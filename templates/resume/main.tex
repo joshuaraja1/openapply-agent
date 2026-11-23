@@ -1,0 +1,51 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=0.55in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,enumitem,xcolor,titlesec,tabularx,microtype,needspace}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\definecolor{resumeBlue}{HTML}{0062A8}
+\titleformat{\section}{\color{resumeBlue}\fontsize{13}{15}\selectfont}{}{0pt}{}[\vspace{1pt}\titlerule]
+\titlespacing*{\section}{0pt}{5pt}{2pt}
+\setlist[itemize]{leftmargin=15pt,label=\textbullet,itemsep=0.5pt,topsep=1.5pt}
+
+\newcommand{\entry}[3]{%
+  \needspace{3\baselineskip}
+  \begin{tabularx}{\textwidth}{@{}Xr@{}}
+    \textbf{#1 $|$ #2} & \textbf{#3}
+  \end{tabularx}}
+
+\begin{document}
+{\centering
+  {\fontsize{26}{28}\selectfont\color{resumeBlue}\textbf{FULL NAME}\par}
+  {\fontsize{11.5}{13}\selectfont\textbf{TARGET ROLE}\par}
+  {\small CITY, STATE $|$ EMAIL $|$ PHONE\par}
+  {\small LINKEDIN $|$ GITHUB $|$ PORTFOLIO\par}
+}
+
+\section{Professional Summary}
+Three to four truthful, role-specific sentences using only verified claims.
+
+\section{Technical Skills}
+\textbf{Languages:} Supported skills requested by the posting.\par
+\textbf{Frameworks and Platforms:} Supported skills requested by the posting.
+
+\section{Professional Experience}
+\entry{JOB TITLE}{EMPLOYER}{DATES}
+\begin{itemize}
+  \item Result-first, one-sentence bullet with a verified metric or scope.
+  \item Result-first, one-sentence bullet explaining the action and tools.
+\end{itemize}
+
+\section{Selected Projects}
+\entry{PROJECT NAME}{TOOLS}{DATE}
+\begin{itemize}
+  \item Relevant, evidence-backed result and implementation detail.
+\end{itemize}
+
+\section{Education}
+\begin{tabularx}{\textwidth}{@{}Xr@{}}
+  \textbf{INSTITUTION} & LOCATION \\
+  DEGREE & GRADUATION DATE
+\end{tabularx}
+\end{document}

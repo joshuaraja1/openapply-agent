@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose one reviewable capability.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the need without prescribing a large implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: slice
+    attributes:
+      label: Smallest useful slice
+      description: What is the smallest independently testable and reversible change?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and privacy impact
+      description: Does this touch credentials, personal data, browser actions, or final submission?
+    validations:
+      required: true
