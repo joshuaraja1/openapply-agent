@@ -3,10 +3,12 @@
 OpenApply separates public discovery from private application execution.
 
 ```text
-Official ATS feeds
-      │
-      ▼
-Source adapters ──► normalized jobs ──► freshness and deduplication
+Official ATS feeds ──► source adapters ──► normalized jobs
+                                                  │
+Signed-in job boards ──► BrowserOS lead queue ──► official-source validation
+                                                  │
+                                                  ▼
+                                      freshness and deduplication
                                              │
 Private candidate facts ──► evidence matching│
                                              ▼
@@ -26,6 +28,7 @@ Private candidate facts ──► evidence matching│
 - `src/matching`: explainable, deterministic ranking.
 - `src/resume`: a brief containing only supported claims.
 - `src/application`: domain restrictions and mandatory stop conditions.
+- `src/browser`: signed-in lead discovery through BrowserOS neo; output remains unverified until official-source validation.
 - `src/cli.ts`: local orchestration and auditable JSON output.
 
 Discovery can run on a scheduler. Résumé files, browser sessions, MFA, and application answers stay local.

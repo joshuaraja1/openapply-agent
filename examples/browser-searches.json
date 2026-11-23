@@ -1,0 +1,29 @@
+{
+  "endpoint": "http://127.0.0.1:9010/mcp",
+  "searches": [
+    {
+      "label": "LinkedIn entry-level software roles",
+      "platform": "linkedin",
+      "url": "https://www.linkedin.com/jobs/search/?keywords=software%20engineer&f_E=2&f_TPR=r604800",
+      "enabled": false
+    },
+    {
+      "label": "Jobright software roles",
+      "platform": "jobright",
+      "url": "https://jobright.ai/jobs/recommend",
+      "enabled": false
+    },
+    {
+      "label": "Handshake saved search",
+      "platform": "handshake",
+      "url": "https://app.joinhandshake.com/stu/postings",
+      "enabled": false
+    },
+    {
+      "label": "Another signed-in job board",
+      "platform": "generic",
+      "url": "https://example.com/careers",
+      "enabled": false
+    }
+  ]
+}
