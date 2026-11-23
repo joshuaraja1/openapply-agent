@@ -6,6 +6,8 @@ It does not include anyone's résumé, address, credentials, application history
 
 When the repository is opened in a coding-agent workspace, [`AGENTS.md`](AGENTS.md) supplies the end-to-end operating contract: continue from discovery through per-role tailoring, PDF inspection, guarded BrowserOS form filling, explicit submission verification, and private outcome logging.
 
+The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](templates/resume/main.tex). New users complete the private Markdown templates; the agent then produces a separate, evidence-backed resume in that layout for every role, compiles it in Overleaf, downloads the PDF, and visually verifies it before upload. See the [Overleaf workflow](docs/overleaf.md).
+
 ## Principles
 
 - Public ATS feeds for discovery; official employer pages for validation.

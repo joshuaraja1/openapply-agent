@@ -11,6 +11,10 @@ Keep the completed copy private. Use absolute paths where possible.
 - Resume-tailoring rules: `{{ABSOLUTE PATH}}`
 - Approved application answers: `{{ABSOLUTE PATH}}`
 - Master resume template: `{{ABSOLUTE PATH TO LATEX OR DOCX}}`
+- Resume template choice: `{{DEFAULT JAKE GUTIERREZ TEMPLATE / USER-APPROVED CUSTOM TEMPLATE}}`
+- Private Overleaf project URL: `{{URL}}`
+- Overleaf project strategy: `{{REUSE ONE PRIVATE PROJECT / CREATE ONE PRIVATE PROJECT PER ROLE}}`
+- Local LaTeX fallback when Overleaf is unavailable: `{{ALLOWED / NOT ALLOWED}}`
 - Generated resume directory: `{{ABSOLUTE PRIVATE DIRECTORY}}`
 - Application log: `{{ABSOLUTE PATH TO CSV OR JSON}}`
 

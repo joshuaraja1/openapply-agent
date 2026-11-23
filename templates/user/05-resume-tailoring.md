@@ -2,7 +2,10 @@
 
 ## Required format
 
-- Template file: `{{PATH TO LATEX OR DOCX TEMPLATE}}`
+- Template file: `{{DEFAULT: templates/resume/main.tex — JAKE GUTIERREZ LATEX TEMPLATE / PATH TO ANOTHER USER-APPROVED TEMPLATE}}`
+- Template selection: `{{USE DEFAULT JAKE TEMPLATE / USE MY APPROVED TEMPLATE}}`
+- Compile using: `{{OVERLEAF}}`
+- Private Overleaf project URL: `{{URL OR SEE 07-RUN-CONFIG}}`
 - Maximum pages: `{{ONE OR TWO}}`
 - Preserve colors, typography, spacing, and section structure: `{{YES/NO}}`
 - Required sections: `{{SUMMARY, SKILLS, EXPERIENCE, PROJECTS, EDUCATION, CERTIFICATIONS}}`
@@ -16,7 +19,7 @@
 5. Write a three-to-four-sentence summary using only verified experience.
 6. Reorder experience and project bullets by relevance without changing chronology.
 7. Select 8–12 supported skills using the job posting's wording where accurate.
-8. Compile to PDF, render every page to images, and visually inspect the result.
+8. Copy the role-specific LaTeX into the private Overleaf project, compile it to PDF, download it, render every page to images, and visually inspect the result.
 9. Upload only the verified role-specific PDF.
 
 ## Bullet formula
@@ -35,6 +38,8 @@ Examples:
 ## Prohibited behavior
 
 - Do not redesign the approved template during tailoring.
+- Do not remove the Jake Gutierrez attribution header from the default template.
+- Do not leave example-person content or unresolved placeholders in the generated resume.
 - Do not add keywords unsupported by experience.
 - Do not hide hard requirement gaps.
 - Do not claim business outcomes that were not measured.

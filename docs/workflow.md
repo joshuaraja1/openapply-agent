@@ -34,11 +34,11 @@ The queue prioritizes the configured freshness window and falls back only when i
 For each queue item:
 
 1. Re-open the official job posting and confirm it is active.
-2. Use the generated tailoring brief with the approved résumé template.
-3. Compile to PDF and render every page to an image.
+2. Use the generated tailoring brief and the user's completed Markdown templates with the default [Jake Gutierrez LaTeX template](../templates/resume/main.tex), unless the user explicitly selected another approved template.
+3. Copy the role-specific `main.tex` into the private Overleaf project, compile and download the PDF, then render every page to an image.
 4. Check clipping, spacing, page count, selectable text, chronology, and claim evidence.
 
-The included LaTeX file is a starter template. Replace placeholders locally; do not commit completed résumés.
+Replace placeholders only in a private working copy or private Overleaf project; never commit completed résumés. Follow the complete [Overleaf workflow](overleaf.md).
 
 ## 5. Browser handoff
 
