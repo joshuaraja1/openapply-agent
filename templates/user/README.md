@@ -10,5 +10,6 @@ Recommended order:
 4. `04-source-policy.md` — which sources may support which claims.
 5. `05-resume-tailoring.md` — formatting and truthfulness rules.
 6. `06-application-answers.md` — reusable answers that the user has explicitly approved.
+7. `07-run-config.md` — private paths, browser connection, submission policy, stop conditions, and logging.
 
 Replace every `{{PLACEHOLDER}}`. Delete examples that do not apply. Keep unsupported claims in the quarantine section instead of quietly promoting them to verified facts.

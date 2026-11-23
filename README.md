@@ -4,6 +4,8 @@ OpenApply Agent is a privacy-first, human-in-the-loop workflow for discovering f
 
 It does not include anyone's résumé, address, credentials, application history, or generated documents.
 
+When the repository is opened in a coding-agent workspace, [`AGENTS.md`](AGENTS.md) supplies the end-to-end operating contract: continue from discovery through per-role tailoring, PDF inspection, guarded BrowserOS form filling, explicit submission verification, and private outcome logging.
+
 ## Principles
 
 - Public ATS feeds for discovery; official employer pages for validation.
