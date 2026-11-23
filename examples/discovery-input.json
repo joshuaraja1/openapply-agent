@@ -1,7 +1,11 @@
 {
   "sources": [
     { "provider": "greenhouse", "company": "Example Corp", "boardToken": "example", "enabled": false },
-    { "provider": "ashby", "company": "Example Labs", "boardName": "example", "enabled": false }
+    { "provider": "ashby", "company": "Example Labs", "boardName": "example", "enabled": false },
+    { "provider": "lever", "company": "Example Systems", "site": "example", "region": "global", "enabled": false },
+    { "provider": "smartrecruiters", "company": "Example Data", "companyIdentifier": "ExampleData", "enabled": false },
+    { "provider": "jsonld", "company": "Example Careers", "url": "https://example.com/careers/software-engineer", "enabled": false },
+    { "provider": "workday", "company": "Example Enterprise", "host": "example.wd1.myworkdayjobs.com", "tenant": "example", "site": "Careers", "searchText": "software", "enabled": false }
   ],
   "preferredFreshnessHours": 48,
   "maximumFreshnessHours": 168,

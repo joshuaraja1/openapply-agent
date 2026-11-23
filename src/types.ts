@@ -1,4 +1,4 @@
-export type Provider = "greenhouse" | "ashby" | "workday";
+export type Provider = "greenhouse" | "ashby" | "workday" | "lever" | "smartrecruiters" | "jsonld";
 
 export interface NormalizedJob {
   id: string;

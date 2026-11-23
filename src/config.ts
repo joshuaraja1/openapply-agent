@@ -9,6 +9,19 @@ export const sourceSchema = z.discriminatedUnion("provider", [
   baseSource.extend({ provider: z.literal("greenhouse"), boardToken: z.string().min(1) }),
   baseSource.extend({ provider: z.literal("ashby"), boardName: z.string().min(1) }),
   baseSource.extend({
+    provider: z.literal("lever"),
+    site: z.string().min(1),
+    region: z.enum(["global", "eu"]).default("global"),
+  }),
+  baseSource.extend({
+    provider: z.literal("smartrecruiters"),
+    companyIdentifier: z.string().min(1),
+  }),
+  baseSource.extend({
+    provider: z.literal("jsonld"),
+    url: z.string().url(),
+  }),
+  baseSource.extend({
     provider: z.literal("workday"),
     host: z.string().min(1),
     tenant: z.string().min(1),
@@ -39,5 +52,13 @@ export function sourceUrl(source: JobSource): string {
   if (source.provider === "ashby") {
     return `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(source.boardName)}?includeCompensation=true`;
   }
+  if (source.provider === "lever") {
+    const host = source.region === "eu" ? "api.eu.lever.co" : "api.lever.co";
+    return `https://${host}/v0/postings/${encodeURIComponent(source.site)}?mode=json`;
+  }
+  if (source.provider === "smartrecruiters") {
+    return `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(source.companyIdentifier)}/postings?limit=100`;
+  }
+  if (source.provider === "jsonld") return source.url;
   return `https://${source.host}/wday/cxs/${encodeURIComponent(source.tenant)}/${encodeURIComponent(source.site)}/jobs`;
 }
