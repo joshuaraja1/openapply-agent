@@ -48,3 +48,15 @@ export function selectFreshnessTier<T extends DiscoveredJob>(
   const fallback = jobs.filter((job) => age(job) > preferredHours && age(job) <= maximumHours);
   return fallback.length > 0 ? { tier: "fallback", jobs: fallback } : { tier: "none", jobs: [] };
 }
+
+export function markJobsReported(
+  state: DiscoveryState,
+  jobIds: string[],
+  reportedAt = new Date(),
+): void {
+  const timestamp = reportedAt.toISOString();
+  for (const id of jobIds) {
+    const job = state.jobs[id];
+    if (job) job.reportedAt = timestamp;
+  }
+}

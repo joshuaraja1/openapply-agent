@@ -3,10 +3,10 @@ import { dirname } from "node:path";
 import { createApplicationHandoff } from "./application/handoff.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
-import { evaluateJob, selectFreshnessTier } from "./discovery.js";
+import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.js";
 import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
-import { fetchSource } from "./sources/fetch.js";
+import { fetchSourceBatch } from "./sources/batch.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -26,9 +26,11 @@ const [input, candidate, preferences] = await Promise.all([
 ]);
 const state = await json(statePath).catch(() => ({ jobs: {} })) as DiscoveryState;
 const now = new Date();
-const fetched = (await Promise.all(input.sources.filter((source) => source.enabled).map((source) => fetchSource(source, now))))
-  .flat()
-  .slice(0, input.maxJobsPerSource * input.sources.length);
+const batch = await fetchSourceBatch(input.sources, input.maxJobsPerSource, now);
+const fetched = batch.jobs;
+for (const failure of batch.failures) {
+  console.warn(`Skipped ${failure.source.company} (${failure.source.provider}): ${failure.message}`);
+}
 
 const evaluated = fetched.flatMap((job) => {
   const result = evaluateJob(job, input, state, now);
@@ -52,6 +54,7 @@ const queue = tier.jobs
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
+markJobsReported(state, queue.map((entry) => entry.job.id), now);
 
 await mkdir(dirname(outputPath), { recursive: true });
 await mkdir(dirname(statePath), { recursive: true });
