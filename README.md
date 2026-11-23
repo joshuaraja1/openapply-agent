@@ -26,7 +26,7 @@ npm run check
 
 1. Copy `templates/user/` to a private directory and complete the Markdown files.
 2. Copy the JSON files in `examples/` and replace the examples with private, verified data.
-3. Enable official Greenhouse, Ashby, or Workday sources.
+3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
 
 ```bash
@@ -43,6 +43,11 @@ The output is a ranked local queue containing an evidence-filtered résumé brie
 - Greenhouse public job-board API
 - Ashby public posting API
 - Workday public career-site endpoint
+- Lever public postings API
+- SmartRecruiters public postings API
+- Public career pages that expose schema.org `JobPosting` JSON-LD
+
+Authenticated aggregators such as LinkedIn, Jobright, and Handshake require a signed-in browser workflow. They are treated as lead sources: every lead must be validated on an official employer page before application data is prepared or submitted.
 
 More adapters should follow the normalization contract and test requirements in [CONTRIBUTING.md](CONTRIBUTING.md).
 
