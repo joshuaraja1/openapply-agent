@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.DS_Store
+
+# Candidate data and generated artifacts must stay local.
+data/private/
+data/candidate.json
+data/application-log.csv
+output/
+storage/
+*.pdf
+*.zip
