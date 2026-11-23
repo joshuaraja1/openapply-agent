@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "identity": {
+    "fullName": "Example Candidate",
+    "location": "Dallas, TX",
+    "email": "candidate@example.com",
+    "phone": "+1 555 555 0100",
+    "portfolio": "https://example.com"
+  },
+  "authorization": {
+    "countries": ["United States"],
+    "sponsorshipRequiredNowOrFuture": false
+  },
+  "skills": {
+    "languages": ["TypeScript", "Python", "SQL"],
+    "frontend": ["React"],
+    "backend": ["Node.js", "PostgreSQL"]
+  },
+  "education": [],
+  "experience": [],
+  "projects": [],
+  "quarantinedClaims": []
+}

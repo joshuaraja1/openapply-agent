@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "targetRoles": ["software engineer", "product engineer", "data engineer", "machine learning engineer"],
+  "excludeSeniorityTerms": ["senior", "staff", "principal", "lead", "manager", "director"],
+  "workArrangements": {
+    "preferred": ["remote"],
+    "accepted": ["hybrid", "on-site"]
+  },
+  "compensation": {
+    "preferredBaseFloor": 100000,
+    "targetRangePosition": 0.7
+  },
+  "applicationPolicy": {
+    "dailyTarget": 10,
+    "dailyHardCap": 25,
+    "requireFinalApproval": true
+  }
+}

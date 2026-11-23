@@ -1,0 +1,11 @@
+{
+  "sources": [
+    { "provider": "greenhouse", "company": "Example Corp", "boardToken": "example", "enabled": false },
+    { "provider": "ashby", "company": "Example Labs", "boardName": "example", "enabled": false }
+  ],
+  "preferredFreshnessHours": 48,
+  "maximumFreshnessHours": 168,
+  "includeKeywords": ["software engineer", "product engineer", "data engineer", "machine learning"],
+  "excludeKeywords": ["staff", "principal", "director"],
+  "maxJobsPerSource": 1000
+}
