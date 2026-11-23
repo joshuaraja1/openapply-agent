@@ -1,5 +1,5 @@
 {
-  "endpoint": "http://127.0.0.1:9010/mcp",
+  "endpoint": "http://127.0.0.1:9200/mcp",
   "searches": [
     {
       "label": "LinkedIn entry-level software roles",

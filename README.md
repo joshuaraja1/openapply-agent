@@ -19,9 +19,13 @@ The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](te
 
 ## Development
 
-Requires Node.js 22 or later.
+Requires Node.js 22 or later. BrowserOS neo is also required for signed-in
+job-board discovery, Overleaf, and application forms; public ATS discovery can
+run without it.
 
 ```bash
+git clone https://github.com/joshuaraja1/openapply-agent.git
+cd openapply-agent
 npm ci
 npm run check
 ```
@@ -41,6 +45,80 @@ npm start
 ```
 
 The output is a ranked local queue containing an evidence-filtered résumé brief and a guarded browser handoff. See [the workflow guide](docs/workflow.md), [architecture](docs/architecture.md), and [safety model](docs/safety.md).
+
+## Set up BrowserOS neo
+
+[BrowserOS neo](https://github.com/browseros-ai/BrowserOS) is the local,
+open-source browser used for websites that require a real signed-in session.
+OpenApply does not receive or store your browser passwords. BrowserOS neo must
+be installed, running, and connected before OpenApply can use LinkedIn,
+Jobright, Handshake, Overleaf, or an employer's application portal.
+
+### 1. Install and start BrowserOS neo
+
+On macOS with Homebrew:
+
+```bash
+brew tap browseros-ai/tap
+brew install --cask browseros-neo
+```
+
+Windows and Linux users can install the appropriate package from the
+[official BrowserOS neo download page](https://browseros.com/download/).
+Launch BrowserOS neo after installation and leave it running while OpenApply
+uses browser workflows.
+
+### 2. Import or establish your signed-in sessions
+
+During BrowserOS neo onboarding, import the browser profile you intend to use,
+or sign in manually to each required service inside BrowserOS neo. At minimum,
+verify the relevant job boards and Overleaf. Employer portals may still require
+their own account, MFA, or one-time code. Never place account passwords,
+session cookies, MFA secrets, or recovery codes in this repository or its JSON
+configuration files.
+
+### 3. Connect your coding agent
+
+Open a new BrowserOS neo tab, select **MCP** in the sidebar, and use the
+one-click **Connect** action for Codex, Cursor, VS Code, or another supported
+agent. Restart the agent after connecting. If your agent is not listed, copy
+the Streamable HTTP endpoint shown on that MCP page and add it to the agent's
+MCP configuration as `browseros-neo`.
+
+The current default endpoint looks like this:
+
+```text
+http://127.0.0.1:9200/mcp
+```
+
+Always prefer the exact endpoint displayed by your installed BrowserOS neo
+version; the port can change. This address is local to your computer and must
+not be replaced with a public URL.
+
+### 4. Configure and verify OpenApply
+
+Copy the signed-in search example to a private location, update its `endpoint`
+to the value shown in BrowserOS neo, and enable only the searches you want:
+
+```bash
+cp examples/browser-searches.json /private/browser-searches.json
+```
+
+Keep BrowserOS neo open, then run a small discovery check:
+
+```bash
+OPENAPPLY_BROWSER_SEARCH=/private/browser-searches.json \
+OPENAPPLY_BROWSER_OUTPUT=/private/browser-leads.json \
+npm run browser:discover
+```
+
+A successful run writes `browser-leads.json`. If the connection fails:
+
+1. Confirm BrowserOS neo is open and its MCP page reports the agent as connected.
+2. Copy the endpoint from that page again; do not assume the example port matches.
+3. Restart the coding agent after changing its MCP connection.
+4. Confirm the private search file contains valid signed-in URLs and at least one enabled search.
+5. Complete CAPTCHA, MFA, one-time-code, or account-recovery prompts manually; OpenApply will not bypass them.
 
 For signed-in discovery on LinkedIn, Jobright, Handshake, or another job board, start BrowserOS neo, copy `examples/browser-searches.json`, enable the searches you want, and run:
 
