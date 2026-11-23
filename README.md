@@ -38,6 +38,16 @@ npm start
 
 The output is a ranked local queue containing an evidence-filtered résumé brief and a guarded browser handoff. See [the workflow guide](docs/workflow.md), [architecture](docs/architecture.md), and [safety model](docs/safety.md).
 
+For signed-in discovery on LinkedIn, Jobright, Handshake, or another job board, start BrowserOS neo, copy `examples/browser-searches.json`, enable the searches you want, and run:
+
+```bash
+OPENAPPLY_BROWSER_SEARCH=/private/browser-searches.json \
+OPENAPPLY_BROWSER_OUTPUT=/private/browser-leads.json \
+npm run browser:discover
+```
+
+This produces a deduplicated lead queue. It intentionally does not treat aggregator metadata as authoritative; validate each lead against the employer's official posting before tailoring or applying.
+
 ## Supported discovery sources
 
 - Greenhouse public job-board API

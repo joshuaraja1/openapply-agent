@@ -6,7 +6,17 @@ Copy `templates/user/` outside the repository, complete every relevant placehold
 
 ## 2. Configure sources
 
-Copy the files in `examples/`, enable official ATS sources, and set include and exclude keywords. Aggregators may help humans discover companies, but the automated source must be the employer's official ATS or career page.
+Copy the files in `examples/`, enable official ATS sources, and set include and exclude keywords. Public adapters cover Greenhouse, Ashby, Workday, Lever, SmartRecruiters, and career pages with schema.org `JobPosting` data.
+
+For LinkedIn, Jobright, Handshake, or another authenticated board, start BrowserOS neo and configure a private copy of `examples/browser-searches.json`. The browser connector uses the signed-in profile and writes discovered links to a local lead queue:
+
+```bash
+OPENAPPLY_BROWSER_SEARCH=/private/browser-searches.json \
+OPENAPPLY_BROWSER_OUTPUT=/private/browser-leads.json \
+npm run browser:discover
+```
+
+Aggregator results are leads, not verified jobs. Open the employer's official posting, confirm the role is active, and add its official ATS or JSON-LD source before an application is prepared.
 
 ## 3. Discover and rank
 
@@ -32,7 +42,7 @@ The included LaTeX file is a starter template. Replace placeholders locally; do 
 
 ## 5. Browser handoff
 
-The queue contains the only allowed application domain and mandatory stop conditions. A browser worker may prepare supported fields. It must stop for CAPTCHA, MFA, unknown sensitive questions, unsupported claims, ambiguous compliance disclosures, or final submission when approval is required.
+The queue contains the only allowed application domain and mandatory stop conditions. A browser worker may prepare supported fields. It must stop for CAPTCHA, MFA, unknown sensitive questions, unsupported claims, ambiguous compliance disclosures, or final submission when approval is required. Browser discovery and browser application are separate stages so an aggregator cannot silently become the authoritative application target.
 
 ## 6. Record the outcome
 
