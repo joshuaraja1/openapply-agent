@@ -16,8 +16,10 @@ export async function submitApplication(
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
-  if (handoff.mode !== "submit-after-approval" || handoff.jobId !== jobId
-    || current?.officialUrl !== handoff.applicationUrl || !handoff.allowedDomains.includes(host)
+  if (handoff.mode !== "submit-after-approval" || handoff.stopConditions.includes("final-submit")
+    || handoff.jobId !== jobId
+    || current?.officialUrl !== handoff.applicationUrl || !current.artifactSha256
+    || !current.sourceFingerprint || !handoff.allowedDomains.includes(host)
     || new URL(browser.currentUrl()).href !== new URL(handoff.applicationUrl).href) {
     throw new Error("Application submission is not authorized for this job and destination");
   }

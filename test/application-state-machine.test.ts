@@ -3,6 +3,9 @@ import { ApplicationWorkflow } from "../src/application/state-machine.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import type { ApplicationCheckpoint } from "../src/application/state-machine.js";
 
+const artifact = (path: string) => ({ artifactPath: path,
+  artifactSha256: "a".repeat(64), sourceFingerprint: "b".repeat(64) });
+
 describe("application workflow", () => {
   it("requires a verified artifact and employer confirmation", async () => {
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore<ApplicationCheckpoint>());
@@ -12,7 +15,7 @@ describe("application workflow", () => {
     await workflow.advance("job-1", "matched");
     await workflow.advance("job-1", "tailored");
     await expect(workflow.advance("job-1", "rendered")).rejects.toThrow("artifact");
-    await workflow.advance("job-1", "rendered", { artifactPath: "/private/job-1.pdf" });
+    await workflow.advance("job-1", "rendered", artifact("/private/job-1.pdf"));
     await workflow.advance("job-1", "applying");
     await workflow.advance("job-1", "submit-claimed");
     await expect(workflow.advance("job-1", "submitted")).rejects.toThrow("confirmation");
@@ -26,7 +29,7 @@ describe("application workflow", () => {
     await workflow.advance("job-2", "validated");
     await workflow.advance("job-2", "matched");
     await workflow.advance("job-2", "tailored");
-    await workflow.advance("job-2", "rendered", { artifactPath: "/private/job-2.pdf" });
+    await workflow.advance("job-2", "rendered", artifact("/private/job-2.pdf"));
     await workflow.advance("job-2", "applying");
     await expect(workflow.advance("job-2", "waiting-human")).rejects.toThrow("reason");
     await workflow.advance("job-2", "waiting-human", { blocker: "CAPTCHA" });
@@ -45,7 +48,7 @@ describe("application workflow", () => {
     await first.advance("job-3", "tailored");
     await first.advance("job-3", "blocked", { blocker: "PDF compile error" });
     await expect(first.advance("job-3", "applying")).rejects.toThrow("artifact");
-    await first.advance("job-3", "rendered", { artifactPath: "/private/job-3.pdf" });
+    await first.advance("job-3", "rendered", artifact("/private/job-3.pdf"));
     await first.advance("job-3", "applying");
     const claims = await Promise.allSettled([
       first.advance("job-3", "submit-claimed"),
@@ -64,7 +67,7 @@ describe("application workflow", () => {
     await workflow.advance("job-4", "validated");
     await workflow.advance("job-4", "matched");
     await workflow.advance("job-4", "tailored");
-    await workflow.advance("job-4", "rendered", { artifactPath: "/private/job-4.pdf" });
+    await workflow.advance("job-4", "rendered", artifact("/private/job-4.pdf"));
     await expect(workflow.advance("job-4", "applying", { artifactPath: "/private/other.pdf" }))
       .rejects.toThrow("rendered checkpoint");
   });

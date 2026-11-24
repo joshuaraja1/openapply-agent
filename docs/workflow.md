@@ -60,3 +60,22 @@ the approved résumé artifact. It stops before filling anything if a required
 field is unknown or duplicated, or if verification is detected. Optional
 free-text questions remain blank. Provider-specific adapters and an execution
 command are still required before this can run unattended on employer portals.
+
+## Single-application runner
+
+`npm run application:run` reads one private application package from
+`OPENAPPLY_PACKAGE`. The package contains the official `job` and configured
+source, candidate facts,
+authorized handoff, generated résumé source, verified PDF path, and optionally
+the employer confirmation text. The runner verifies the PDF again, checkpoints
+each stage in encrypted local storage, fills supported fields in a persistent
+Chromium profile, and records `submitted` only after a new confirmation appears.
+It returns `waiting-human` with an exact blocker for unknown required fields,
+missing confirmation configuration, ambiguous submit controls, or final
+approval required by policy. It does not yet create accounts, read email codes,
+or handle multi-step forms; those require provider adapters and onboarding.
+If final approval is required, set `OPENAPPLY_APPROVE_JOB_ID` to the exact job
+ID on the next run. Only that approval blocker is resumable this way. The
+official posting, PDF hash, source fingerprint, and page state are rechecked
+before submission. Older checkpoints without both fingerprints cannot resume
+automatically and require operator inspection before recovery.
