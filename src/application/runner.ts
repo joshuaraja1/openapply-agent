@@ -207,7 +207,7 @@ export async function runApplicationPackage(
       throw new Error("Application handoff left the approved employer destination");
     }
     let loginBlocker: string | undefined;
-    if (loginRecoveryPending && snapshot.url !== current!.browserPageUrl
+    if (loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
     }

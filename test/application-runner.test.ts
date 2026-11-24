@@ -162,6 +162,10 @@ describe("application runner", () => {
     expect(resumed.checkpoint.stage).toBe("waiting-human");
     expect(resumed.checkpoint.blocker).toContain("cannot be bound to this requisition");
     expect(resumed.checkpoint.blocker?.startsWith("Portal sign-in needs human completion")).toBe(true);
+    const stillWrong = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: job.id });
+    expect(stillWrong.checkpoint.stage).toBe("waiting-human");
+    expect(stillWrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
   });
 
   it("keeps a human login handoff resumable when credentials leave an MFA form", async () => {
