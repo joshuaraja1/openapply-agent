@@ -19,7 +19,7 @@ The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](te
 
 ## Development
 
-Requires Node.js 22 or later. BrowserOS neo is also required for signed-in
+Requires Node.js 22.13 or later. BrowserOS neo is also required for signed-in
 job-board discovery, Overleaf, and application forms; public ATS discovery can
 run without it.
 

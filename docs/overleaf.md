@@ -6,8 +6,14 @@ OpenApply uses Jake Gutierrez's MIT-licensed LaTeX resume as its default layout.
 fingerprint per job from approved candidate claims. It preserves the template
 preamble and layout, keeps experience chronology, orders supported bullets by
 relevance, and escapes candidate text. If no supported claim matches the
-posting, generation stops. It does not compile or verify a PDF yet; that
-renderer boundary must be completed before any automatic upload.
+posting, generation stops.
+
+`verifyResumePdf` accepts a downloaded PDF only when its source fingerprint,
+approved claim text, candidate name, company, role title, active email link,
+page size, text extraction, and page bounds pass. It records the exact PDF hash
+for the application checkpoint. The Overleaf browser renderer and automated
+page-image inspection are still pending. Until then, a person must compile,
+download, and visually inspect the PDF before invoking the verifier.
 
 ## One-time setup
 
