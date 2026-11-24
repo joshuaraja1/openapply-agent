@@ -44,7 +44,7 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
 
 /** Only maps exact common fields. Unknown required questions need a human or a provider adapter. */
 export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {}): FormPlan {
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {}): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
   if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
@@ -68,7 +68,7 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
       blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
     }
   }
-  if (!actions.some((action) => action.action === "upload")) {
+  if (!options.allowMissingResume && !actions.some((action) => action.action === "upload")) {
     blockers.push("Resume upload control was not found; verify this application step before submission");
   }
   return { actions, blockers };
@@ -79,10 +79,10 @@ export async function fillApplicationForm(
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {},
-): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {},
+): Promise<{ snapshot: BrowserSnapshot; blockers: string[]; uploaded: boolean }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath, options);
-  if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
+  if (plan.blockers.length) return { snapshot, blockers: plan.blockers, uploaded: false };
   const initialCounts = new Map<string, number>();
   for (const control of snapshot.controls) initialCounts.set(key(control), (initialCounts.get(key(control)) ?? 0) + 1);
   const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] => {
@@ -101,7 +101,8 @@ export async function fillApplicationForm(
   if (browser.fillBatch) {
     const filled = await browser.fillBatch(plan.actions);
     if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");
-    return { snapshot: filled, blockers: postFillBlockers(filled, true) };
+    const uploaded = plan.actions.some((action) => action.action === "upload");
+    return { snapshot: filled, blockers: postFillBlockers(filled, uploaded), uploaded };
   }
   let current = snapshot;
   let uploaded = false;
@@ -112,8 +113,8 @@ export async function fillApplicationForm(
     current = await browser.act(matching[0]!.ref, action.action, action.value);
     uploaded ||= action.action === "upload";
     const blockers = postFillBlockers(current, uploaded);
-    if (blockers.length) return { snapshot: current, blockers };
+    if (blockers.length) return { snapshot: current, blockers, uploaded };
   }
   if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");
-  return { snapshot: current, blockers: postFillBlockers(current, uploaded) };
+  return { snapshot: current, blockers: postFillBlockers(current, uploaded), uploaded };
 }

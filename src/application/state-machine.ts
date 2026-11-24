@@ -39,8 +39,10 @@ export interface ApplicationCheckpoint {
   confirmation?: string;
   blocker?: string;
   browserPageId?: number;
+  browserPageUrl?: string;
   browserGroupId?: string;
   browserEndpoint?: string;
+  resumeUploaded?: boolean;
   packagePath?: string;
   updatedAt: string;
 }
@@ -64,7 +66,7 @@ export class ApplicationWorkflow {
   async advance(
     jobId: string,
     stage: ApplicationStage,
-    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "browserGroupId" | "browserEndpoint" | "packagePath"> = {},
+    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "browserPageUrl" | "browserGroupId" | "browserEndpoint" | "resumeUploaded" | "packagePath"> = {},
   ): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
     if (!current) throw new Error(`Application ${jobId} does not exist`);
@@ -89,8 +91,12 @@ export class ApplicationWorkflow {
     if (details.packagePath && stage !== "waiting-human") {
       throw new Error("Application package path belongs only to a human handoff");
     }
-    if ((details.browserGroupId || details.browserEndpoint) && !["waiting-human", "submit-claimed"].includes(stage)) {
+    if ((details.browserGroupId || details.browserEndpoint || details.browserPageUrl)
+      && !["waiting-human", "submit-claimed"].includes(stage)) {
       throw new Error("Browser identity belongs only to a handoff or claimed submission");
+    }
+    if (details.resumeUploaded !== undefined && stage !== "waiting-human") {
+      throw new Error("Résumé upload progress belongs only to a human handoff");
     }
     if (stage === "submitted" && !details.confirmation) {
       throw new Error("Submission requires an employer confirmation");

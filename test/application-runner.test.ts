@@ -57,6 +57,134 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("continues a two-step form and uploads the verified résumé before submitting", async () => {
+    const input = (ref: string, name: string, type: string | null = null) => ({
+      ref, tag: "input", role: "textbox", name, type, value: null, required: true, options: [],
+    });
+    const first = { url: job.applicationUrl, title: "Profile", controls: [
+      input("email", "Email"),
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ] };
+    const second = { url: "https://jobs.example.com/apply/step-2", title: "Documents", controls: [
+      input("resume", "Resume", "file"),
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const steps: string[] = [];
+    let current = first;
+    const browser = { currentUrl: () => current.url, navigate: async () => first,
+      fillBatch: async (actions: Array<{ action: string }>) => {
+        steps.push(actions.some((action) => action.action === "upload") ? "upload" : "fill");
+        return current;
+      },
+      act: async () => { steps.push("continue"); current = second; return second; },
+      submit: async () => { steps.push("submit"); return "Thank you for applying"; },
+    };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/two-step.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(steps).toEqual(["fill", "continue", "upload", "submit"]);
+  });
+
+  it("halts before submission when no application step offers a résumé upload", async () => {
+    const page = { url: job.applicationUrl, title: "Apply", controls: [
+      { ref: "email", tag: "input", role: "textbox", name: "Email", type: null,
+        value: null, required: true, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const submit = vi.fn(async () => "Thank you for applying");
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/missing-resume.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => page, act: async () => page, fillBatch: async () => page, submit },
+      close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("résumé was not uploaded");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("saves the current step after a crash and resumes that exact BrowserOS tab", async () => {
+    const first = { url: job.applicationUrl, title: "Step one", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ] };
+    const second = { url: "https://jobs.example.com/apply/step-2", title: "Step two", controls: [
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/crash.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let fills = 0;
+    let current = first;
+    const attach = vi.fn(async () => second);
+    const browser = { currentUrl: () => current.url, navigate: async () => first,
+      attach, pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
+      act: async () => { current = second; return second; }, fillBatch: async () => {
+        fills += 1;
+        if (fills === 2) {
+          throw new Error("browser transport lost");
+        }
+        return current;
+      },
+      submit: async () => "Thank you for applying" };
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      browserFactory: async () => ({ browser, close: async () => {} }) };
+    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", options)).rejects.toThrow("transport lost");
+    expect(await workflow.current(job.id)).toMatchObject({ stage: "waiting-human",
+      browserPageUrl: second.url, resumeUploaded: true });
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      ...options, resumedJobId: job.id });
+    expect(attach).toHaveBeenCalledWith(7, second.url, "AAAAAAAAAAAAAAAA");
+    expect(resumed.checkpoint.stage).toBe("submitted");
+  });
+
+  it("clicks a no-op Continue only once", async () => {
+    const page = { url: job.applicationUrl, title: "Step one", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ], visibleText: "Step 1 of 2" };
+    const click = vi.fn(async () => ({ ...page, visibleText: `${page.visibleText}\n- heading "Please correct errors"` }));
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/no-op.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => page, act: click, fillBatch: async () => page,
+        submit: async () => "Thank you for applying" }, close: async () => {} }) });
+    expect(click).toHaveBeenCalledOnce();
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("did not advance");
+  });
+
   it("verifies the artifact, fills the form, and records employer confirmation", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-runner-"));
     try {

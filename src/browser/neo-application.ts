@@ -29,7 +29,8 @@ export function parseNeoSnapshot(message: string): BrowserSnapshot & { visibleTe
       required: attributes!.includes("[required]") || ["checkbox", "radio", "combobox"].includes(role!),
       tag: role === "link" ? "a" : role === "button" && !resume ? "button"
         : role === "combobox" ? "select" : "input",
-      type: resume ? "file" : submit ? "submit" : role === "checkbox" || role === "radio" ? role! : null,
+      type: resume ? "file" : submit ? "submit" : role === "button" && attributes!.includes("[type=button]")
+        ? "button" : role === "checkbox" || role === "radio" ? role! : null,
       value: value ?? null, options: [],
     });
   }
@@ -113,9 +114,17 @@ export class NeoApplicationBrowser {
   }
 
   async act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot> {
-    if (this.page === undefined || !this.latest || !value) throw new Error("Application action needs a current page and value");
+    if (this.page === undefined || !this.latest) throw new Error("Application action needs a current page");
     const control = this.latest.controls.find((entry) => entry.ref === ref);
     if (!control) throw new Error("BrowserOS control changed; take a new snapshot");
+    if (action === "click" && control.tag === "button" && control.type === "button"
+      && /^(next|continue|save and continue|continue to next step)$/i.test(control.name.trim())) {
+      success(await this.client.callTool({ name: "act", arguments: {
+        page: this.page, kind: "click", ref, diff: "none",
+      } }), "continue application");
+      return this.snapshot();
+    }
+    if (!value) throw new Error("Application action needs a value");
     if (action === "fill" && control.tag === "input" && control.type !== "file") {
       success(await this.client.callTool({ name: "act", arguments: {
         page: this.page, kind: "fill", ref, value, sensitive: true, diff: "none",
