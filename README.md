@@ -48,7 +48,8 @@ npm start
 The output is a ranked local queue containing an evidence-filtered résumé brief and a guarded browser handoff. See [the workflow guide](docs/workflow.md), [architecture](docs/architecture.md), and [safety model](docs/safety.md).
 
 For a single application with a verified role-specific PDF, create a private
-application package containing the `job`, `candidate`, `handoff`,
+application package containing the `job`, its configured official `source`,
+`candidate`, `handoff`,
 `resumeSource`, `resumePdfPath`, and optional `expectedConfirmation`. Then run:
 
 ```bash
@@ -61,6 +62,11 @@ stops on unknown required answers, and submits only when the handoff mode
 authorizes it and a new employer confirmation is found. Account creation,
 email-code retrieval, provider-specific multi-page forms, and automatic
 Overleaf PDF compilation are still in development.
+
+When the package stops at final approval, inspect the employer posting and
+résumé. To resume that one job after approval, run the same package with
+`OPENAPPLY_APPROVE_JOB_ID` set to its exact job ID. The runner re-fetches the
+official posting, re-verifies the PDF, and reloads the page before submission.
 
 ## Set up BrowserOS neo
 

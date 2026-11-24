@@ -2,7 +2,9 @@ import { z } from "zod";
 import { AgentBrowser } from "../browser/actions.js";
 import { launchBrowser, type BrowserRuntime } from "../browser/runtime.js";
 import { candidateProfileSchema } from "../candidate/schema.js";
+import { sourceSchema } from "../config.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "../resume/verify-pdf.js";
+import { fetchSourceBatch } from "../sources/batch.js";
 import type { DiscoveredJob } from "../types.js";
 import { applicationHandoffSchema } from "./handoff.js";
 import { fillApplicationForm } from "./form-mapper.js";
@@ -23,6 +25,7 @@ const jobSchema = z.object({
 export const applicationPackageSchema = z.object({
   version: z.literal(1),
   job: jobSchema,
+  source: sourceSchema,
   candidate: candidateProfileSchema,
   handoff: applicationHandoffSchema,
   resumeSource: z.object({ latex: z.string().min(1), fingerprint: z.string().length(64),
@@ -36,28 +39,47 @@ export interface RunResult { checkpoint: ApplicationCheckpoint; artifact: Verifi
 
 type BrowserLaunch = (options: { profileDirectory: string; headless: boolean }) => Promise<BrowserRuntime>;
 
+async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
+  if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
+  const batch = await fetchSourceBatch([pkg.source], 5000);
+  return batch.jobs.some((official) => official.id === pkg.job.id
+    && official.applicationUrl === pkg.job.applicationUrl && official.sourceUrl === pkg.job.sourceUrl
+    && official.title === pkg.job.title && official.descriptionText === pkg.job.descriptionText);
+}
+
 export async function runApplicationPackage(
   input: ApplicationPackage,
   workflow: ApplicationWorkflow,
   profileDirectory: string,
-  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf } = {},
+  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
+    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string } = {},
 ): Promise<RunResult> {
   const pkg = applicationPackageSchema.parse(input);
   const job = pkg.job as DiscoveredJob;
-  const host = new URL(job.applicationUrl).hostname.toLowerCase();
-  if (new URL(job.applicationUrl).protocol !== "https:" || pkg.handoff.jobId !== job.id
+  const destination = new URL(job.applicationUrl);
+  const host = destination.hostname.toLowerCase();
+  if (destination.protocol !== "https:" || destination.username || destination.password
+    || new URL(job.sourceUrl).protocol !== "https:"
+    || pkg.source.provider !== job.provider || pkg.source.company !== job.company
+    || pkg.handoff.jobId !== job.id
     || pkg.handoff.applicationUrl !== job.applicationUrl
     || !pkg.handoff.allowedDomains.map((domain) => domain.toLowerCase()).includes(host)) {
     throw new Error("Application package does not match its approved employer destination");
   }
   const current = await workflow.current(job.id);
   if (current && current.officialUrl !== job.applicationUrl) throw new Error("Application ID already belongs to another URL");
-  if (current && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
+  const resumingApproval = current?.stage === "waiting-human"
+    && current.blocker === "Final submission approval required"
+    && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval";
+  if (current && !resumingApproval
+    && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
     throw new Error(`Application is ${current.stage}; inspect or resume it before another run`);
   }
-  const artifact = await (dependencies.verify ?? verifyResumePdf)(
-    pkg.resumePdfPath, job, pkg.candidate, pkg.resumeSource,
-  );
+  const [isOfficial, artifact] = await Promise.all([
+    (dependencies.validateOfficial ?? validateOfficialPosting)(pkg),
+    (dependencies.verify ?? verifyResumePdf)(pkg.resumePdfPath, job, pkg.candidate, pkg.resumeSource),
+  ]);
+  if (!isOfficial) throw new Error("Posting no longer matches the configured official source");
   if (artifact.jobId !== job.id || artifact.sourceFingerprint !== pkg.resumeSource.fingerprint) {
     throw new Error("Verified résumé artifact belongs to another job or source");
   }
@@ -65,6 +87,7 @@ export async function runApplicationPackage(
     throw new Error("Application checkpoint belongs to a different résumé artifact");
   }
   let checkpoint = current ?? await workflow.create(job.id, job.applicationUrl);
+  if (resumingApproval) checkpoint = await workflow.advance(job.id, "applying");
   for (const stage of ["validated", "matched", "tailored"] as const) {
     if (checkpoint.stage === ({ validated: "discovered", matched: "validated", tailored: "matched" } as const)[stage]) {
       checkpoint = await workflow.advance(job.id, stage);

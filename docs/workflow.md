@@ -64,7 +64,8 @@ command are still required before this can run unattended on employer portals.
 ## Single-application runner
 
 `npm run application:run` reads one private application package from
-`OPENAPPLY_PACKAGE`. The package contains the official `job`, candidate facts,
+`OPENAPPLY_PACKAGE`. The package contains the official `job` and configured
+source, candidate facts,
 authorized handoff, generated résumé source, verified PDF path, and optionally
 the employer confirmation text. The runner verifies the PDF again, checkpoints
 each stage in encrypted local storage, fills supported fields in a persistent
@@ -73,3 +74,6 @@ It returns `waiting-human` with an exact blocker for unknown required fields,
 missing confirmation configuration, ambiguous submit controls, or final
 approval required by policy. It does not yet create accounts, read email codes,
 or handle multi-step forms; those require provider adapters and onboarding.
+If final approval is required, set `OPENAPPLY_APPROVE_JOB_ID` to the exact job
+ID on the next run. Only that approval blocker is resumable this way. The
+official posting, PDF, and page state are rechecked before submission.

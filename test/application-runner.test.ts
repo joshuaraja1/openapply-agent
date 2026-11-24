@@ -24,6 +24,7 @@ const candidate = candidateProfileSchema.parse({ version: 1,
   authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
   skills: {}, education: [], experience: [], projects: [],
 });
+const source = { provider: "greenhouse" as const, boardToken: "example", company: "Example Co", enabled: true };
 
 function browserFixture(extraRequired = false) {
   let confirmationVisible = false;
@@ -62,7 +63,7 @@ describe("application runner", () => {
       const bytes = Buffer.from("%PDF-1.4\ncontrolled-test-pdf\n%%EOF\n");
       await writeFile(path, bytes);
       const browser = browserFixture();
-      const pkg = applicationPackageSchema.parse({ version: 1, job, candidate,
+      const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
         handoff: createApplicationHandoff(job, false),
         resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
         resumePdfPath: path, expectedConfirmation: "Thank you for applying" });
@@ -72,6 +73,7 @@ describe("application runner", () => {
           pdfSha256: createHash("sha256").update(bytes).digest("hex"), path, pages: 1,
           verifiedAt: new Date().toISOString() }),
         launch: async () => browser,
+        validateOfficial: async () => true,
       });
       expect(result.checkpoint.stage).toBe("submitted");
       expect(result.checkpoint.confirmation).toBe("Thank you for applying");
@@ -79,7 +81,7 @@ describe("application runner", () => {
       expect(browser.uploaded[0]).toEqual(bytes);
       expect(browser.close).toHaveBeenCalledOnce();
       await expect(runApplicationPackage(pkg, workflow, join(root, "profile"), {
-        verify: async () => result.artifact, launch: async () => browser,
+        verify: async () => result.artifact, launch: async () => browser, validateOfficial: async () => true,
       })).rejects.toThrow("submitted");
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -88,18 +90,33 @@ describe("application runner", () => {
 
   it("pauses before filling when the portal asks an unknown required question", async () => {
     const browser = browserFixture(true);
-    const pkg = applicationPackageSchema.parse({ version: 1, job, candidate,
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/resume.pdf", expectedConfirmation: "Thank you for applying" });
     const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
       "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: "f".repeat(64),
         pdfSha256: "0".repeat(64), path: "/tmp/resume.pdf", pages: 1, verifiedAt: new Date().toISOString() }),
-      launch: async () => browser });
+      launch: async () => browser, validateOfficial: async () => true });
     expect(result.checkpoint.stage).toBe("waiting-human");
     expect(result.checkpoint.blocker).toContain("Salary expectation");
     expect(browser.fields[0]?.value).toBe("");
     expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not open the browser when official-source validation fails", async () => {
+    const browser = browserFixture();
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/resume.pdf" });
+    const launch = vi.fn(async () => browser);
+    await expect(runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "0".repeat(64), path: "/tmp/resume.pdf", pages: 1,
+        verifiedAt: new Date().toISOString() }), validateOfficial: async () => false, launch }))
+      .rejects.toThrow("official source");
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it("pauses at final approval when policy requires it", async () => {
@@ -109,18 +126,30 @@ describe("application runner", () => {
       const bytes = Buffer.from("%PDF-1.4\ncontrolled-test-pdf\n%%EOF\n");
       await writeFile(path, bytes);
       const browser = browserFixture();
-      const pkg = applicationPackageSchema.parse({ version: 1, job, candidate,
+      const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
         handoff: createApplicationHandoff(job, true),
         resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
         resumePdfPath: path });
-      const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+      const result = await runApplicationPackage(pkg, workflow,
         join(root, "profile"), { verify: async () => ({ jobId: job.id,
           sourceFingerprint: pkg.resumeSource.fingerprint,
           pdfSha256: createHash("sha256").update(bytes).digest("hex"), path, pages: 1,
-          verifiedAt: new Date().toISOString() }), launch: async () => browser });
+          verifiedAt: new Date().toISOString() }), launch: async () => browser,
+          validateOfficial: async () => true });
       expect(result.checkpoint.stage).toBe("waiting-human");
       expect(result.checkpoint.blocker).toContain("approval");
       expect(browser.uploaded[0]).toEqual(bytes);
+      const approved = applicationPackageSchema.parse({ ...pkg,
+        handoff: { ...pkg.handoff, mode: "submit-after-approval" },
+        expectedConfirmation: "Thank you for applying" });
+      const resumed = await runApplicationPackage(approved, workflow,
+        join(root, "other-profile"), { verify: async () => ({ jobId: job.id,
+          sourceFingerprint: pkg.resumeSource.fingerprint,
+          pdfSha256: createHash("sha256").update(bytes).digest("hex"), path, pages: 1,
+          verifiedAt: new Date().toISOString() }), launch: async () => browser,
+          validateOfficial: async () => true, approvedJobId: job.id });
+      expect(resumed.checkpoint.stage).toBe("submitted");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
