@@ -7,7 +7,7 @@ import { verifyResumePdf, type VerifiedResumeArtifact } from "../resume/verify-p
 import { fetchSourceBatch } from "../sources/batch.js";
 import type { DiscoveredJob } from "../types.js";
 import { applicationHandoffSchema } from "./handoff.js";
-import { fillApplicationForm, planApplicationForm } from "./form-mapper.js";
+import { fillApplicationForm } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
@@ -102,7 +102,7 @@ export async function runApplicationPackage(
     && current.blocker !== "Final submission approval required" || current?.stage === "applying")
     && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
     && Boolean(dependencies.browserFactory);
-  if (resumingHuman && (!current?.browserGroupId || !current.browserEndpoint
+  if (resumingHuman && (!current?.browserGroupId || !current.browserEndpoint || !current.browserPageUrl
     || current.browserEndpoint !== pkg.browserEndpoint)) {
     throw new Error("BrowserOS handoff requires the saved tab group and endpoint");
   }
@@ -164,8 +164,12 @@ export async function runApplicationPackage(
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     const snapshot = resumingHuman
-      ? await browser.attach!(current!.browserPageId!, job.applicationUrl, current!.browserGroupId!)
+      ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!)
       : await browser.navigate(job.applicationUrl);
+    if (new URL(snapshot.url).protocol !== "https:"
+      || new URL(snapshot.url).hostname.toLowerCase() !== host) {
+      throw new Error("Application handoff left the approved employer destination");
+    }
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
@@ -173,21 +177,21 @@ export async function runApplicationPackage(
       ...(resumingHuman && dependencies.humanAnswerApproval
         ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {}) };
     let resumeUploaded = resumingHuman && current?.resumeUploaded === true;
+    let continued = false;
     let page = snapshot;
-    let filled = { snapshot, blockers: [] as string[] };
+    let filled = { snapshot, blockers: [] as string[], uploaded: false };
     const visited = new Set<string>();
     for (let step = 0; step < 5; step += 1) {
-      const signature = `${page.url}|${page.controls.map((control) =>
+      const signature = `${page.url}|${page.title}|${page.visibleText ?? ""}|${page.controls.map((control) =>
         `${control.tag}:${control.type}:${control.name}`).join("|")}`;
       if (visited.has(signature)) {
-        filled = { snapshot: page, blockers: ["Application step repeated without progress"] };
+        filled = { snapshot: page, blockers: ["Application step repeated without progress"], uploaded: false };
         break;
       }
       visited.add(signature);
-      const plan = planApplicationForm(page, pkg.candidate, artifact.path, formOptions);
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
+      resumeUploaded ||= filled.uploaded;
       if (filled.blockers.length) break;
-      resumeUploaded ||= plan.actions.some((action) => action.action === "upload");
       const next = filled.snapshot.controls.filter((control) => control.tag === "button"
         && control.type === "button"
         && /^(next|continue|save and continue|continue to next step)$/i.test(control.name.trim()));
@@ -211,6 +215,7 @@ export async function runApplicationPackage(
         break;
       }
       page = await browser.act(next[0]!.ref, "click");
+      continued = true;
       if (new URL(page.url).hostname.toLowerCase() !== host) {
         throw new Error("Application left the approved employer destination");
       }
@@ -221,6 +226,7 @@ export async function runApplicationPackage(
       throw new Error("BrowserOS application needs a stable tab group and endpoint for recovery");
     }
     const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
+      ...(pageId ? { browserPageUrl: filled.snapshot.url } : {}),
       ...(groupId ? { browserGroupId: groupId } : {}),
       ...(pageId && pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
       resumeUploaded,
@@ -249,7 +255,8 @@ export async function runApplicationPackage(
         });
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
-          pkg.expectedConfirmation, handoff, pkg.browserEndpoint);
+          pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
+          continued || resumingHuman ? filled.snapshot.url : undefined);
         checkpoint = (await workflow.current(job.id))!;
       }
     }
@@ -260,6 +267,7 @@ export async function runApplicationPackage(
       await workflow.advance(job.id, "waiting-human", {
         blocker: current?.blocker ?? "Human handoff needs another review",
         ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
+        ...(current?.browserPageUrl ? { browserPageUrl: current.browserPageUrl } : {}),
         ...(current?.browserGroupId ? { browserGroupId: current.browserGroupId } : {}),
         ...(current?.browserEndpoint ? { browserEndpoint: current.browserEndpoint } : {}),
         resumeUploaded: current?.resumeUploaded === true,

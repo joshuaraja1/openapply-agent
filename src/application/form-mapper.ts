@@ -80,9 +80,9 @@ export async function fillApplicationForm(
   candidate: CandidateProfile,
   resumePath: string,
   options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {},
-): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
+): Promise<{ snapshot: BrowserSnapshot; blockers: string[]; uploaded: boolean }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath, options);
-  if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
+  if (plan.blockers.length) return { snapshot, blockers: plan.blockers, uploaded: false };
   const initialCounts = new Map<string, number>();
   for (const control of snapshot.controls) initialCounts.set(key(control), (initialCounts.get(key(control)) ?? 0) + 1);
   const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] => {
@@ -101,7 +101,8 @@ export async function fillApplicationForm(
   if (browser.fillBatch) {
     const filled = await browser.fillBatch(plan.actions);
     if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");
-    return { snapshot: filled, blockers: postFillBlockers(filled, true) };
+    const uploaded = plan.actions.some((action) => action.action === "upload");
+    return { snapshot: filled, blockers: postFillBlockers(filled, uploaded), uploaded };
   }
   let current = snapshot;
   let uploaded = false;
@@ -112,8 +113,8 @@ export async function fillApplicationForm(
     current = await browser.act(matching[0]!.ref, action.action, action.value);
     uploaded ||= action.action === "upload";
     const blockers = postFillBlockers(current, uploaded);
-    if (blockers.length) return { snapshot: current, blockers };
+    if (blockers.length) return { snapshot: current, blockers, uploaded };
   }
   if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");
-  return { snapshot: current, blockers: postFillBlockers(current, uploaded) };
+  return { snapshot: current, blockers: postFillBlockers(current, uploaded), uploaded };
 }

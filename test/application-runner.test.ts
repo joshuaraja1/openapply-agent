@@ -66,14 +66,14 @@ describe("application runner", () => {
       { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
         value: null, required: false, options: [] },
     ] };
-    const second = { url: job.applicationUrl, title: "Documents", controls: [
+    const second = { url: "https://jobs.example.com/apply/step-2", title: "Documents", controls: [
       input("resume", "Resume", "file"),
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
         value: null, required: false, options: [] },
     ] };
     const steps: string[] = [];
     let current = first;
-    const browser = { currentUrl: () => job.applicationUrl, navigate: async () => first,
+    const browser = { currentUrl: () => current.url, navigate: async () => first,
       fillBatch: async (actions: Array<{ action: string }>) => {
         steps.push(actions.some((action) => action.action === "upload") ? "upload" : "fill");
         return current;
