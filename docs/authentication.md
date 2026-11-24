@@ -8,6 +8,9 @@ The embedded runtime uses Playwright's Chromium binary. Install it with
 `npx playwright install chromium` after `npm ci`. Pass a dedicated private
 profile directory to `launchBrowser`. The runtime holds a process lock while
 open, so a second process cannot launch against the same profile.
+After a crash, inspect the process and profile before removing its empty
+`.lock` directory. Automatic stale-lock recovery is deferred until an OS-backed
+lock is available.
 
 ## First-run import
 

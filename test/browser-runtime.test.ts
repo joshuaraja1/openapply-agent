@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,11 +32,12 @@ describe("persistent browser runtime", () => {
     const close = vi.fn(async () => {});
     const launch = vi.fn(async () => ({ close })) as unknown as NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
     const browser = await launchBrowser({ profileDirectory: directory, launch });
-    expect(await readFile(join(directory, ".openapply.lock"), "utf8")).toBe(String(process.pid));
-    await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow("already in use");
+    await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow();
     await browser.close();
     expect(close).toHaveBeenCalledOnce();
     const next = await launchBrowser({ profileDirectory: directory, launch });
+    await browser.close();
+    expect(await stat(`${directory}.lock`)).toBeDefined();
     await next.close();
   });
 
@@ -45,6 +46,23 @@ describe("persistent browser runtime", () => {
     directories.push(directory);
     const launch = vi.fn(async () => { throw new Error("renderer failed"); }) as unknown as NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
     await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow("renderer failed");
-    await expect(readFile(join(directory, ".openapply.lock"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(`${directory}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps a crash lock until explicitly recovered", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openapply-browser-"));
+    directories.push(directory);
+    await mkdir(`${directory}.lock`);
+    const launch = vi.fn(async () => ({ close: async () => {} })) as unknown as NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
+    await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow();
+    expect(launch).not.toHaveBeenCalled();
+    await rm(`${directory}.lock`, { recursive: true });
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a shared profile directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openapply-browser-"));
+    directories.push(directory);
+    await chmod(directory, 0o755);
+    await expect(launchBrowser({ profileDirectory: directory })).rejects.toThrow("private");
   });
 });
