@@ -51,3 +51,12 @@ Log the company, title, canonical URL, timestamp, tailored artifact path, answer
 ## Scheduling
 
 Run the discovery command hourly with a scheduler such as cron, systemd, GitHub Actions with encrypted private inputs, or an agent automation. Do not place candidate data in a public CI repository.
+
+# Deterministic form mapping
+
+The embedded browser can now identify visible form labels, required controls,
+and select options. `planApplicationForm` maps exact common identity fields and
+the approved résumé artifact. It stops before filling anything if a required
+field is unknown or duplicated, or if verification is detected. Optional
+free-text questions remain blank. Provider-specific adapters and an execution
+command are still required before this can run unattended on employer portals.
