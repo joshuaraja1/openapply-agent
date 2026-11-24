@@ -609,5 +609,17 @@ describe("application runner", () => {
       company: "Example Co", portalHost: "jobs.example.com" }));
     expect(act).toHaveBeenCalledWith("code", "fill", "123456");
     expect(submit).toHaveBeenCalledOnce();
+    codeControl.value = null;
+    const verifiedPage = () => ({ ...page(), visibleText: "Example Co application. Email verified.",
+      controls: [resumeControl, submitControl] });
+    const autoAdvanced = await runApplicationPackage(pkg,
+      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
+        validateOfficial: async () => true, verify: async () => result.artifact,
+        emailCode: { resolve }, browserFactory: async () => ({ browser: {
+          currentUrl: () => job.applicationUrl, navigate: async () => page(),
+          act: async () => verifiedPage(), fillBatch: async () => verifiedPage(), submit,
+        }, close: async () => {} }),
+      });
+    expect(autoAdvanced.checkpoint.stage).toBe("submitted");
   });
 });

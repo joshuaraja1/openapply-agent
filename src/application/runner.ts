@@ -270,8 +270,9 @@ export async function runApplicationPackage(
       if (emailControls.length === 1 && !/^\d{6}$/.test(emailControls[0]!.value ?? "")) {
         let code: string | undefined;
         try {
-          code = await dependencies.emailCode?.resolve({ accountEmail: pkg.candidate.identity.email,
-            company: job.company, portalHost: host, requestedAt: checkpoint.updatedAt });
+          code = await dependencies.emailCode?.resolve({ jobId: job.id, jobTitle: job.title,
+            accountEmail: pkg.candidate.identity.email, company: job.company, portalHost: host,
+            requestedAt: new Date(Date.now() - 15_000).toISOString() });
         } catch {
           filled = { snapshot: page, blockers: ["Email verification requires human review"], uploaded: false };
           break;
@@ -284,8 +285,12 @@ export async function runApplicationPackage(
         if (new URL(page.url).hostname.toLowerCase() !== host) {
           throw new Error("Email code entry left the approved employer destination");
         }
-        if (page.controls.filter(isEmailCodeControl).length !== 1
-          || !page.controls.some((control) => isEmailCodeControl(control) && control.value === code)) {
+        const codeFields = page.controls.filter(isEmailCodeControl);
+        const accepted = codeFields.length === 1 && codeFields[0]!.value === code;
+        const verifiedTransition = codeFields.length === 0
+          && /\b(email (?:address )?verified|email confirmed|verification successful)\b/i
+            .test(page.visibleText ?? "");
+        if (!accepted && !verifiedTransition) {
           filled = { snapshot: page, blockers: ["Email verification code was not retained"], uploaded: false };
           break;
         }

@@ -19,10 +19,12 @@ only confirms consent receipt; the command reports success after token storage.
 
 When `autoEnter` is enabled, the queue and single-application runners can fill
 one clearly labeled **email** code field. The message must match the configured
-account, approved sender domain, company or portal host, and active application
-window. A selected message is claimed in encrypted local state before browser
-entry, so a crash or a second run cannot use that message again. Missing,
-ambiguous, stale, or unretained codes pause for human review. Other MFA and
+account, approved sender domain, company or portal host, job title, and a short
+window around the observed code field. It checks for up to 30 seconds. Overlapping
+challenges for the same account and employer pause rather than compete for a code.
+A selected message is claimed in encrypted local state before browser entry, so
+a crash or a second run cannot use that message again. Missing, ambiguous,
+stale, or unretained codes pause for human review. Other MFA and
 security challenges remain human handoffs. This path has synthetic tests; live
 Gmail and Microsoft consent plus employer-portal flows require beta validation.
 
