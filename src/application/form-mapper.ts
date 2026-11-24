@@ -58,6 +58,9 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
     if (action && counts.get(key(control)) === 1) actions.push(action);
     else if (control.required) blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
   }
+  if (!actions.some((action) => action.action === "upload")) {
+    blockers.push("Resume upload control was not found; verify this application step before submission");
+  }
   return { actions, blockers };
 }
 
@@ -76,5 +79,6 @@ export async function fillApplicationForm(
     if (matching.length !== 1) throw new Error(`Form field changed during filling: ${action.name}`);
     current = await browser.act(matching[0]!.ref, action.action, action.value);
   }
+  if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");
   return { snapshot: current, blockers: [] };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
@@ -40,7 +40,7 @@ describe("deterministic application field mapping", () => {
       field("1", "Email"), field("2", "Email"), field("3", "Expected salary"),
       field("4", "Verification code"),
     ), candidate, "/tmp/resume.pdf");
-    expect(plan.blockers).toHaveLength(4);
+    expect(plan.blockers).toHaveLength(5);
     expect(plan.actions).toEqual([]);
   });
 
@@ -48,19 +48,19 @@ describe("deterministic application field mapping", () => {
     const browser = { act: vi.fn() };
     const result = await fillApplicationForm(browser as never,
       snapshot(field("1", "Email"), field("2", "Citizenship details")), candidate, "/tmp/resume.pdf");
-    expect(result.blockers).toHaveLength(1);
+    expect(result.blockers).toHaveLength(2);
     expect(browser.act).not.toHaveBeenCalled();
   });
 
   it("refreshes refs after every action and halts on form drift", async () => {
-    const initial = snapshot(field("1", "First name"), field("2", "Email"));
-    const next = snapshot(field("3", "First name"), field("4", "Email"));
-    const browser = { act: vi.fn().mockResolvedValueOnce(next).mockResolvedValueOnce(next) };
+    const initial = snapshot(field("1", "First name"), field("2", "Email"), field("5", "Resume", "file"));
+    const next = snapshot(field("3", "First name"), field("4", "Email"), field("6", "Resume", "file"));
+    const browser = { act: vi.fn().mockResolvedValue(next) };
     const result = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf");
     expect(result.blockers).toEqual([]);
-    expect(browser.act.mock.calls.map((call) => call[0])).toEqual(["1", "4"]);
+    expect(browser.act.mock.calls.map((call) => call[0])).toEqual(["1", "4", "6"]);
     const drifted = { ...next, url: "https://jobs.example.com/other" };
-    browser.act = vi.fn().mockResolvedValueOnce(drifted);
+    browser.act = vi.fn().mockResolvedValueOnce(next).mockResolvedValueOnce(next).mockResolvedValueOnce(drifted);
     await expect(fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf"))
       .rejects.toThrow("changed during form filling");
   });
@@ -68,22 +68,26 @@ describe("deterministic application field mapping", () => {
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("fills labeled fields in real Chromium", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-form-"));
     try {
+      const resumePath = join(root, "resume.pdf");
+      await writeFile(resumePath, "%PDF-1.4\n%%EOF\n");
       const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true });
       try {
         await runtime.context.route("https://jobs.example.com/apply", async (route) => {
           await route.fulfill({ contentType: "text/html", body: `
             <form><label for="first">First name</label><input id="first" required>
             <label for="email">Email</label><input id="email" type="email" required>
-            <label for="reason">Why this company?</label><textarea id="reason"></textarea></form>` });
+            <label for="reason">Why this company?</label><textarea id="reason"></textarea>
+            <label for="resume">Resume</label><input id="resume" type="file" required></form>` });
         });
-        const browser = new AgentBrowser(runtime.context, new Set(["jobs.example.com"]));
+        const browser = new AgentBrowser(runtime.context, new Set(["jobs.example.com"]), new Set([resumePath]));
         const first = await browser.navigate("https://jobs.example.com/apply");
-        const result = await fillApplicationForm(browser, first, candidate, "/tmp/resume.pdf");
+        const result = await fillApplicationForm(browser, first, candidate, resumePath);
         expect(result.blockers).toEqual([]);
         const page = runtime.context.pages().at(-1)!;
         expect(await page.locator("#first").inputValue()).toBe("Test");
         expect(await page.locator("#email").inputValue()).toBe("test@example.com");
         expect(await page.locator("#reason").inputValue()).toBe("");
+        expect(await page.locator("#resume").evaluate((element) => (element as HTMLInputElement).files?.[0]?.name)).toBe("resume.pdf");
       } finally {
         await runtime.close();
       }
