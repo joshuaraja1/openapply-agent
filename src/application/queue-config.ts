@@ -1,10 +1,13 @@
 import { z } from "zod";
+import { isAbsolute } from "node:path";
+
+const absolutePath = z.string().min(1).refine(isAbsolute, "Use an absolute path");
 
 export const queueRunnerConfigSchema = z.object({
-  version: z.literal(1), queuePath: z.string().min(1), candidatePath: z.string().min(1),
-  preferencesPath: z.string().min(1), discoveryInputPath: z.string().min(1),
-  discoveryStatePath: z.string().min(1), browserEndpoint: z.url(),
-  overleafProjectUrl: z.url(), outputDirectory: z.string().min(1),
+  version: z.literal(1), queuePath: absolutePath, candidatePath: absolutePath,
+  preferencesPath: absolutePath, discoveryInputPath: absolutePath,
+  discoveryStatePath: absolutePath, browserEndpoint: z.url(),
+  overleafProjectUrl: z.url(), outputDirectory: absolutePath,
   expectedConfirmationByDomain: z.record(z.string(), z.string().min(1)).default({}),
 });
 

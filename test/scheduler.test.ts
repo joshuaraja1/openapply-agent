@@ -32,5 +32,6 @@ describe("macOS background schedule", () => {
     setDiscoveryEnvironment(queue, env);
     expect(env.OPENAPPLY_CANDIDATE).toBe(queue.candidatePath);
     expect(env.OPENAPPLY_OUTPUT).toBe(queue.queuePath);
+    expect(() => queueRunnerConfigSchema.parse({ ...queue, candidatePath: "candidate.json" })).toThrow();
   });
 });
