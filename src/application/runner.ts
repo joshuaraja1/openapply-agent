@@ -308,7 +308,7 @@ export async function runApplicationPackage(
         }
       }
     }
-    const formOptions = { allowMissingResume: true,
+    const formOptions = { allowMissingResume: true, provider: job.provider,
       ...(resumingHuman && dependencies.humanAnswerApproval
         ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {}) };
     let resumeUploaded = resumingHuman && current?.resumeUploaded === true;

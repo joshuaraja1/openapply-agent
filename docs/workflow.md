@@ -57,9 +57,10 @@ Run the discovery command hourly with a scheduler such as cron, systemd, GitHub 
 The embedded browser can now identify visible form labels, required controls,
 and select options. `planApplicationForm` maps exact common identity fields and
 the approved résumé artifact. It stops before filling anything if a required
-field is unknown or duplicated, or if verification is detected. Optional
-free-text questions remain blank. Provider-specific adapters and an execution
-command are still required before this can run unattended on employer portals.
+field is unknown or duplicated, or if verification is detected. Greenhouse and
+Ashby have a small set of exact identity-field aliases. Optional free-text
+questions remain blank. Complete provider-specific adapters are still needed
+for conditional controls and site-specific forms.
 
 ## Single-application runner
 
