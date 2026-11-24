@@ -40,6 +40,13 @@ export const authenticationPolicySchema = z.strictObject({
     maximumMessageAgeSeconds: z.number().int().min(30).max(900).default(300),
     autoEnter: z.boolean().default(false),
   }).superRefine((value, context) => {
+    if (value.autoEnter && !value.enabled) {
+      context.addIssue({
+        code: "custom",
+        path: ["autoEnter"],
+        message: "Enable email verification before automatic code entry",
+      });
+    }
     if (!value.enabled) return;
     for (const field of ["provider", "accountId", "oauthSecretRef"] as const) {
       if (!value[field]) {

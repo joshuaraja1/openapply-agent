@@ -57,6 +57,10 @@ describe("authentication policy", () => {
       emailVerification: { enabled: true, autoEnter: true },
     });
     expect(result.success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      emailVerification: { enabled: false, autoEnter: true },
+    }).success).toBe(false);
   });
 
   it("rejects unapproved senders and unknown mailbox accounts", () => {

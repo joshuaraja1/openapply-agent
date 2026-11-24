@@ -13,7 +13,7 @@
     {
       "id": "job-search",
       "email": "candidate@example.com",
-      "domains": ["linkedin.com", "myworkdayjobs.com", "greenhouse.io", "ashbyhq.com"],
+      "domains": ["linkedin.com", "*.myworkdayjobs.com", "*.greenhouse.io", "*.ashbyhq.com"],
       "passwordSecretRef": "keychain://openapply/job-search",
       "allowAccountCreation": true
     }
