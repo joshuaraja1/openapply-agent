@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ApplicationStateStore } from "./contracts.js";
 
@@ -57,6 +57,12 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
     });
   }
 
+  /** Call only after an operator has confirmed no process is using this state file. */
+  async recoverLockAfterInspection(confirmedInactive: true): Promise<void> {
+    if (confirmedInactive !== true) throw new Error("Recovery requires explicit inactivity confirmation");
+    await rmdir(`${this.path}.lock`);
+  }
+
   private async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
     const directory = dirname(this.path);
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -83,10 +89,11 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
     const sealed = JSON.parse(raw) as SealedData;
     const decipher = createDecipheriv("aes-256-gcm", this.key, Buffer.from(sealed.nonce, "base64"));
     decipher.setAuthTag(Buffer.from(sealed.tag, "base64"));
-    return JSON.parse(Buffer.concat([
+    const parsed = JSON.parse(Buffer.concat([
       decipher.update(Buffer.from(sealed.ciphertext, "base64")),
       decipher.final(),
     ]).toString("utf8")) as Record<string, StoredRecord<State>>;
+    return Object.assign(Object.create(null) as Record<string, StoredRecord<State>>, parsed);
   }
 
   private async save(records: Record<string, StoredRecord<State>>): Promise<void> {
@@ -100,8 +107,22 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
     };
     const temporary = `${this.path}.${randomUUID()}.tmp`;
     try {
-      await writeFile(temporary, JSON.stringify(sealed), { mode: 0o600, flag: "wx" });
+      const file = await open(temporary, "wx", 0o600);
+      try {
+        await file.writeFile(JSON.stringify(sealed));
+        await file.sync();
+      } finally {
+        await file.close();
+      }
       await rename(temporary, this.path);
+      if (process.platform !== "win32") {
+        const directory = await open(dirname(this.path), "r");
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      }
     } finally {
       await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;

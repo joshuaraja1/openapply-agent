@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,5 +47,22 @@ describe("encrypted application state", () => {
     sealed.ciphertext = Buffer.from("changed").toString("base64");
     await writeFile(path, JSON.stringify(sealed));
     await expect(store.read("job-1")).rejects.toThrow();
+  });
+
+  it("persists reserved-looking application IDs safely", async () => {
+    const { path, store } = await fixture();
+    expect(await store.compareAndSwap("__proto__", undefined, { stage: "ready" })).toBe(1);
+    expect(await store.compareAndSwap("constructor", undefined, { stage: "ready" })).toBe(1);
+    const restarted = new EncryptedApplicationStateStore<{ stage: string }>(path, Buffer.alloc(32, 7));
+    expect((await restarted.read("__proto__"))?.state.stage).toBe("ready");
+    expect((await restarted.read("constructor"))?.state.stage).toBe("ready");
+  });
+
+  it("requires explicit inspection to recover a crash lock", async () => {
+    const { path, store } = await fixture();
+    await mkdir(`${path}.lock`);
+    await expect(store.compareAndSwap("job-1", undefined, { stage: "ready" })).rejects.toThrow();
+    await store.recoverLockAfterInspection(true);
+    expect(await store.compareAndSwap("job-1", undefined, { stage: "ready" })).toBe(1);
   });
 });
