@@ -4,6 +4,11 @@ OpenApply uses a dedicated persistent Chromium profile. The profile is local to
 the user's machine and retains cookies, local storage, downloads, and successful
 logins between runs.
 
+The embedded runtime uses Playwright's Chromium binary. Install it with
+`npx playwright install chromium` after `npm ci`. Pass a dedicated private
+profile directory to `launchBrowser`. The runtime holds a process lock while
+open, so a second process cannot launch against the same profile.
+
 ## First-run import
 
 The onboarding flow may offer a one-time browser-native import from Chrome,
