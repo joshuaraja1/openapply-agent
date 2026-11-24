@@ -51,6 +51,11 @@ export interface ApplicationBrowserSurface {
   attach?(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot>;
 }
 
+function stepSignature(page: BrowserSnapshot): string {
+  return `${page.url}|${page.title}|${page.visibleText ?? ""}|${page.controls.map((control) =>
+    `${control.tag}:${control.type}:${control.name}:${control.value ?? ""}`).join("|")}`;
+}
+
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
   if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
   const batch = await fetchSourceBatch([pkg.source], 5000);
@@ -160,6 +165,8 @@ export async function runApplicationPackage(
       return { browser: new AgentBrowser(launched.context, new Set([host]),
         new Map([[artifact.path, artifact.pdfSha256]])), close: () => launched.close() };
     })();
+  let recoveryPageUrl = current?.browserPageUrl;
+  let recoveryResumeUploaded = current?.resumeUploaded === true;
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
@@ -170,6 +177,7 @@ export async function runApplicationPackage(
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
     }
+    recoveryPageUrl = snapshot.url;
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
@@ -182,15 +190,15 @@ export async function runApplicationPackage(
     let filled = { snapshot, blockers: [] as string[], uploaded: false };
     const visited = new Set<string>();
     for (let step = 0; step < 5; step += 1) {
-      const signature = `${page.url}|${page.title}|${page.visibleText ?? ""}|${page.controls.map((control) =>
-        `${control.tag}:${control.type}:${control.name}`).join("|")}`;
+      filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
+      resumeUploaded ||= filled.uploaded;
+      recoveryResumeUploaded = resumeUploaded;
+      const signature = stepSignature(filled.snapshot);
       if (visited.has(signature)) {
-        filled = { snapshot: page, blockers: ["Application step repeated without progress"], uploaded: false };
+        filled.blockers.push("Application step repeated without progress");
         break;
       }
       visited.add(signature);
-      filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
-      resumeUploaded ||= filled.uploaded;
       if (filled.blockers.length) break;
       const next = filled.snapshot.controls.filter((control) => control.tag === "button"
         && control.type === "button"
@@ -218,6 +226,11 @@ export async function runApplicationPackage(
       continued = true;
       if (new URL(page.url).hostname.toLowerCase() !== host) {
         throw new Error("Application left the approved employer destination");
+      }
+      recoveryPageUrl = page.url;
+      if (stepSignature(page) === signature) {
+        filled = { snapshot: page, blockers: ["Continue did not advance the application"], uploaded: false };
+        break;
       }
     }
     const pageId = browser.pageId?.();
@@ -263,14 +276,16 @@ export async function runApplicationPackage(
     return { checkpoint, artifact };
   } catch (error) {
     const latest = await workflow.current(job.id);
-    if ((resumingApproval || resumingHuman) && latest?.stage === "applying") {
+    if (latest?.stage === "applying" && (resumingApproval || resumingHuman
+      || runtime.browser.pageId?.()) && recoveryPageUrl) {
+      const pageId = runtime.browser.pageId?.() ?? current?.browserPageId;
+      const groupId = runtime.browser.groupId?.() ?? current?.browserGroupId;
       await workflow.advance(job.id, "waiting-human", {
         blocker: current?.blocker ?? "Human handoff needs another review",
-        ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
-        ...(current?.browserPageUrl ? { browserPageUrl: current.browserPageUrl } : {}),
-        ...(current?.browserGroupId ? { browserGroupId: current.browserGroupId } : {}),
-        ...(current?.browserEndpoint ? { browserEndpoint: current.browserEndpoint } : {}),
-        resumeUploaded: current?.resumeUploaded === true,
+        ...(pageId ? { browserPageId: pageId, browserPageUrl: recoveryPageUrl } : {}),
+        ...(groupId ? { browserGroupId: groupId } : {}),
+        ...(pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
+        resumeUploaded: recoveryResumeUploaded,
         ...(current?.packagePath ? { packagePath: current.packagePath } : {}),
       });
     }
