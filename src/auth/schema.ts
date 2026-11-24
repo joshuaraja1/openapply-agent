@@ -7,7 +7,7 @@ const secretReferenceSchema = z.string().regex(
   "Use an operating-system secret reference; never put a password in configuration",
 );
 const userSecretReferenceSchema = secretReferenceSchema.refine(
-  (reference) => !reference.startsWith("keychain://application-state/"),
+  (reference) => !/^(?:keychain|credential-manager|secret-service):\/\/application-state\//.test(reference),
   "Application-state encryption keys cannot be used as account credentials",
 );
 

@@ -31,6 +31,14 @@ describe("macOS Keychain secret store", () => {
     expect(factory).not.toHaveBeenCalled();
   });
 
+  it("does not report deletion while the credential is still readable", async () => {
+    const store = new MacKeychainSecretStore(() => ({
+      getPassword: async () => "still-present",
+      setPassword: async () => {}, deletePassword: async () => false,
+    }), "darwin");
+    await expect(store.delete("keychain://portal/account")).rejects.toThrow("did not delete");
+  });
+
   it("creates a 256-bit key once and reuses it across launches", async () => {
     const { store, values } = fakeKeychain();
     const keyReference = `keychain://test/${randomUUID()}`;

@@ -11,7 +11,8 @@ import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/sc
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
-import { getOrCreateStateKey, MacKeychainSecretStore } from "../storage/mac-keychain.js";
+import { getOrCreateStateKey } from "../storage/mac-keychain.js";
+import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
@@ -38,8 +39,8 @@ const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
 const root = join(userInfo().homedir, ".openapply-agent");
-const secrets = new MacKeychainSecretStore();
-const key = await getOrCreateStateKey(secrets, "keychain://application-state/main");
+const secrets = createNativeSecretStore();
+const key = await getOrCreateStateKey(secrets, stateKeyReference());
 const workflow = new ApplicationWorkflow(new EncryptedApplicationStateStore<ApplicationCheckpoint>(
   join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord>(
