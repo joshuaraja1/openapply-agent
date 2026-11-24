@@ -42,6 +42,7 @@ if (endpoint) assertLocalBrowserEndpoint(endpoint);
 if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
   throw new Error("BrowserOS endpoint differs from the saved application package");
 }
+const runtimePackage = endpoint ? { ...authorizedPackage, browserEndpoint: endpoint } : authorizedPackage;
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
@@ -51,10 +52,10 @@ try {
     const attestationPath = process.env.OPENAPPLY_CONFIRMATION_ATTESTATION;
     if (!attestationPath) throw new Error("Manual confirmation requires a private job-bound attestation file");
     const browser = new NeoApplicationBrowser(client, new Set([approvedDestinationHost(pkg)]), new Map());
-    await confirmManualSubmission(pkg, workflow, browser, await loadManualAttestation(attestationPath));
+    await confirmManualSubmission(runtimePackage, workflow, browser, await loadManualAttestation(attestationPath));
     console.log(JSON.stringify({ jobId: pkg.job.id, stage: "submitted" }));
   } else {
-  const result = await runApplicationPackage(authorizedPackage, workflow, profileDirectory,
+  const result = await runApplicationPackage(runtimePackage, workflow, profileDirectory,
     { packagePath, ...(approvedJobId ? { approvedJobId } : {}), ...(resumedJobId ? { resumedJobId } : {}),
       ...(humanAnswerApproval ? { humanAnswerApproval } : {}),
       ...(client ? { browserFactory: async (allowedHosts, approvedArtifacts) => ({
