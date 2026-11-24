@@ -55,8 +55,8 @@ a password already stored under its Keychain reference. BrowserOS fills the
 credential without saving it in the browser profile. Ambiguous login controls,
 identity-provider redirects, and failed sign-ins pause for human handling.
 If sign-in lands on a different page, OpenApply continues only when the same
-requisition identifier appears in both the original and returned URLs and the
-returned page visibly identifies the company and role. Otherwise it pauses
+requisition identifier remains in the same URL path prefix and the returned
+page visibly identifies the company and role. Otherwise it pauses
 before filling or submitting the form.
 
 New-account creation is still planned. The current runner pauses at registration

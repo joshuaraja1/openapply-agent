@@ -69,12 +69,16 @@ function identifiesJob(page: BrowserSnapshot, job: DiscoveredJob): boolean {
 function hasStableJobReference(page: BrowserSnapshot, job: DiscoveredJob): boolean {
   const reference = job.id.split(":").at(-1)?.toLowerCase();
   if (!reference || !/^[a-z0-9_-]{6,}$/.test(reference)) return false;
-  const contains = (url: string): boolean => {
-    const parsed = new URL(url);
-    return [...parsed.pathname.split("/"), ...parsed.searchParams.values()]
-      .some((part) => decodeURIComponent(part).toLowerCase() === reference);
+  const segments = (url: string): string[] | undefined => {
+    try { return new URL(url).pathname.split("/").map((part) => decodeURIComponent(part).toLowerCase()); }
+    catch { return undefined; }
   };
-  return contains(job.applicationUrl) && contains(page.url) && identifiesJob(page, job);
+  const original = segments(job.applicationUrl);
+  const returned = segments(page.url);
+  const position = original?.indexOf(reference) ?? -1;
+  return position > 0 && Boolean(returned)
+    && original!.slice(0, position + 1).join("/") === returned!.slice(0, position + 1).join("/")
+    && identifiesJob(page, job);
 }
 
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
@@ -249,8 +253,16 @@ export async function runApplicationPackage(
     let filled = { snapshot, blockers: [] as string[], uploaded: false };
     const visited = new Set<string>();
     for (let step = 0; step < 5 && !loginBlocker; step += 1) {
+      if (page.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))
+        && page.controls.some((control) => control.tag === "button"
+          && /^(sign in|log in|login)$/i.test(control.name.trim()))) {
+        loginRecoveryPending = true;
+        filled = { snapshot: page, blockers: ["Portal sign-in needs human completion"], uploaded: false };
+        break;
+      }
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
       resumeUploaded ||= filled.uploaded;
+      if (filled.uploaded) loginRecoveryPending = false;
       recoveryResumeUploaded = resumeUploaded;
       const signature = stepSignature(filled.snapshot);
       if (visited.has(signature)) {
@@ -306,11 +318,11 @@ export async function runApplicationPackage(
     if (!filled.blockers.length && !resumeUploaded) {
       filled.blockers.push("Verified résumé was not uploaded on any application step");
     }
-    if (resumeUploaded) loginRecoveryPending = false;
-    if (loginRecoveryPending && filled.blockers.length) {
+    if (loginBlocker) filled.blockers.unshift(loginBlocker);
+    if (loginRecoveryPending && filled.blockers.length
+      && filled.blockers[0] !== "Portal sign-in needs human completion") {
       filled.blockers.unshift("Portal sign-in needs human completion");
     }
-    if (loginBlocker) filled.blockers.unshift(loginBlocker);
     if (filled.blockers.length) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: filled.blockers.join("; "), ...pageDetails,
