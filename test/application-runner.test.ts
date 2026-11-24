@@ -204,14 +204,25 @@ describe("application runner", () => {
       expect(first.checkpoint.stage).toBe("waiting-human");
       expect(first.checkpoint.browserPageId).toBe(7);
       expect(first.checkpoint.packagePath).toBe(join(root, "application.json"));
+      await workflow.advance(job.id, "applying"); // Simulate a crash after the resume transition.
       const attach = vi.fn(async () => controls(true));
-      const resumed = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
-        verify: verification, validateOfficial: async () => true, resumedJobId: job.id,
-        browserFactory: async () => ({ browser: {
+      const browserFactory = async () => ({ browser: {
           currentUrl: () => job.applicationUrl, navigate: async () => { throw new Error("Opened a new tab"); },
           attach, act: async () => controls(true), fillBatch: async () => controls(true),
           submit: async () => "Thank you for applying", pageId: () => 7,
-        }, close: async () => {} }),
+        }, close: async () => {} });
+      await expect(runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        verify: verification, validateOfficial: async () => true, browserFactory,
+      })).rejects.toThrow("same-tab resume");
+      const unapproved = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        verify: verification, validateOfficial: async () => true, resumedJobId: job.id, browserFactory,
+      });
+      expect(unapproved.checkpoint.stage).toBe("waiting-human");
+      expect(unapproved.checkpoint.blocker).toContain("Salary expectation");
+      const resumed = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        verify: verification, validateOfficial: async () => true, resumedJobId: job.id,
+        humanAnswerApproval: { jobId: job.id, browserPageId: 7, approveFinalSubmission: true,
+          answers: new Map([["Salary expectation", "Negotiable"]]) }, browserFactory,
       });
       expect(attach).toHaveBeenCalledWith(7, job.applicationUrl);
       expect(resumed.checkpoint.stage).toBe("submitted");

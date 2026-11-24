@@ -44,7 +44,7 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
 
 /** Only maps exact common fields. Unknown required questions need a human or a provider adapter. */
 export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string,
-  options: { allowHumanEnteredValues?: boolean } = {}): FormPlan {
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {}): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
   if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
@@ -60,8 +60,11 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
     }
     const action = valueFor(control, candidate, resumePath);
     if (action && counts.get(key(control)) === 1) actions.push(action);
-    else if (control.required && !(options.allowHumanEnteredValues && control.value?.trim()
-      && !["checkbox", "radio", "select", "file"].includes(control.type ?? control.tag))) {
+    else if (control.required && !(control.value?.trim()
+      && options.approvedHumanAnswers?.get(control.name) === control.value
+      && !["checkbox", "radio", "select", "file"].includes(control.type ?? control.tag)
+      && !/\b(attest|certify|criminal|disability|ethnicity|race|gender|veteran|clearance|export|sanction|consent|agree)\b/i
+        .test(control.name))) {
       blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
     }
   }
@@ -76,7 +79,7 @@ export async function fillApplicationForm(
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
-  options: { allowHumanEnteredValues?: boolean } = {},
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {},
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath, options);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };

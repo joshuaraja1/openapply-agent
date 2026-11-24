@@ -92,9 +92,14 @@ When BrowserOS pauses for an unknown required field, keep its application tab
 open and complete that field yourself. Inspect the encrypted checkpoint with
 `OPENAPPLY_JOB_ID=<job-id> npm run application:status`, then resume the package
 path it reports with `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> npm run application:run`
-after fixing the blocker. The runner attaches to the saved tab and rechecks
-the official posting and résumé before continuing. CAPTCHA and MFA may still
-require a person to finish the portal flow; the agent does not bypass them.
+after fixing the blocker. For an unknown required answer, provide a private
+[`OPENAPPLY_APPROVED_ANSWERS` file](examples/human-answer-approval.example.json)
+that names the exact job, tab, field, and value. The runner attaches to the
+saved tab and rechecks the official posting and résumé before continuing.
+If you manually finish a CAPTCHA or MFA and submit in that tab, use
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> npm run application:run`.
+It records submission only when the configured employer confirmation is visible
+on the approved host.
 
 ## Set up BrowserOS neo
 

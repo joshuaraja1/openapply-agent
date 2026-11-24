@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "jobId": "example-job-id",
+  "browserPageId": 7,
+  "approveFinalSubmission": true,
+  "answers": [
+    { "field": "Salary expectation", "value": "Negotiable" }
+  ]
+}

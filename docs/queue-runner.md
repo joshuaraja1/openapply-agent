@@ -42,7 +42,15 @@ On macOS, a paused application also triggers a generic desktop notification.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
-`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> npm run application:run`.
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> OPENAPPLY_APPROVED_ANSWERS=<private-answers-file> npm run application:run`.
+The answers file follows `examples/human-answer-approval.example.json`; its
+job ID, BrowserOS page ID, field label, and value must match exactly. Put it
+outside the repository with user-only permissions. Setting
+`approveFinalSubmission: true` explicitly authorizes submission after these
+exact answers are verified. For CAPTCHA or MFA, finish
+the portal flow yourself. If you submit manually, run
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> npm run application:run`
+to verify the employer confirmation in that same tab before recording success.
 
 On macOS, build the project, copy `examples/schedule.example.json` to a private
 path, set its paths and interval, then install a LaunchAgent. It runs at login

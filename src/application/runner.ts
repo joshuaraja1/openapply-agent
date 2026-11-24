@@ -10,6 +10,7 @@ import { applicationHandoffSchema } from "./handoff.js";
 import { fillApplicationForm } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
+import type { HumanAnswerApproval } from "./human-answers.js";
 
 export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
@@ -49,7 +50,7 @@ export interface ApplicationBrowserSurface {
   attach?(pageId: number, expectedUrl: string): Promise<BrowserSnapshot>;
 }
 
-async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
+export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
   if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
   const batch = await fetchSourceBatch([pkg.source], 5000);
   return batch.jobs.some((official) => official.id === pkg.job.id
@@ -57,18 +58,8 @@ async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean
     && official.title === pkg.job.title && official.descriptionText === pkg.job.descriptionText);
 }
 
-export async function runApplicationPackage(
-  input: ApplicationPackage,
-  workflow: ApplicationWorkflow,
-  profileDirectory: string,
-  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
-    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string; resumedJobId?: string;
-    packagePath?: string;
-    browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
-      Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
-): Promise<RunResult> {
-  const pkg = applicationPackageSchema.parse(input);
-  const job = pkg.job as DiscoveredJob;
+export function approvedDestinationHost(pkg: ApplicationPackage): string {
+  const job = pkg.job;
   const destination = new URL(job.applicationUrl);
   const host = destination.hostname.toLowerCase();
   const independentlyAllowed = pkg.source.allowedApplicationHosts
@@ -78,20 +69,36 @@ export async function runApplicationPackage(
   if (destination.protocol !== "https:" || destination.username || destination.password
     || new URL(job.sourceUrl).protocol !== "https:"
     || pkg.source.provider !== job.provider || pkg.source.company !== job.company
-    || pkg.handoff.jobId !== job.id
-    || pkg.handoff.applicationUrl !== job.applicationUrl
+    || pkg.handoff.jobId !== job.id || pkg.handoff.applicationUrl !== job.applicationUrl
     || !independentlyAllowed
     || !pkg.handoff.allowedDomains.map((domain) => domain.toLowerCase()).includes(host)) {
     throw new Error("Application package does not match its approved employer destination");
   }
+  return host;
+}
+
+export async function runApplicationPackage(
+  input: ApplicationPackage,
+  workflow: ApplicationWorkflow,
+  profileDirectory: string,
+  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
+    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string; resumedJobId?: string;
+    packagePath?: string;
+    humanAnswerApproval?: HumanAnswerApproval;
+    browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
+      Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
+): Promise<RunResult> {
+  const pkg = applicationPackageSchema.parse(input);
+  const job = pkg.job as DiscoveredJob;
+  const host = approvedDestinationHost(pkg);
   const current = await workflow.current(job.id);
   if (current && current.officialUrl !== job.applicationUrl) throw new Error("Application ID already belongs to another URL");
   const resumingApproval = current?.stage === "waiting-human"
     && current.blocker === "Final submission approval required"
     && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval"
     && !pkg.handoff.stopConditions.includes("final-submit");
-  const resumingHuman = current?.stage === "waiting-human"
-    && current.blocker !== "Final submission approval required"
+  const resumingHuman = (current?.stage === "waiting-human"
+    && current.blocker !== "Final submission approval required" || current?.stage === "applying")
     && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
     && Boolean(dependencies.browserFactory);
   if (dependencies.approvedJobId && !resumingApproval) {
@@ -99,6 +106,15 @@ export async function runApplicationPackage(
   }
   if (dependencies.resumedJobId && !resumingHuman) {
     throw new Error("Human resume requires a matching pending BrowserOS handoff");
+  }
+  if (dependencies.humanAnswerApproval
+    && (!resumingHuman || dependencies.humanAnswerApproval.jobId !== job.id
+      || dependencies.humanAnswerApproval.browserPageId !== current?.browserPageId
+      || dependencies.humanAnswerApproval.approveFinalSubmission !== true)) {
+    throw new Error("Human answer approval does not match this BrowserOS handoff");
+  }
+  if (current?.stage === "applying" && current.browserPageId && !resumingHuman) {
+    throw new Error("An interrupted BrowserOS handoff requires explicit same-tab resume");
   }
   if (current && !resumingApproval && !resumingHuman
     && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
@@ -141,9 +157,12 @@ export async function runApplicationPackage(
     const snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, job.applicationUrl)
       : await browser.navigate(job.applicationUrl);
-    if (resumingApproval || resumingHuman) checkpoint = await workflow.advance(job.id, "applying");
+    if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
+      checkpoint = await workflow.advance(job.id, "applying");
+    }
     const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path,
-      { allowHumanEnteredValues: resumingHuman });
+      resumingHuman && dependencies.humanAnswerApproval
+        ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {});
     const pageId = browser.pageId?.();
     const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
       ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };

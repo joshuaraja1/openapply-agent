@@ -52,12 +52,16 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
 
   async attach(pageId: number, expectedUrl: string): Promise<BrowserSnapshot> {
+    const snapshot = await this.inspectHandoff(pageId);
+    if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
+    return snapshot;
+  }
+
+  async inspectHandoff(pageId: number): Promise<BrowserSnapshot & { visibleText: string }> {
     if (!Number.isInteger(pageId) || pageId < 1) throw new Error("Invalid BrowserOS handoff page");
     success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
     this.page = pageId;
-    const snapshot = await this.snapshot();
-    if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
-    return snapshot;
+    return this.snapshot();
   }
 
   private assertAllowed(snapshot: BrowserSnapshot): void {

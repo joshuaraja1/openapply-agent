@@ -20,10 +20,10 @@ const nextStages: Record<ApplicationStage, ReadonlySet<ApplicationStage>> = {
   matched: new Set(["tailored", "skipped"]),
   tailored: new Set(["rendered", "blocked"]),
   rendered: new Set(["applying", "blocked"]),
-  applying: new Set(["waiting-human", "submit-claimed", "blocked"]),
+  applying: new Set(["waiting-human", "submit-claimed", "submitted", "blocked"]),
   "submit-claimed": new Set(["submitted", "submission-uncertain"]),
   "submission-uncertain": new Set(["submitted"]),
-  "waiting-human": new Set(["applying", "blocked"]),
+  "waiting-human": new Set(["applying", "submitted", "blocked"]),
   submitted: new Set(),
   blocked: new Set(["rendered", "applying", "skipped"]),
   skipped: new Set(),
@@ -79,9 +79,10 @@ export class ApplicationWorkflow {
     if ((details.artifactPath || details.artifactSha256 || details.sourceFingerprint) && stage !== "rendered") {
       throw new Error("Resume artifact changes require a rendered checkpoint");
     }
-    if (details.browserPageId !== undefined && (stage !== "waiting-human" || !Number.isInteger(details.browserPageId)
+    if (details.browserPageId !== undefined && (!["waiting-human", "submit-claimed"].includes(stage)
+      || !Number.isInteger(details.browserPageId)
       || details.browserPageId < 1)) {
-      throw new Error("Browser page ID belongs only to a human handoff");
+      throw new Error("Browser page ID belongs only to a handoff or claimed submission");
     }
     if (details.packagePath && stage !== "waiting-human") {
       throw new Error("Application package path belongs only to a human handoff");

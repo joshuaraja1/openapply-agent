@@ -4,6 +4,7 @@ import type { ApplicationHandoff } from "./handoff.js";
 export interface SubmissionBrowser {
   currentUrl(): string;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
+  pageId?(): number | undefined;
 }
 
 export async function submitApplication(
@@ -23,7 +24,8 @@ export async function submitApplication(
     || new URL(browser.currentUrl()).href !== new URL(handoff.applicationUrl).href) {
     throw new Error("Application submission is not authorized for this job and destination");
   }
-  await workflow.advance(jobId, "submit-claimed");
+  const pageId = browser.pageId?.();
+  await workflow.advance(jobId, "submit-claimed", pageId ? { browserPageId: pageId } : {});
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
     await workflow.advance(jobId, "submitted", { confirmation });
