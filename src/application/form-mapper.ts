@@ -75,9 +75,21 @@ export async function fillApplicationForm(
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
-  const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] =>
-    planApplicationForm(current, candidate, resumePath).blockers.filter((blocker) =>
+  const initialCounts = new Map<string, number>();
+  for (const control of snapshot.controls) initialCounts.set(key(control), (initialCounts.get(key(control)) ?? 0) + 1);
+  const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] => {
+    const blockers = planApplicationForm(current, candidate, resumePath).blockers.filter((blocker) =>
       !uploaded || blocker !== "Resume upload control was not found; verify this application step before submission");
+    const seen = new Map<string, number>();
+    for (const control of current.controls) {
+      const id = key(control);
+      seen.set(id, (seen.get(id) ?? 0) + 1);
+      if (control.required && seen.get(id)! > (initialCounts.get(id) ?? 0)) {
+        blockers.push(`New required field appeared after filling: ${control.name || control.type || control.tag}`);
+      }
+    }
+    return blockers;
+  };
   if (browser.fillBatch) {
     const filled = await browser.fillBatch(plan.actions);
     if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");

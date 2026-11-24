@@ -76,6 +76,11 @@ describe("deterministic application field mapping", () => {
     const browser = { act: vi.fn(), fillBatch: vi.fn().mockResolvedValue(conditional) };
     const result = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf");
     expect(result.blockers).toContain("Required field needs an answer: Salary expectation");
+    const known = snapshot(field("3", "First name"), field("4", "Resume", "file"),
+      field("5", "Phone"));
+    browser.fillBatch = vi.fn().mockResolvedValue(known);
+    const knownResult = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf");
+    expect(knownResult.blockers).toContain("New required field appeared after filling: Phone");
   });
 
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("fills labeled fields in real Chromium", async () => {
