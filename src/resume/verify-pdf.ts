@@ -23,14 +23,14 @@ function normalize(value: string): string {
   return value.toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-function approvedClaimTexts(candidate: CandidateProfile, ids: string[]): string[] {
+function approvedClaimTexts(candidate: CandidateProfile, ids: string[]): Array<{ label: string; text: string }> {
   const claims = [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
     ...candidate.projects.flatMap((project) => project.claims)];
   return ids.map((id) => {
     const matching = claims.filter((claim) => claim.id === id && claim.allowedUses.includes("resume")
       && (claim.status === "verified" || claim.status === "user-confirmed"));
     if (matching.length !== 1) throw new Error(`Résumé claim ${id} has no unique approved source`);
-    return matching[0]!.claim;
+    return { label: `approved claim ${id}`, text: matching[0]!.claim };
   });
 }
 
@@ -47,9 +47,12 @@ export async function verifyResumePdf(
   if (bytes.length !== file.size) throw new Error("Résumé PDF changed while being verified");
   if (!bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("Résumé artifact is not a PDF");
   const expectedSourceFingerprint = createHash("sha256").update(`${job.id}\0${source.latex}`).digest("hex");
+  const marker = `\\hypersetup{pdfsubject={OpenApply:${source.renderToken}}}\n`;
+  const content = source.latex.replace(marker, "");
+  const expectedRenderToken = createHash("sha256").update(`${job.id}\0${content}`).digest("hex");
   if (source.fingerprint !== expectedSourceFingerprint || !source.claimIds.length
-    || !/^[a-f0-9]{64}$/.test(source.renderToken)
-    || !source.latex.includes(`\\hypersetup{pdfsubject={OpenApply:${source.renderToken}}}`)) {
+    || !/^[a-f0-9]{64}$/.test(source.renderToken) || source.renderToken !== expectedRenderToken
+    || !source.latex.includes(marker) || source.latex.indexOf(marker) !== source.latex.lastIndexOf(marker)) {
     throw new Error("Résumé source fingerprint or claims do not match this job");
   }
   const task = getDocument({ data: new Uint8Array(bytes), stopAtErrors: true, standardFontDataUrl });
@@ -62,6 +65,9 @@ export async function verifyResumePdf(
     if (document.numPages < 1 || document.numPages > 2) throw new Error("Résumé PDF must have one or two pages");
     const pageTexts: string[] = [];
     let hasContactLink = false;
+    const approvedLinks = new Set([`mailto:${candidate.identity.email.toLowerCase()}`,
+      ...[candidate.identity.linkedin, candidate.identity.github, candidate.identity.portfolio]
+        .filter((url): url is string => Boolean(url)).map((url) => new URL(url).href.toLowerCase())]);
     for (let index = 1; index <= document.numPages; index += 1) {
       const page = await document.getPage(index);
       const viewport = page.getViewport({ scale: 1 });
@@ -81,14 +87,24 @@ export async function verifyResumePdf(
         }
       }
       const annotations = await page.getAnnotations();
-      hasContactLink ||= annotations.some((annotation) => annotation.subtype === "Link"
-        && annotation.url?.toLowerCase() === `mailto:${candidate.identity.email.toLowerCase()}`);
+      for (const annotation of annotations) {
+        if (annotation.subtype !== "Link") continue;
+        const destination = annotation.url?.toLowerCase();
+        if (!destination || !approvedLinks.has(destination)) {
+          throw new Error("Résumé PDF contains an unapproved link destination");
+        }
+        if (destination === `mailto:${candidate.identity.email.toLowerCase()}`) hasContactLink = true;
+      }
     }
     const allText = normalize(pageTexts.join(" "));
-    const required = [candidate.identity.fullName, job.title, job.company,
-      ...approvedClaimTexts(candidate, source.claimIds)];
+    const required = [
+      { label: "candidate name", text: candidate.identity.fullName },
+      { label: "role title", text: job.title },
+      { label: "company", text: job.company },
+      ...approvedClaimTexts(candidate, source.claimIds),
+    ];
     for (const phrase of required) {
-      if (!allText.includes(normalize(phrase))) throw new Error(`Résumé PDF is missing expected text: ${phrase}`);
+      if (!allText.includes(normalize(phrase.text))) throw new Error(`Résumé PDF is missing ${phrase.label}`);
     }
     if (!hasContactLink) throw new Error("Résumé PDF has no active candidate email link");
     return {
