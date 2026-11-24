@@ -19,7 +19,11 @@ describe("application state store contract", () => {
     const firstRead = await store.read("job-1");
     firstRead?.state.answers.push("also changed");
     expect((await store.read("job-1"))?.state.answers).toEqual(["yes"]);
-    await store.delete("job-1");
+    expect(await store.delete("job-1", 0)).toBe(false);
+    expect(await store.delete("job-1", 1)).toBe(true);
     expect(await store.read("job-1")).toBeUndefined();
+    expect(await store.compareAndSwap("job-1", undefined, { answers: ["new"] })).toBe(2);
+    expect(await store.delete("job-1", 1)).toBe(false);
+    expect((await store.read("job-1"))?.state.answers).toEqual(["new"]);
   });
 });
