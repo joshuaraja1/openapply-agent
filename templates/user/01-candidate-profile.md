@@ -45,3 +45,31 @@ These values are optional. `Decline to self-identify` is the recommended default
 - Race or ethnicity: `{{DECLINE OR USER-PROVIDED VALUE}}`
 - Veteran status: `{{DECLINE OR USER-PROVIDED VALUE}}`
 - Disability status: `{{DECLINE OR USER-PROVIDED VALUE}}`
+
+## Structured identity for OpenApply
+
+Fill this block with the same verified facts above. The compiler reads only
+this block; keep the completed file private. Add education claims with evidence
+and approved uses if you want them on a résumé. Remove optional portfolio,
+GitHub, or LinkedIn keys when you have no URL. Replace sponsorship with the
+JSON boolean `true` or `false`.
+
+```openapply-identity-json
+{
+  "version": 1,
+  "identity": {
+    "fullName": "{{FULL_NAME}}",
+    "location": "{{CITY, STATE}}",
+    "email": "{{EMAIL}}",
+    "phone": "{{PHONE}}",
+    "portfolio": "{{PORTFOLIO_URL}}",
+    "github": "{{GITHUB_URL}}",
+    "linkedin": "{{LINKEDIN_URL}}"
+  },
+  "authorization": {
+    "countries": ["{{COUNTRY}}"],
+    "sponsorshipRequiredNowOrFuture": "{{TRUE_OR_FALSE}}"
+  },
+  "education": []
+}
+```

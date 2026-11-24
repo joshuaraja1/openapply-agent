@@ -12,6 +12,7 @@
     "application:run": "tsx src/application/cli.ts",
     "queue:run": "tsx src/application/queue-cli.ts",
     "autopilot": "tsx src/application/autopilot-cli.ts",
+    "profile:compile": "tsx src/candidate/markdown-cli.ts",
     "schedule:install": "tsx src/scheduler/cli.ts install",
     "schedule:remove": "tsx src/scheduler/cli.ts remove",
     "resume:render": "tsx src/resume/cli.ts",
