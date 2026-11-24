@@ -12,13 +12,15 @@ posting, generation stops.
 embedded render token, approved claim text, candidate name, company, role title,
 active email link, page size, text extraction, and page bounds pass. It records
 the exact PDF hash for the application checkpoint. The embedded browser uploads
-the verified bytes only after checking that hash again. The Overleaf browser renderer and automated
-page-image inspection are still pending. Until then, a person must compile,
-download, and visually inspect the PDF before invoking the verifier.
+the verified bytes only after checking that hash again. `resume:render` now
+fills the source editor in a private Overleaf project through BrowserOS neo,
+recompiles, downloads the PDF, and verifies it before writing a private
+application package. Automated page-image inspection is still pending; visually
+review the rendered PDF before enabling unattended submission.
 
 ## One-time setup
 
-1. Create a blank Overleaf project.
+1. Create a dedicated private Overleaf project for OpenApply. The renderer replaces its `main.tex` on every run.
 2. Upload `templates/resume/main.tex` as the project's `main.tex`.
 3. Select pdfLaTeX as the compiler.
 4. Store the private project URL in `07-run-config.md`.

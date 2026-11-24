@@ -47,10 +47,16 @@ npm start
 
 The output is a ranked local queue containing an evidence-filtered résumé brief and a guarded browser handoff. See [the workflow guide](docs/workflow.md), [architecture](docs/architecture.md), and [safety model](docs/safety.md).
 
-For a single application with a verified role-specific PDF, create a private
-application package containing the `job`, its configured official `source`,
-`candidate`, `handoff`,
-`resumeSource`, `resumePdfPath`, and optional `expectedConfirmation`. Then run:
+For a single application, create private render input containing the selected
+`job`, its configured official `source`, `candidate`, BrowserOS endpoint,
+Overleaf project URL, and a private output directory. Generate the tailored
+PDF and application package with:
+
+```bash
+OPENAPPLY_RENDER_INPUT=/private/render-input.json npm run resume:render
+```
+
+Then run the returned package:
 
 ```bash
 OPENAPPLY_PACKAGE=/private/application-package.json npm run application:run
@@ -60,8 +66,9 @@ On macOS, the runner stores its encryption key in Keychain and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
 stops on unknown required answers, and submits only when the handoff mode
 authorizes it and a new employer confirmation is found. Account creation,
-email-code retrieval, provider-specific multi-page forms, and automatic
-Overleaf PDF compilation are still in development.
+email-code retrieval, and provider-specific multi-page forms are still in
+development. Automated page-image inspection is also pending; review the
+rendered PDF before enabling unattended submission.
 
 When the package stops at final approval, inspect the employer posting and
 résumé. To resume that one job after approval, run the same package with
