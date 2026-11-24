@@ -19,6 +19,8 @@ export interface EmailCodeRequest {
 }
 
 function senderAddress(value: string): string | undefined {
+  if (value.includes(",") || (value.match(/</g)?.length ?? 0) > 1
+    || (value.match(/>/g)?.length ?? 0) > 1) return undefined;
   const bracketed = value.match(/<([^<>\s]+@[^<>\s]+)>\s*$/);
   const address = (bracketed?.[1] ?? value.trim()).toLowerCase();
   return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address) ? address : undefined;
@@ -45,6 +47,11 @@ function verificationCodes(text: string): string[] {
   return [...codes];
 }
 
+function containsContext(text: string, phrase: string): boolean {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 /** Selects only one fresh, job-bound email code. Ambiguity always pauses automation. */
 export function selectEmailCode(messages: MailboxMessage[], request: EmailCodeRequest):
   { messageId: string; code: string } | undefined {
@@ -68,8 +75,8 @@ export function selectEmailCode(messages: MailboxMessage[], request: EmailCodeRe
     const sender = senderAddress(message.from);
     if (!sender || !allowedSender(sender, request.allowedSenderDomains)
       || !message.to.some((recipient) => senderAddress(recipient) === expectedAccount)) continue;
-    const content = `${message.subject}\n${message.bodyText}`.toLowerCase();
-    if (!content.includes(company) && !content.includes(portalHost)) continue;
+    const content = `${message.subject}\n${message.bodyText}`.toLowerCase().replace(/\s+/g, " ");
+    if (!containsContext(content, company) && !containsContext(content, portalHost)) continue;
     const codes = verificationCodes(content);
     if (codes.length > 1) throw new Error("Multiple verification codes were found in one email");
     if (codes[0]) candidates.push({ messageId: message.id, code: codes[0] });

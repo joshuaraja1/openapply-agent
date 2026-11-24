@@ -23,6 +23,7 @@ describe("scoped email-code selection", () => {
     const changes: Partial<MailboxMessage>[] = [
       { from: "Example Co <verify@evil.example>" },
       { from: "verify@mail.example.com.evil.example" },
+      { from: "Attacker <evil@evil.example>, Verify <verify@mail.example.com>" },
       { receivedAt: "2026-11-24T15:59:00Z" },
       { to: ["other@example.com"] },
       { subject: "Other company", bodyText: "Your verification code is 123456." },
@@ -38,5 +39,14 @@ describe("scoped email-code selection", () => {
     expect(() => selectEmailCode([{ ...message,
       bodyText: "Your verification code is 123456. Your security code is 654321." }], request))
       .toThrow("Multiple verification codes");
+  });
+
+  it("does not match a short company name inside an unrelated word", () => {
+    const shortCompany = { ...request, company: "AI" };
+    const unrelated = { ...message, subject: "Your email verification",
+      bodyText: "Your verification code is 123456." };
+    expect(selectEmailCode([unrelated], shortCompany)).toBeUndefined();
+    expect(selectEmailCode([{ ...unrelated, subject: "AI verification" }], shortCompany))
+      .toEqual({ messageId: "message-1", code: "123456" });
   });
 });
