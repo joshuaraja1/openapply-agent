@@ -36,9 +36,10 @@ operating system scheduler. `OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json n
 runs both commands in order, using the queue configuration as the only source
 for discovery and candidate paths. BrowserOS neo and Overleaf must already be signed
 in. Queued applications use that same BrowserOS profile and its existing site
-sessions. If a form asks an unknown
-question, account creation, email code, CAPTCHA, or MFA, the application pauses
-for human handling. The queue output reports a job as `processed` when the
+sessions. Configured exact-domain account creation and email-code entry can
+proceed when their safety checks pass. Unknown questions, unsupported account
+forms or email codes, CAPTCHA, and MFA pause for human handling. The queue
+output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a
 confirmed submission from a human handoff.
 On macOS, a paused application also triggers a generic desktop notification.

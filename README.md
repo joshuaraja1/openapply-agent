@@ -2,6 +2,12 @@
 
 OpenApply Agent is a privacy-first, human-in-the-loop workflow for discovering fresh jobs, ranking them against evidence-backed candidate facts, tailoring application materials, and preparing guarded browser handoffs.
 
+The scheduled runner can submit supported applications after employer confirmation
+when the user's private policy authorizes it. This repository is still a
+development project, not a packaged autonomous consumer app. Queued runs depend
+on a separately installed BrowserOS neo and a signed-in Overleaf project; some
+portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
+
 It does not include anyone's résumé, address, credentials, application history, or generated documents.
 
 When the repository is opened in a coding-agent workspace, [`AGENTS.md`](AGENTS.md) supplies the end-to-end operating contract: continue from discovery through per-role tailoring, PDF inspection, guarded BrowserOS form filling, explicit submission verification, and private outcome logging.
@@ -78,9 +84,10 @@ OPENAPPLY_PACKAGE=/private/application-package.json npm run application:run
 On macOS, the runner stores its encryption key in Keychain and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
 stops on unknown required answers, and submits only when the handoff mode
-authorizes it and a new employer confirmation is found. Account creation,
-email-code retrieval, and provider-specific multi-page forms are still in
-development. Automated page-image inspection is also pending; review the
+authorizes it and a new employer confirmation is found. Opt-in exact-domain
+account creation and scoped email-code entry are available with a private auth
+policy and consented mailbox. Provider-specific adapters and automated
+page-image inspection are pending; review the
 rendered PDF before enabling unattended submission.
 
 When the package stops at final approval, inspect the employer posting and

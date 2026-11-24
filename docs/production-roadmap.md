@@ -1,5 +1,22 @@
 # Production roadmap: autonomous application runtime
 
+## Current implementation status
+
+The repository has a scheduled discovery-to-application CLI, official-source
+validation, evidence-backed Jake résumé generation, Overleaf PDF compilation,
+encrypted macOS state and Keychain secrets, a persistent BrowserOS neo adapter,
+guarded form filling and submission confirmation, scoped mailbox OAuth and
+email-code entry, exact-domain login and account creation, and same-tab human
+recovery. These paths have automated tests and the merged changes passed Bugbot,
+security review, CI, and CodeQL.
+
+The product promise below is **not yet a release claim**. The current browser is
+separately installed BrowserOS neo; it is not bundled into an app. The local
+Playwright fallback has its own profile. Provider-specific application adapters,
+automated visual PDF inspection, Windows/Linux secret stores, first-run user UI,
+signed installer/updater, and live provider beta validation remain open. The
+general-availability gates in this document have not been met.
+
 ## Product promise
 
 OpenApply discovers eligible jobs, validates them against official sources,
