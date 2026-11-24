@@ -8,6 +8,8 @@ confirmation. This repository is still a
 development project, not a packaged autonomous consumer app. Queued runs depend
 on a separately installed BrowserOS neo and a signed-in Overleaf project; some
 portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
+The remaining PR sequence and release gates are in the
+[autonomy release requirements](docs/autonomy-release-requirements.md).
 
 It does not include anyone's résumé, address, credentials, application history, or generated documents.
 
