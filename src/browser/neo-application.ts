@@ -11,20 +11,22 @@ function success(result: BrowserToolResult, step: string): string {
 }
 
 export function parseNeoSnapshot(message: string): BrowserSnapshot & { visibleText: string } {
-  const marker = message.match(/\[UNTRUSTED_PAGE_CONTENT [^\]]* origin=(https:\/\/[^\]\s]+)\]/);
+  const marker = message.match(/\[UNTRUSTED_PAGE_CONTENT nonce=([a-f0-9]+) origin=(https:\/\/[^\]\s]+)\]/);
   if (!marker) throw new Error("BrowserOS did not provide a trusted HTTPS page origin");
-  const url = new URL(marker[1]!);
-  const end = message.indexOf("[END_UNTRUSTED_PAGE_CONTENT", marker.index!);
+  const url = new URL(marker[2]!);
+  const end = message.indexOf(`[END_UNTRUSTED_PAGE_CONTENT nonce=${marker[1]}]`, marker.index!);
   if (end < 0) throw new Error("BrowserOS page snapshot is incomplete");
   const visibleText = message.slice(marker.index! + marker[0].length, end);
   const controls: BrowserControl[] = [];
   for (const line of visibleText.split("\n")) {
-    const match = line.match(/- (textbox|searchbox|button|link|combobox|checkbox|radio) "([^"]+)"([^\n]*?)\[ref=(e\d+)\](?:: "([^"]*)")?/);
+    const match = line.match(/^\s*- (textbox|searchbox|button|link|combobox|checkbox|radio)(?: "([^"]*)")?([^\n]*?)\[ref=(e\d+)\](?:: "([^"]*)")?/);
     if (!match) continue;
-    const [, role, name, attributes, ref, value] = match;
+    const [, role, label, attributes, ref, value] = match;
+    const name = label ?? "";
     const submit = role === "button" && /\b(submit|apply now|send application)\b/i.test(name!);
     const resume = role === "button" && /\b(resume|résumé|cv)\b/i.test(name!);
-    controls.push({ ref: ref!, role: role!, name: name!, required: attributes!.includes("[required]"),
+    controls.push({ ref: ref!, role: role!, name,
+      required: attributes!.includes("[required]") || ["checkbox", "radio", "combobox"].includes(role!),
       tag: role === "link" ? "a" : role === "button" && !resume ? "button"
         : role === "combobox" ? "select" : "input",
       type: resume ? "file" : submit ? "submit" : role === "checkbox" || role === "radio" ? role! : null,
@@ -72,7 +74,7 @@ export class NeoApplicationBrowser {
   async snapshot(): Promise<BrowserSnapshot & { visibleText: string }> {
     if (this.page === undefined) throw new Error("Application page is not open");
     const result = await this.client.callTool({ name: "snapshot", arguments: {
-      page: this.page, mode: "interactive", depth: 8,
+      page: this.page, mode: "interactive",
     } });
     const snapshot = parseNeoSnapshot(success(result, "snapshot"));
     this.assertAllowed(snapshot);
