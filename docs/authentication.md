@@ -59,10 +59,18 @@ requisition identifier remains in the same URL path prefix and the returned
 page visibly identifies the company and role. Otherwise it pauses
 before filling or submitting the form.
 
-New-account creation is still planned. The current runner pauses at registration
-forms, even when `allowAccountCreation` is true. A future implementation may
-create accounts only with that policy enabled, using the configured email and
-Keychain password; it must not invent security answers.
+The BrowserOS runner can create an account on a same-host registration form when
+`allowAccountCreation` is true, the domain exactly matches the selected account,
+the account email matches the candidate email, and the configured password is
+present in Keychain. It accepts only one email,
+password, password-confirmation, and Create account control; unknown required
+fields, legal consent, CAPTCHA, or unsupported registration pages pause for human
+review. Before clicking Create account, it saves the exact BrowserOS tab as a
+recovery checkpoint. A crash cannot silently retry registration. The user must
+inspect and resume that tab if registration success is uncertain. Windows/Linux
+secret stores and a full first-run onboarding UI remain planned.
+After registration, the returned page must still identify the configured job
+and company before application fields can be filled.
 
 ## Email verification
 

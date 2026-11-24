@@ -55,6 +55,14 @@ export interface ApplicationBrowserSurface {
   attach?(pageId: number, expectedUrl: string, expectedGroupId: string,
     allowChangedEmployerUrl?: boolean): Promise<BrowserSnapshot>;
   authenticate?(email: string, password: string): Promise<BrowserSnapshot>;
+  register?(email: string, password: string): Promise<BrowserSnapshot>;
+}
+
+function isRegistrationPage(page: BrowserSnapshot): boolean {
+  return page.controls.some((control) => control.tag === "input"
+    && /^(confirm password|password confirmation|re-enter password)$/i.test(control.name.trim()))
+    && page.controls.some((control) => control.tag === "button"
+      && /^(create account|sign up|register)$/i.test(control.name.trim()));
 }
 
 function stepSignature(page: BrowserSnapshot): string {
@@ -197,13 +205,16 @@ export async function runApplicationPackage(
   let recoveryResumeUploaded = current?.resumeUploaded === true;
   let loginRecoveryPending = resumingHuman
     && current?.blocker?.startsWith("Portal sign-in needs human completion") === true;
+  const registrationRecoveryPending = resumingHuman
+    && current?.blocker?.startsWith("Account registration may need human completion") === true;
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     let emailChallengeStartedAt = new Date().toISOString();
     let snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
-        current!.blocker?.startsWith("Portal sign-in needs human completion") === true)
+        current!.blocker?.startsWith("Portal sign-in needs human completion") === true
+          || current!.blocker?.startsWith("Account registration may need human completion") === true)
       : await browser.navigate(job.applicationUrl);
     if (new URL(snapshot.url).protocol !== "https:"
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
@@ -213,6 +224,11 @@ export async function runApplicationPackage(
     if (loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
+    }
+    if (registrationRecoveryPending && !isRegistrationPage(snapshot)
+      && (!identifiesJob(snapshot, job)
+        || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job)))) {
+      loginBlocker = "Post-registration page cannot be bound to this requisition";
     }
     recoveryPageUrl = snapshot.url;
     const loginPage = snapshot.controls.some((control) =>
@@ -246,6 +262,51 @@ export async function runApplicationPackage(
     }
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
+    }
+    if (isRegistrationPage(snapshot)) {
+      const account = dependencies.account;
+      if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
+        || !account.domains.some((domain) => domain.toLowerCase() === host)) {
+        loginBlocker = "Account registration requires an enabled exact-domain account";
+      } else if (account.email.toLowerCase() !== pkg.candidate.identity.email.toLowerCase()) {
+        loginBlocker = "Registration account email differs from the candidate email";
+      } else if (registrationRecoveryPending) {
+        loginBlocker = "Account registration may need human completion";
+      } else {
+        const password = await dependencies.secretStore.get(account.passwordSecretRef);
+        if (!password) loginBlocker = "Configured registration password is unavailable in the OS secret store";
+        else {
+          const pageId = browser.pageId?.();
+          const groupId = browser.groupId?.();
+          if (!pageId || !groupId || !pkg.browserEndpoint) {
+            loginBlocker = "Account registration requires a recoverable BrowserOS tab";
+          } else {
+            checkpoint = await workflow.advance(job.id, "waiting-human", {
+              blocker: "Account registration may need human completion",
+              browserPageId: pageId, browserPageUrl: snapshot.url,
+              browserGroupId: groupId, browserEndpoint: pkg.browserEndpoint,
+              resumeUploaded: current?.resumeUploaded === true,
+              ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}),
+            });
+            try {
+              snapshot = await browser.register(account.email, password);
+            } catch {
+              return { checkpoint, artifact };
+            }
+            if (new URL(snapshot.url).protocol !== "https:"
+              || new URL(snapshot.url).hostname.toLowerCase() !== host) {
+              throw new Error("Account registration left the approved employer destination");
+            }
+            recoveryPageUrl = snapshot.url;
+            checkpoint = await workflow.advance(job.id, "applying");
+            if (isRegistrationPage(snapshot)) loginBlocker = "Account registration may need human completion";
+            if (!identifiesJob(snapshot, job)
+              || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job))) {
+              loginBlocker = "Post-registration page cannot be bound to this requisition";
+            }
+          }
+        }
+      }
     }
     const formOptions = { allowMissingResume: true,
       ...(resumingHuman && dependencies.humanAnswerApproval

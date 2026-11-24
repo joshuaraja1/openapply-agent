@@ -55,6 +55,48 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
   groupId(): string | undefined { return this.group; }
 
+  async register(email: string, password: string): Promise<BrowserSnapshot> {
+    if (this.page === undefined || !this.latest || !email || !password) {
+      throw new Error("BrowserOS registration page is unavailable");
+    }
+    const fields = this.registrationFields(this.latest);
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "fill", sensitive: true, diff: "none", fields: [
+        { ref: fields.email.ref, value: email },
+        { ref: fields.password.ref, value: password },
+        { ref: fields.confirmation.ref, value: password },
+      ],
+    } }), "registration fill");
+    const filled = await this.snapshot();
+    const updated = this.registrationFields(filled);
+    if (updated.email.value !== email) {
+      throw new Error("Registration form changed during credential fill");
+    }
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "click", ref: updated.submit.ref, diff: "none",
+    } }), "registration submission");
+    return this.snapshot();
+  }
+
+  private registrationFields(snapshot: BrowserSnapshot & { visibleText: string }) {
+    const controls = snapshot.controls;
+    const field = (name: RegExp) => controls.filter((control) => control.tag === "input"
+      && name.test(control.name.trim()));
+    const email = field(/^(email|email address|e-mail)$/i);
+    const password = field(/^(password|create password)$/i);
+    const confirmation = field(/^(confirm password|password confirmation|re-enter password)$/i);
+    const submit = controls.filter((control) => control.tag === "button"
+      && /^(create account|sign up|register)$/i.test(control.name.trim()));
+    if (email.length !== 1 || password.length !== 1 || confirmation.length !== 1 || submit.length !== 1
+      || /\b(captcha|verify you are human|security question|i agree|by (?:creating|registering|signing up|clicking)\b.{0,160}\b(?:agree|accept)|agree to (?:the )?(?:terms|privacy)|accept (?:the )?(?:terms|privacy))\b/i
+        .test(snapshot.visibleText)
+      || controls.some((control) => control.required
+        && ![...email, ...password, ...confirmation].includes(control) && control.tag !== "button")) {
+      throw new Error("Registration form requires human review");
+    }
+    return { email: email[0]!, password: password[0]!, confirmation: confirmation[0]!, submit: submit[0]! };
+  }
+
   async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
     if (this.page === undefined || !this.latest || !email || !password
       || !this.latest.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))
