@@ -7,8 +7,9 @@ message bodies. The selector requires the configured recipient, approved sender
 domain, company or portal host, a fresh message, and exactly one six-digit
 verification code. Ambiguous or stale messages produce no automatic answer.
 
-This module is not yet connected to application forms. OAuth onboarding,
-refresh-token handling, encrypted one-use message tracking, and browser form
+This module is not yet connected to application forms. Keychain-backed OAuth
+refresh and mailbox-identity verification are available, but OAuth onboarding,
+encrypted one-use message tracking, and browser form
 entry are required before automatic email codes can be enabled. The current
 runner continues to pause for verification codes.
 

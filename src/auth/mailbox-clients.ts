@@ -15,6 +15,9 @@ const graphList = z.object({ value: z.array(z.object({
   toRecipients: z.array(z.object({ emailAddress: z.object({ address: z.string() }) })).default([]),
   body: z.object({ contentType: z.string(), content: z.string() }).optional(),
 })).max(10) });
+const gmailProfile = z.object({ emailAddress: z.email() });
+const graphProfile = z.object({ mail: z.email().nullable().optional(),
+  userPrincipalName: z.email().optional() });
 
 async function getJson(url: URL, token: string, fetcher: Fetcher, headers: Record<string, string> = {}): Promise<unknown> {
   if (!token || /[\r\n]/.test(token)) throw new Error("Mailbox access token is invalid");
@@ -101,4 +104,18 @@ export async function fetchMicrosoftMessages(token: string, requestedAt: string,
     bodyText: item.body?.contentType.toLowerCase() === "text"
       ? item.body.content.slice(0, 50_000) : "",
   }));
+}
+
+export async function fetchMailboxAccountEmail(provider: "gmail" | "microsoft", token: string,
+  fetcher: Fetcher = fetch): Promise<string> {
+  if (provider === "gmail") {
+    const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/profile");
+    return gmailProfile.parse(await getJson(url, token, fetcher)).emailAddress.toLowerCase();
+  }
+  const url = new URL("https://graph.microsoft.com/v1.0/me");
+  url.searchParams.set("$select", "mail,userPrincipalName");
+  const profile = graphProfile.parse(await getJson(url, token, fetcher));
+  const email = profile.mail ?? profile.userPrincipalName;
+  if (!email) throw new Error("Microsoft mailbox identity is unavailable");
+  return email.toLowerCase();
 }
