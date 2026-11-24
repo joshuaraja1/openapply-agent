@@ -28,6 +28,10 @@ a crash or a second run cannot use that message again. Missing, ambiguous,
 stale, or unretained codes pause for human review. Other MFA and
 security challenges remain human handoffs. This path has synthetic tests; live
 Gmail and Microsoft consent plus employer-portal flows require beta validation.
+Generic employer emails may lack a unique challenge identifier, so the workflow
+cannot prove exact form linkage if the user independently requests another code
+from the same employer during that window. Pause or disable `autoEnter` for that
+employer when this could happen.
 
 API contracts: [Gmail message search](https://developers.google.com/workspace/gmail/api/guides/filtering),
 [Gmail message retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get),
