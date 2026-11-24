@@ -110,6 +110,25 @@ export class AgentBrowser {
     return this.snapshot();
   }
 
+  async submit(ref: string, expectedConfirmation: string): Promise<string> {
+    if (!expectedConfirmation.trim()) throw new Error("Expected employer confirmation is required");
+    const page = this.requirePage();
+    const handle = this.controls.get(ref);
+    if (!handle || !ref.startsWith(`${this.generation}:`)) throw new Error("Stale browser control reference");
+    this.controls.clear();
+    this.generation += 1;
+    if (!(await handle.evaluate((element) => element.isConnected))) throw new Error("Submit control changed");
+    const type = await handle.getAttribute("type");
+    const label = ((await handle.getAttribute("aria-label")) ?? (await handle.innerText().catch(() => ""))).trim();
+    if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
+      throw new Error("Selected control is not a submit action");
+    }
+    await handle.click();
+    this.assertAllowedPage();
+    await page.getByText(expectedConfirmation, { exact: false }).waitFor({ timeout: 10000 });
+    return expectedConfirmation;
+  }
+
   private requirePage(): Page {
     if (!this.page) throw new Error("Navigate to an approved page first");
     return this.page;
