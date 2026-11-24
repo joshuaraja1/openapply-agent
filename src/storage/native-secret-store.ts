@@ -8,6 +8,7 @@ interface SecretEntry {
   deletePassword(): Promise<boolean>;
 }
 type LinuxEntryFactory = (service: string, account: string) => SecretEntry;
+type WindowsEntryFactory = (service: string, account: string) => SecretEntry;
 const service = "com.openapply.agent";
 
 /** Pins Linux credentials to persistent Secret Service; never falls back to kernel keyutils. */
@@ -41,9 +42,40 @@ export class LinuxSecretServiceStore implements SecretStore {
   }
 }
 
+/** Uses the OS-backed Windows Credential Manager through keyring. */
+export class WindowsCredentialManagerStore implements SecretStore {
+  constructor(private readonly entry: WindowsEntryFactory = (serviceName, account) =>
+    new AsyncEntry(serviceName, account), platform = process.platform) {
+    if (platform !== "win32") throw new Error("Credential Manager is available only on Windows");
+  }
+
+  private account(reference: string): string {
+    if (!/^credential-manager:\/\/[A-Za-z0-9._/@:-]+$/.test(reference)) {
+      throw new Error("Expected a Windows Credential Manager secret reference");
+    }
+    return reference.slice("credential-manager://".length);
+  }
+
+  async get(reference: string): Promise<string | undefined> {
+    return (await this.entry(service, this.account(reference)).getPassword()) ?? undefined;
+  }
+
+  async put(reference: string, value: string): Promise<void> {
+    if (!value) throw new Error("Credential Manager secret must be nonempty");
+    await this.entry(service, this.account(reference)).setPassword(value);
+  }
+
+  async delete(reference: string): Promise<void> {
+    const entry = this.entry(service, this.account(reference));
+    await entry.deletePassword();
+    if (await entry.getPassword() !== null) throw new Error("Credential Manager did not delete the secret");
+  }
+}
+
 export function createNativeSecretStore(platform = process.platform): SecretStore {
   if (platform === "darwin") return new MacKeychainSecretStore(undefined, platform);
   if (platform === "linux") return new LinuxSecretServiceStore(undefined, platform);
+  if (platform === "win32") return new WindowsCredentialManagerStore(undefined, platform);
   throw new Error("This platform does not yet have an OpenApply OS secret store");
 }
 

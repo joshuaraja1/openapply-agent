@@ -4,7 +4,8 @@
 
 The repository has a scheduled discovery-to-application CLI, official-source
 validation, evidence-backed Jake résumé generation, Overleaf PDF compilation,
-encrypted local state with macOS Keychain or Linux Secret Service keys, a persistent BrowserOS neo adapter,
+encrypted local state with macOS Keychain or Linux Secret Service keys, a Windows
+Credential Manager backend for secrets, a persistent BrowserOS neo adapter,
 guarded form filling and submission confirmation, scoped mailbox OAuth and
 email-code entry, exact-domain login and account creation, and same-tab human
 recovery. These paths have automated tests and the merged changes passed Bugbot,
@@ -14,7 +15,7 @@ The product promise below is **not yet a release claim**. The current browser is
 separately installed BrowserOS neo; it is not bundled into an app. The local
 Playwright fallback has its own profile. Greenhouse and Ashby have a small set
 of exact identity-field aliases; complete provider-specific application adapters,
-automated visual PDF inspection, Windows secret storage, first-run user UI,
+automated visual PDF inspection, Windows private-file ACL handling, first-run user UI,
 signed installer/updater, and live provider beta validation remain open. The
 general-availability gates in this document have not been met.
 

@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  windows-secret-smoke:
+    name: Windows Credential Manager smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --run test/windows-credential-store.integration.test.ts
+
   verify:
     name: verify (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
