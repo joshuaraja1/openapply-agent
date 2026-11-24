@@ -50,6 +50,19 @@ describe("scoped email-code selection", () => {
     expect(selectEmailCode([unrelated], shortCompany)).toBeUndefined();
     expect(selectEmailCode([{ ...unrelated, subject: "AI verification" }], shortCompany))
       .toEqual({ messageId: "message-1", code: "123456" });
+    expect(selectEmailCode([{ ...unrelated, subject: "𐐀AI verification" }], shortCompany))
+      .toBeUndefined();
+  });
+
+  it("rejects portal-host lookalikes in email content", () => {
+    const hostOnly = { ...request, company: "Unmentioned Company" };
+    for (const host of ["evil.jobs.example.com", "jobs.example.com.evil"] ) {
+      expect(selectEmailCode([{ ...message, subject: "Verification",
+        bodyText: `Your verification code is 123456 for ${host}.` }], hostOnly)).toBeUndefined();
+    }
+    expect(selectEmailCode([{ ...message, subject: "Verification",
+      bodyText: "Your verification code is 123456 for jobs.example.com." }], hostOnly)?.code)
+      .toBe("123456");
   });
 
   it("rejects a verification window that has already expired", () => {

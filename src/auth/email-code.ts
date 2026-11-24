@@ -55,13 +55,21 @@ function verificationCodes(text: string): string[] {
   return [...codes];
 }
 
-function containsContext(text: string, phrase: string): boolean {
+function containsContext(text: string, phrase: string, kind: "company" | "host"): boolean {
+  const adjacent = kind === "host" ? /[\p{L}\p{N}.-]/u : /[\p{L}\p{N}]/u;
   let index = text.indexOf(phrase);
   while (index >= 0) {
-    const before = index > 0 ? text[index - 1] : undefined;
-    const after = text[index + phrase.length];
-    if ((!before || !/[\p{L}\p{N}]/u.test(before))
-      && (!after || !/[\p{L}\p{N}]/u.test(after))) return true;
+    const priorUnit = text.charCodeAt(index - 1);
+    const priorIndex = priorUnit >= 0xdc00 && priorUnit <= 0xdfff ? index - 2 : index - 1;
+    const before = index > 0 ? text.slice(Math.max(0, priorIndex), index) : undefined;
+    const nextIndex = index + phrase.length;
+    const nextPoint = text.codePointAt(nextIndex);
+    const after = nextPoint === undefined ? undefined : String.fromCodePoint(nextPoint);
+    const afterNext = after ? text.codePointAt(nextIndex + after.length) : undefined;
+    const hostSuffix = kind === "host" && after === "."
+      ? afterNext !== undefined && /[\p{L}\p{N}-]/u.test(String.fromCodePoint(afterNext))
+      : Boolean(after && adjacent.test(after));
+    if ((!before || !adjacent.test(before)) && !hostSuffix) return true;
     index = text.indexOf(phrase, index + 1);
   }
   return false;
@@ -93,7 +101,8 @@ export function selectEmailCode(messages: MailboxMessage[], request: EmailCodeRe
     if (!sender || !allowedSender(sender, request.allowedSenderDomains)
       || !message.to.some((recipient) => senderAddress(recipient) === expectedAccount)) continue;
     const content = `${message.subject}\n${message.bodyText}`.toLowerCase().replace(/\s+/g, " ");
-    if (!containsContext(content, company) && !containsContext(content, portalHost)) continue;
+    if (!containsContext(content, company, "company")
+      && !containsContext(content, portalHost, "host")) continue;
     const codes = verificationCodes(content);
     if (codes.length > 1) throw new Error("Multiple verification codes were found in one email");
     if (codes[0]) candidates.push({ messageId: message.id, code: codes[0] });
