@@ -11,7 +11,7 @@ import { fillApplicationForm } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 
-const jobSchema = z.object({
+export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
   company: z.string().min(1), title: z.string().min(1), descriptionText: z.string().min(1),
   applicationUrl: z.url(), sourceUrl: z.url(),

@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "job": {
+    "id": "greenhouse:example:123",
+    "provider": "greenhouse",
+    "company": "Example Corp",
+    "title": "Software Engineer",
+    "descriptionText": "Build Python services",
+    "applicationUrl": "https://boards.greenhouse.io/example/jobs/123",
+    "sourceUrl": "https://boards.greenhouse.io/example/jobs/123",
+    "location": "Remote",
+    "department": null,
+    "employmentType": null,
+    "workplaceType": "Remote",
+    "compensation": null,
+    "sourcePublishedAt": null,
+    "sourceUpdatedAt": null,
+    "firstSeenAt": "2026-01-01T00:00:00.000Z",
+    "discoveredAt": "2026-01-01T00:00:00.000Z",
+    "isNew": true,
+    "isFresh": true,
+    "freshnessBasis": "first-seen",
+    "matchedKeywords": ["software engineer"]
+  },
+  "source": {
+    "provider": "greenhouse",
+    "company": "Example Corp",
+    "boardToken": "example",
+    "enabled": true
+  },
+  "candidate": {
+    "version": 1,
+    "identity": {
+      "fullName": "Example Candidate",
+      "location": "Dallas, TX",
+      "email": "candidate@example.com",
+      "phone": "555-0100"
+    },
+    "authorization": {
+      "countries": ["United States"],
+      "sponsorshipRequiredNowOrFuture": false
+    },
+    "skills": { "languages": ["Python"] },
+    "education": [],
+    "experience": [{
+      "employer": "Example Employer",
+      "title": "Engineer",
+      "employmentType": "Full-time",
+      "start": "2024",
+      "end": "2026",
+      "claims": [{
+        "id": "example-claim",
+        "claim": "Built Python services for three teams",
+        "skills": ["Python"],
+        "metrics": [],
+        "evidence": [{ "source": "candidate", "uri": "https://example.com/evidence" }],
+        "status": "user-confirmed",
+        "allowedUses": ["resume", "matching"]
+      }]
+    }],
+    "projects": [],
+    "quarantinedClaims": []
+  },
+  "browserEndpoint": "http://127.0.0.1:9210/mcp",
+  "overleafProjectUrl": "https://www.overleaf.com/project/000000000000000000000000",
+  "outputDirectory": "/Users/you/.openapply-agent/artifacts",
+  "requireFinalApproval": true,
+  "expectedConfirmation": "Thank you for applying"
+}
