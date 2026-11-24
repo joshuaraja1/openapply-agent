@@ -1,21 +1,11 @@
 ## Why
 
-Explain the user or engineering problem. Link the issue when one exists.
-
-## What changed
-
-- Keep this list scoped to one logical change.
+<!-- Describe the user-facing outcome and reason for this change. -->
 
 ## Verification
 
-- [ ] `npm run check`
-- [ ] New behavior has automated tests
-- [ ] I reviewed the diff for secrets, personal data, and generated artifacts
+<!-- List commands and relevant manual checks. -->
 
-## Risk and rollback
+## Risks and rollback
 
-Describe failure modes, compatibility impact, and the smallest safe rollback.
-
-## Screenshots or artifacts
-
-Include only when they materially help review. Never attach private candidate data.
+<!-- Note affected credentials, browser state, application submission, and rollback steps when relevant. -->
