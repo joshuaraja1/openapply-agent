@@ -21,7 +21,17 @@ export function escapeLatex(value: string): string {
 function safeUrl(value: string): string {
   const url = new URL(value);
   if (!(["http:", "https:"].includes(url.protocol))) throw new Error("Résumé link must use HTTP or HTTPS");
-  return url.href.replace(/[{}\\]/g, (character) => encodeURIComponent(character));
+  return escapeHref(url.href);
+}
+
+function escapeHref(value: string): string {
+  const encoded = value.replace(/[{}\\~^]/g, (character) => encodeURIComponent(character));
+  return encoded.replace(/[%#&_$]/g, (character) => `\\${character}`);
+}
+
+function hasSkill(description: string, skill: string): boolean {
+  const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i").test(description);
 }
 
 function approved(claim: Claim): boolean {
@@ -30,8 +40,7 @@ function approved(claim: Claim): boolean {
 }
 
 function relevance(claim: Claim, description: string): number {
-  const content = description.toLowerCase();
-  return claim.skills.filter((skill) => content.includes(skill.toLowerCase())).length;
+  return claim.skills.filter((skill) => hasSkill(description, skill)).length;
 }
 
 function selected(claims: Claim[], description: string, limit: number): Claim[] {
@@ -69,7 +78,7 @@ export function createJakeResumeSource(template: string, job: DiscoveredJob, can
   const claimIds = [...education, ...used].map((claim) => claim.id);
   if (new Set(claimIds).size !== claimIds.length) throw new Error("Résumé claim IDs must be unique");
   const skills = [...new Set(used.flatMap((claim) => claim.skills))]
-    .filter((skill) => job.descriptionText.toLowerCase().includes(skill.toLowerCase())).slice(0, 12);
+    .filter((skill) => hasSkill(job.descriptionText, skill)).slice(0, 12);
   const summaryClaims = used.slice(0, 2).map((claim) => claim.claim.trim().replace(/[.!?]+$/, ""));
   const summary = [
     `Candidate for the ${job.title} role at ${job.company}.`,
@@ -79,7 +88,7 @@ export function createJakeResumeSource(template: string, job: DiscoveredJob, can
   ].map(escapeLatex).join(" ");
   const identity = candidate.identity;
   const contacts = [escapeLatex(identity.phone), escapeLatex(identity.location),
-    `\\href{mailto:${encodeURIComponent(identity.email)}}{\\underline{${escapeLatex(identity.email)}}}`,
+    `\\href{${escapeHref(`mailto:${identity.email}`)}}{\\underline{${escapeLatex(identity.email)}}}`,
     contactLink(identity.linkedin, "LinkedIn"), contactLink(identity.github, "GitHub"),
     contactLink(identity.portfolio, "Portfolio")].filter(Boolean).join(" $|$ ");
   const sections = [

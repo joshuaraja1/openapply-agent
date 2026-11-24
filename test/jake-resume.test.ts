@@ -8,7 +8,7 @@ const template = await readFile("templates/resume/main.tex", "utf8");
 const job: DiscoveredJob = {
   id: "greenhouse:example:123", provider: "greenhouse", company: "Example Co", title: "Backend Engineer",
   location: "Remote", department: null, employmentType: null, workplaceType: "remote", compensation: null,
-  descriptionText: "Build services with Python, AWS, and SQL.", applicationUrl: "https://example.com/apply",
+  descriptionText: "Build services with Python, AWS, SQL, and Google Cloud.", applicationUrl: "https://example.com/apply",
   sourceUrl: "https://example.com/job", sourcePublishedAt: null, sourceUpdatedAt: null,
   firstSeenAt: "2026-11-24T00:00:00Z", discoveredAt: "2026-11-24T00:00:00Z",
   isNew: true, isFresh: true, freshnessBasis: "first-seen", matchedKeywords: [],
@@ -27,8 +27,10 @@ const candidate = candidateProfileSchema.parse({
         evidence: [{ source: "work history", uri: "private:work" }], status: "verified", allowedUses: ["resume"] },
       { id: "unverified", claim: "Saved 90% with secret tool", skills: ["AWS"],
         evidence: [{ source: "draft", uri: "private:draft" }], status: "needs-confirmation", allowedUses: ["resume"] },
+      { id: "go", claim: "Built unrelated Go service", skills: ["Go"],
+        evidence: [{ source: "work history", uri: "private:work" }], status: "verified", allowedUses: ["resume"] },
     ] }],
-  projects: [{ name: "Data_Stack", claims: [
+  projects: [{ name: "Data_Stack", url: "https://example.com/a%20b?x=1&y=2#part", claims: [
     { id: "sql", claim: "Processed 1M rows with SQL & Python", skills: ["SQL"],
       evidence: [{ source: "repository", uri: "https://github.com/example/project" }],
       status: "user-confirmed", allowedUses: ["resume"] },
@@ -43,6 +45,8 @@ describe("Jake résumé source generation", () => {
     expect(source.latex).toContain("Processed 1M rows with SQL \\& Python");
     expect(source.latex).toContain("Test \\& Candidate");
     expect(source.latex).not.toContain("Saved 90%");
+    expect(source.latex).not.toContain("Built unrelated Go service");
+    expect(source.latex).toContain("\\href{https://example.com/a\\%20b?x=1\\&y=2\\#part}");
     expect(source.latex).not.toContain("FULL NAME");
     expect(source.claimIds).toEqual(["degree", "aws", "sql"]);
     expect(source.fingerprint).toMatch(/^[a-f0-9]{64}$/);
