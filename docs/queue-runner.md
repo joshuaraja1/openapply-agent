@@ -74,6 +74,9 @@ For unattended final submission, set `requireFinalApproval` to `false` in the
 private preferences and provide an exact employer confirmation string in
 `expectedConfirmationByDomain`. Missing confirmation text causes a safe pause.
 Automated visual PDF inspection and provider-specific multi-page adapters are
-still pending; use approval mode while those limits matter for your target
-portals. Each private application package is retained in the artifact directory
-for recovery and manual inspection.
+still pending. The generic runner can advance through up to five form steps
+when each Continue control is explicitly a non-submit button. Ambiguous
+navigation, a missing résumé upload, or a repeated step pauses the application.
+Use approval mode while those limits matter for your target portals. Each
+private application package is retained in the artifact directory for recovery
+and manual inspection.

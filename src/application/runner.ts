@@ -7,7 +7,7 @@ import { verifyResumePdf, type VerifiedResumeArtifact } from "../resume/verify-p
 import { fetchSourceBatch } from "../sources/batch.js";
 import type { DiscoveredJob } from "../types.js";
 import { applicationHandoffSchema } from "./handoff.js";
-import { fillApplicationForm } from "./form-mapper.js";
+import { fillApplicationForm, planApplicationForm } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
@@ -169,9 +169,52 @@ export async function runApplicationPackage(
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
-    const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path,
-      resumingHuman && dependencies.humanAnswerApproval
-        ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {});
+    const formOptions = { allowMissingResume: true,
+      ...(resumingHuman && dependencies.humanAnswerApproval
+        ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {}) };
+    let resumeUploaded = resumingHuman && current?.resumeUploaded === true;
+    let page = snapshot;
+    let filled = { snapshot, blockers: [] as string[] };
+    const visited = new Set<string>();
+    for (let step = 0; step < 5; step += 1) {
+      const signature = `${page.url}|${page.controls.map((control) =>
+        `${control.tag}:${control.type}:${control.name}`).join("|")}`;
+      if (visited.has(signature)) {
+        filled = { snapshot: page, blockers: ["Application step repeated without progress"] };
+        break;
+      }
+      visited.add(signature);
+      const plan = planApplicationForm(page, pkg.candidate, artifact.path, formOptions);
+      filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
+      if (filled.blockers.length) break;
+      resumeUploaded ||= plan.actions.some((action) => action.action === "upload");
+      const next = filled.snapshot.controls.filter((control) => control.tag === "button"
+        && control.type === "button"
+        && /^(next|continue|save and continue|continue to next step)$/i.test(control.name.trim()));
+      const ambiguousNext = filled.snapshot.controls.some((control) => control.tag === "button"
+        && control.type !== "button" && /^(next|continue|save and continue|continue to next step)$/i
+          .test(control.name.trim()));
+      const final = filled.snapshot.controls.filter((control) => control.type === "submit"
+        || /\b(submit|apply now|send application)\b/i.test(control.name));
+      if (next.length && final.length) {
+        filled.blockers.push("Application has ambiguous continue and submit controls");
+        break;
+      }
+      if (ambiguousNext) {
+        filled.blockers.push("Continue control is not explicitly a non-submit button");
+        break;
+      }
+      if (!next.length) break;
+      if (next.length !== 1 || step === 4) {
+        filled.blockers.push(step === 4 ? "Application exceeded the five-step limit"
+          : "Application has ambiguous continue controls");
+        break;
+      }
+      page = await browser.act(next[0]!.ref, "click");
+      if (new URL(page.url).hostname.toLowerCase() !== host) {
+        throw new Error("Application left the approved employer destination");
+      }
+    }
     const pageId = browser.pageId?.();
     const groupId = browser.groupId?.();
     if (pageId && (!groupId || !pkg.browserEndpoint)) {
@@ -180,7 +223,11 @@ export async function runApplicationPackage(
     const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
       ...(groupId ? { browserGroupId: groupId } : {}),
       ...(pageId && pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
+      resumeUploaded,
       ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };
+    if (!filled.blockers.length && !resumeUploaded) {
+      filled.blockers.push("Verified résumé was not uploaded on any application step");
+    }
     if (filled.blockers.length) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: filled.blockers.join("; "), ...pageDetails,
@@ -215,6 +262,7 @@ export async function runApplicationPackage(
         ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
         ...(current?.browserGroupId ? { browserGroupId: current.browserGroupId } : {}),
         ...(current?.browserEndpoint ? { browserEndpoint: current.browserEndpoint } : {}),
+        resumeUploaded: current?.resumeUploaded === true,
         ...(current?.packagePath ? { packagePath: current.packagePath } : {}),
       });
     }

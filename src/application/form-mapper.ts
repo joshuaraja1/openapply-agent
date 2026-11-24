@@ -44,7 +44,7 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
 
 /** Only maps exact common fields. Unknown required questions need a human or a provider adapter. */
 export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {}): FormPlan {
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {}): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
   if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
@@ -68,7 +68,7 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
       blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
     }
   }
-  if (!actions.some((action) => action.action === "upload")) {
+  if (!options.allowMissingResume && !actions.some((action) => action.action === "upload")) {
     blockers.push("Resume upload control was not found; verify this application step before submission");
   }
   return { actions, blockers };
@@ -79,7 +79,7 @@ export async function fillApplicationForm(
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string> } = {},
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {},
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath, options);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };

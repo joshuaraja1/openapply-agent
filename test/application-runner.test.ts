@@ -57,6 +57,67 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("continues a two-step form and uploads the verified résumé before submitting", async () => {
+    const input = (ref: string, name: string, type: string | null = null) => ({
+      ref, tag: "input", role: "textbox", name, type, value: null, required: true, options: [],
+    });
+    const first = { url: job.applicationUrl, title: "Profile", controls: [
+      input("email", "Email"),
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ] };
+    const second = { url: job.applicationUrl, title: "Documents", controls: [
+      input("resume", "Resume", "file"),
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const steps: string[] = [];
+    let current = first;
+    const browser = { currentUrl: () => job.applicationUrl, navigate: async () => first,
+      fillBatch: async (actions: Array<{ action: string }>) => {
+        steps.push(actions.some((action) => action.action === "upload") ? "upload" : "fill");
+        return current;
+      },
+      act: async () => { steps.push("continue"); current = second; return second; },
+      submit: async () => { steps.push("submit"); return "Thank you for applying"; },
+    };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/two-step.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(steps).toEqual(["fill", "continue", "upload", "submit"]);
+  });
+
+  it("halts before submission when no application step offers a résumé upload", async () => {
+    const page = { url: job.applicationUrl, title: "Apply", controls: [
+      { ref: "email", tag: "input", role: "textbox", name: "Email", type: null,
+        value: null, required: true, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const submit = vi.fn(async () => "Thank you for applying");
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/missing-resume.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => page, act: async () => page, fillBatch: async () => page, submit },
+      close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("résumé was not uploaded");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("verifies the artifact, fills the form, and records employer confirmation", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-runner-"));
     try {
