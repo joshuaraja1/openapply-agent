@@ -9,9 +9,10 @@ relevance, and escapes candidate text. If no supported claim matches the
 posting, generation stops.
 
 `verifyResumePdf` accepts a downloaded PDF only when its source fingerprint,
-approved claim text, candidate name, company, role title, active email link,
-page size, text extraction, and page bounds pass. It records the exact PDF hash
-for the application checkpoint. The Overleaf browser renderer and automated
+embedded render token, approved claim text, candidate name, company, role title,
+active email link, page size, text extraction, and page bounds pass. It records
+the exact PDF hash for the application checkpoint. The embedded browser uploads
+the verified bytes only after checking that hash again. The Overleaf browser renderer and automated
 page-image inspection are still pending. Until then, a person must compile,
 download, and visually inspect the PDF before invoking the verifier.
 

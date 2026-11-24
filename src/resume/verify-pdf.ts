@@ -20,7 +20,7 @@ export interface VerifiedResumeArtifact {
 }
 
 function normalize(value: string): string {
-  return value.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return value.toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
 function approvedClaimTexts(candidate: CandidateProfile, ids: string[]): string[] {
@@ -47,12 +47,18 @@ export async function verifyResumePdf(
   if (bytes.length !== file.size) throw new Error("Résumé PDF changed while being verified");
   if (!bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("Résumé artifact is not a PDF");
   const expectedSourceFingerprint = createHash("sha256").update(`${job.id}\0${source.latex}`).digest("hex");
-  if (source.fingerprint !== expectedSourceFingerprint || !source.claimIds.length) {
+  if (source.fingerprint !== expectedSourceFingerprint || !source.claimIds.length
+    || !/^[a-f0-9]{64}$/.test(source.renderToken)
+    || !source.latex.includes(`\\hypersetup{pdfsubject={OpenApply:${source.renderToken}}}`)) {
     throw new Error("Résumé source fingerprint or claims do not match this job");
   }
   const task = getDocument({ data: new Uint8Array(bytes), stopAtErrors: true, standardFontDataUrl });
   try {
     const document = await task.promise;
+    const metadata = await document.getMetadata();
+    if ((metadata?.info as { Subject?: string } | undefined)?.Subject !== `OpenApply:${source.renderToken}`) {
+      throw new Error("Résumé PDF was not rendered from the expected source token");
+    }
     if (document.numPages < 1 || document.numPages > 2) throw new Error("Résumé PDF must have one or two pages");
     const pageTexts: string[] = [];
     let hasContactLink = false;

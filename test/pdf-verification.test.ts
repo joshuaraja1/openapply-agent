@@ -26,16 +26,19 @@ const candidate = candidateProfileSchema.parse({
     claims: [{ id: "claim-1", claim: "Built Python services", skills: ["Python"],
       evidence: [{ source: "work history", uri: "private:work" }], status: "verified", allowedUses: ["resume"] }] }],
 });
-const source: ResumeSource = { latex: "fixture", fingerprint: createHash("sha256")
-  .update(`${job.id}\0fixture`).digest("hex"), claimIds: ["claim-1"] };
+const renderToken = "a".repeat(64);
+const latex = `\\hypersetup{pdfsubject={OpenApply:${renderToken}}}\nfixture`;
+const source: ResumeSource = { latex, renderToken, fingerprint: createHash("sha256")
+  .update(`${job.id}\0${latex}`).digest("hex"), claimIds: ["claim-1"] };
 
-async function fixture(path: string, options: { title?: string; offPage?: boolean; link?: boolean } = {}): Promise<void> {
+async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean; link?: boolean; subject?: string } = {}): Promise<void> {
   const pdf = await PDFDocument.create();
+  pdf.setSubject(options.subject ?? `OpenApply:${renderToken}`);
   const page = pdf.addPage([612, 792]);
   page.drawText("Test Candidate", { x: 40, y: 740 });
   page.drawText(options.title ?? "Backend Engineer", { x: 40, y: 720 });
   page.drawText("Example Co", { x: 40, y: 700 });
-  page.drawText("Built Python services", { x: options.offPage ? 800 : 40, y: 680 });
+  page.drawText(options.claim ?? "Built Python services", { x: options.offPage ? 800 : 40, y: 680 });
   if (options.link !== false) {
     const annotation = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 730, 150, 745],
       Border: [0, 0, 0], A: { Type: "Action", S: "URI", URI: PDFString.of("mailto:test@example.com") } });
@@ -57,6 +60,10 @@ describe("job-bound PDF verification", () => {
       expect(result.pages).toBe(1);
       await expect(verifyResumePdf(path, job, candidate, { ...source, fingerprint: "f".repeat(64) }))
         .rejects.toThrow("fingerprint");
+      await expect(verifyResumePdf(path, job, candidate, { ...source, renderToken: "b".repeat(64) }))
+        .rejects.toThrow("fingerprint");
+      await fixture(path, { subject: "Another résumé" });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("source token");
       await fixture(path, { title: "Other Role" });
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("Backend Engineer");
     } finally {
@@ -74,6 +81,20 @@ describe("job-bound PDF verification", () => {
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("email link");
       await writeFile(path, "Not a PDF".repeat(20));
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("not a PDF");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves material punctuation when matching approved claims", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
+    try {
+      const path = join(root, "resume.pdf");
+      await fixture(path, { claim: "Built Python services 50" });
+      const withPercent = candidateProfileSchema.parse({ ...candidate,
+        experience: candidate.experience.map((role) => ({ ...role,
+          claims: role.claims.map((claim) => ({ ...claim, claim: "Built Python services 50%" })) })) });
+      await expect(verifyResumePdf(path, job, withPercent, source)).rejects.toThrow("50%");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
