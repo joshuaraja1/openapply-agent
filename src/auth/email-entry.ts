@@ -11,7 +11,6 @@ interface UsedMessages {
 }
 export interface ActiveEmailCodeRequest {
   jobId: string;
-  jobTitle: string;
   accountEmail: string;
   company: string;
   portalHost: string;
@@ -29,11 +28,11 @@ export class EmailCodeEntry {
     if (!config.enabled || !config.autoEnter || !config.provider || !config.accountId) return undefined;
     const account = this.policy.accounts.find((entry) => entry.id === config.accountId);
     if (!account || account.email.toLowerCase() !== request.accountEmail.toLowerCase()) return undefined;
-    if (!request.jobId || !request.jobTitle.trim()) return undefined;
+    if (!request.jobId || !request.company.trim()) return undefined;
     const started = Date.now();
     const saved = await this.ledger.read("mailbox-message-claims");
     const challenges = (saved?.state.challenges ?? []).filter((entry) =>
-      Date.parse(entry.at) > started - 60_000);
+      Date.parse(entry.at) > started - 600_000);
     if (challenges.some((entry) => entry.jobId !== request.jobId
       && entry.accountEmail === request.accountEmail.toLowerCase()
       && entry.company === request.company.toLowerCase())) return undefined;

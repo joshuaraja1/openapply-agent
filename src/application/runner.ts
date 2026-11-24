@@ -200,6 +200,7 @@ export async function runApplicationPackage(
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
+    let emailChallengeStartedAt = new Date().toISOString();
     let snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
         current!.blocker?.startsWith("Portal sign-in needs human completion") === true)
@@ -270,9 +271,9 @@ export async function runApplicationPackage(
       if (emailControls.length === 1 && !/^\d{6}$/.test(emailControls[0]!.value ?? "")) {
         let code: string | undefined;
         try {
-          code = await dependencies.emailCode?.resolve({ jobId: job.id, jobTitle: job.title,
+          code = await dependencies.emailCode?.resolve({ jobId: job.id,
             accountEmail: pkg.candidate.identity.email, company: job.company, portalHost: host,
-            requestedAt: new Date(Date.now() - 15_000).toISOString() });
+            requestedAt: emailChallengeStartedAt });
         } catch {
           filled = { snapshot: page, blockers: ["Email verification requires human review"], uploaded: false };
           break;
@@ -329,6 +330,7 @@ export async function runApplicationPackage(
           : "Application has ambiguous continue controls");
         break;
       }
+      emailChallengeStartedAt = new Date().toISOString();
       page = await browser.act(next[0]!.ref, "click");
       continued = true;
       if (new URL(page.url).hostname.toLowerCase() !== host) {

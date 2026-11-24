@@ -11,7 +11,6 @@ export interface EmailCodeRequest {
   accountEmail: string;
   company: string;
   portalHost: string;
-  jobTitle?: string;
   requestedAt: string;
   now: string;
   allowedSenderDomains: string[];
@@ -102,7 +101,6 @@ export function selectEmailCode(messages: MailboxMessage[], request: EmailCodeRe
     if (!sender || !allowedSender(sender, request.allowedSenderDomains)
       || !message.to.some((recipient) => senderAddress(recipient) === expectedAccount)) continue;
     const content = `${message.subject}\n${message.bodyText}`.toLowerCase().replace(/\s+/g, " ");
-    if (request.jobTitle && !containsContext(content, request.jobTitle.trim().toLowerCase(), "company")) continue;
     if (!containsContext(content, company, "company")
       && !containsContext(content, portalHost, "host")) continue;
     const codes = verificationCodes(content);
