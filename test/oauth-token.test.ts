@@ -55,6 +55,12 @@ describe("Keychain-backed mailbox OAuth token", () => {
       put: async () => {}, delete: async () => {} };
     await expect(getMailboxAccessToken(policy, secrets, fetcher, now)).rejects.toThrow("read-only scopes");
     expect(fetcher).not.toHaveBeenCalled();
+    const broad = { get: async () => JSON.stringify({ ...token,
+      scopes: [...token.scopes, "https://www.googleapis.com/auth/gmail.modify"] }),
+      put: async () => {}, delete: async () => {} };
+    await expect(getMailboxAccessToken(policy, broad, fetcher, now))
+      .rejects.toThrow("outside the approved read-only scopes");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("refreshes a Microsoft public-client token against a fixed tenant endpoint", async () => {

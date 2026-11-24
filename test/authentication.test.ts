@@ -85,6 +85,11 @@ describe("authentication policy", () => {
       ...validPolicy,
       emailVerification: { enabled: false, autoEnter: true },
     }).success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      emailVerification: { ...validPolicy.emailVerification,
+        oauthSecretRef: validPolicy.accounts[0].passwordSecretRef },
+    }).success).toBe(false);
   });
 
   it("rejects unapproved senders and unknown mailbox accounts", () => {
@@ -121,6 +126,10 @@ describe("authentication policy", () => {
     expect(authenticationPolicySchema.safeParse({
       ...validPolicy,
       accounts: [validPolicy.accounts[0], { ...validPolicy.accounts[0], id: "duplicate" }],
+    }).success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({ ...validPolicy,
+      accounts: [validPolicy.accounts[0], { ...validPolicy.accounts[0],
+        id: "other", domains: ["other.example.com"] }],
     }).success).toBe(false);
   });
 });

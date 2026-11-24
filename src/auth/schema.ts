@@ -78,6 +78,16 @@ export const authenticationPolicySchema = z.strictObject({
   if (new Set(accountIds).size !== accountIds.length) {
     context.addIssue({ code: "custom", path: ["accounts"], message: "Account IDs must be unique" });
   }
+  const passwordReferences = policy.accounts.map((account) => account.passwordSecretRef);
+  if (new Set(passwordReferences).size !== passwordReferences.length) {
+    context.addIssue({ code: "custom", path: ["accounts"],
+      message: "Each site account needs its own password secret reference" });
+  }
+  if (policy.emailVerification.oauthSecretRef
+    && passwordReferences.includes(policy.emailVerification.oauthSecretRef)) {
+    context.addIssue({ code: "custom", path: ["emailVerification", "oauthSecretRef"],
+      message: "Mailbox OAuth tokens need a separate secret reference" });
+  }
   const domains = policy.accounts.flatMap((account) => account.domains.map((domain) => domain.toLowerCase()));
   if (new Set(domains).size !== domains.length) {
     context.addIssue({ code: "custom", path: ["accounts"], message: "A domain may belong to only one account" });

@@ -24,6 +24,11 @@ function assertScopes(provider: "gmail" | "microsoft", scopes: string[]): void {
   if (!requiredScopes(provider).every((scope) => names.has(scope.toLowerCase()))) {
     throw new Error("Mailbox token lacks required read-only scopes");
   }
+  const allowed = new Set(["openid", "email", "profile", "offline_access",
+    ...requiredScopes(provider).map((scope) => scope.toLowerCase())]);
+  if ([...names].some((scope) => !allowed.has(scope))) {
+    throw new Error("Mailbox token includes permissions outside the approved read-only scopes");
+  }
 }
 
 async function readTokenResponse(response: Response): Promise<string> {
