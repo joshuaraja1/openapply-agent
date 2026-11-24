@@ -9,7 +9,7 @@ const config = scheduleConfigSchema.parse({ version: 1, repositoryPath: "/privat
 describe("macOS background schedule", () => {
   it("escapes paths and runs the compiled sequential workflow", () => {
     const plist = launchAgentPlist(config, "/usr/local/bin/node", "/private/logs");
-    expect(plist).toContain("OpenApply &amp; Projects/dist/application/autopilot-cli.js");
+    expect(plist).toContain("OpenApply &amp; Projects/dist/src/application/autopilot-cli.js");
     expect(plist).toContain("<integer>3600</integer>");
     expect(plist).toContain("OPENAPPLY_QUEUE_CONFIG");
     expect(plist).toContain("<key>RunAtLoad</key><true/>");

@@ -24,7 +24,7 @@ function xml(value: string): string {
 export function launchAgentPlist(config: ScheduleConfig, nodePath: string, logsDirectory: string): string {
   const parsed = scheduleConfigSchema.parse(config);
   if (!isAbsolute(nodePath) || !isAbsolute(logsDirectory)) throw new Error("Scheduler paths must be absolute");
-  const script = join(parsed.repositoryPath, "dist", "application", "autopilot-cli.js");
+  const script = join(parsed.repositoryPath, "dist", "src", "application", "autopilot-cli.js");
   const environment = { OPENAPPLY_QUEUE_CONFIG: parsed.queueConfigPath };
   const entries = Object.entries(environment)
     .map(([key, value]) => `      <key>${key}</key><string>${xml(value)}</string>`).join("\n");
@@ -53,7 +53,7 @@ export async function installLaunchAgent(config: ScheduleConfig, nodePath = proc
   if (process.platform !== "darwin") throw new Error("The local scheduler currently supports macOS LaunchAgents");
   const parsed = scheduleConfigSchema.parse(config);
   const repository = await stat(parsed.repositoryPath);
-  const script = await stat(join(parsed.repositoryPath, "dist", "application", "autopilot-cli.js"));
+  const script = await stat(join(parsed.repositoryPath, "dist", "src", "application", "autopilot-cli.js"));
   if (!repository.isDirectory() || !script.isFile()) throw new Error("Build the project before installing the scheduler");
   const queueConfig = queueRunnerConfigSchema.parse(JSON.parse(await readFile(parsed.queueConfigPath, "utf8")));
   for (const path of [queueConfig.discoveryInputPath, queueConfig.candidatePath,
