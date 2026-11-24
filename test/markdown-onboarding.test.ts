@@ -37,5 +37,9 @@ describe("Markdown onboarding compiler", () => {
       fenced("openapply-history-json", unapproved))).toThrow("approved");
     const twice = fenced("openapply-search-json", preferences).repeat(2);
     expect(() => compileSearchMarkdown(twice)).toThrow("exactly one");
+    const quarantinedDuplicate = { ...history, quarantinedClaims: [{ ...claim,
+      status: "do-not-use", allowedUses: [] }] };
+    expect(() => compileCandidateMarkdown(fenced("openapply-identity-json", identity),
+      fenced("openapply-history-json", quarantinedDuplicate))).toThrow("unique");
   });
 });

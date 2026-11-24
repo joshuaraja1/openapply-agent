@@ -1,6 +1,7 @@
-import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { compileCandidateMarkdown, compileSearchMarkdown } from "./markdown.js";
+import { createPrivateOutput } from "../storage/private-output.js";
 
 const variables = ["OPENAPPLY_PROFILE_MD", "OPENAPPLY_WORK_MD", "OPENAPPLY_SEARCH_MD",
   "OPENAPPLY_PROFILE_OUTPUT", "OPENAPPLY_PREFERENCES_OUTPUT"] as const;
@@ -31,11 +32,6 @@ for (const output of [profileOutput, preferencesOutput]) {
     throw new Error("Candidate output directories must be private to this user");
   }
 }
-await writeFile(profileOutput, `${JSON.stringify(candidate, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-try {
-  await writeFile(preferencesOutput, `${JSON.stringify(preferences, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-} catch (error) {
-  await unlink(profileOutput);
-  throw error;
-}
+await createPrivateOutput(profileOutput, `${JSON.stringify(candidate, null, 2)}\n`);
+await createPrivateOutput(preferencesOutput, `${JSON.stringify(preferences, null, 2)}\n`);
 console.log("Compiled private candidate profile and search preferences");

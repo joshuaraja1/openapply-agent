@@ -31,4 +31,5 @@ npm run profile:compile
 
 The command refuses unresolved placeholders, unapproved résumé claims, and
 world-readable inputs. It creates output files with user-only permissions and
-will not overwrite existing files; review and move old outputs before a recompile.
+will not overwrite different existing files. If interrupted between outputs,
+rerun the same command to finish; move old outputs before changing source facts.

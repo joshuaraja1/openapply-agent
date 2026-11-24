@@ -23,8 +23,13 @@ export function compileCandidateMarkdown(profileMarkdown: string, historyMarkdow
   const identity = identitySection.parse(fencedJson(profileMarkdown, "openapply-identity-json"));
   const history = historySection.parse(fencedJson(historyMarkdown, "openapply-history-json"));
   const candidate = candidateProfileSchema.parse({ ...identity, ...history });
-  const approved = [...candidate.education, ...candidate.experience.flatMap((entry) => entry.claims),
-    ...candidate.projects.flatMap((entry) => entry.claims)]
+  const usableClaims = [...candidate.education, ...candidate.experience.flatMap((entry) => entry.claims),
+    ...candidate.projects.flatMap((entry) => entry.claims)];
+  const allIds = [...usableClaims, ...candidate.quarantinedClaims].map((claim) => claim.id);
+  if (new Set(allIds).size !== allIds.length) {
+    throw new Error("Claim IDs must be unique across approved and quarantined facts");
+  }
+  const approved = usableClaims
     .some((claim) => ["verified", "user-confirmed"].includes(claim.status)
       && claim.allowedUses.includes("resume"));
   if (!approved) throw new Error("At least one evidenced résumé claim must be approved");
