@@ -4,12 +4,13 @@ import { launchBrowser, type BrowserRuntime } from "../browser/runtime.js";
 import { candidateProfileSchema } from "../candidate/schema.js";
 import type { SiteAccount } from "../auth/schema.js";
 import type { SecretStore } from "../storage/contracts.js";
+import type { ActiveEmailCodeRequest } from "../auth/email-entry.js";
 import { sourceSchema } from "../config.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "../resume/verify-pdf.js";
 import { fetchSourceBatch } from "../sources/batch.js";
 import type { DiscoveredJob } from "../types.js";
 import { applicationHandoffSchema } from "./handoff.js";
-import { fillApplicationForm } from "./form-mapper.js";
+import { fillApplicationForm, isEmailCodeControl } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
@@ -117,6 +118,7 @@ export async function runApplicationPackage(
     packagePath?: string;
     humanAnswerApproval?: HumanAnswerApproval;
     account?: SiteAccount; secretStore?: SecretStore;
+    emailCode?: { resolve(request: ActiveEmailCodeRequest): Promise<string | undefined> };
     browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
       Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
 ): Promise<RunResult> {
@@ -198,6 +200,7 @@ export async function runApplicationPackage(
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
+    let emailChallengeStartedAt = new Date().toISOString();
     let snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
         current!.blocker?.startsWith("Portal sign-in needs human completion") === true)
@@ -260,6 +263,40 @@ export async function runApplicationPackage(
         filled = { snapshot: page, blockers: ["Portal sign-in needs human completion"], uploaded: false };
         break;
       }
+      const emailControls = page.controls.filter(isEmailCodeControl);
+      if (emailControls.length > 1) {
+        filled = { snapshot: page, blockers: ["Email verification field is ambiguous"], uploaded: false };
+        break;
+      }
+      if (emailControls.length === 1 && !/^\d{6}$/.test(emailControls[0]!.value ?? "")) {
+        let code: string | undefined;
+        try {
+          code = await dependencies.emailCode?.resolve({ jobId: job.id,
+            accountEmail: pkg.candidate.identity.email, company: job.company, portalHost: host,
+            requestedAt: emailChallengeStartedAt });
+        } catch {
+          filled = { snapshot: page, blockers: ["Email verification requires human review"], uploaded: false };
+          break;
+        }
+        if (!code) {
+          filled = { snapshot: page, blockers: ["Email verification code is unavailable"], uploaded: false };
+          break;
+        }
+        page = await browser.act(emailControls[0]!.ref, "fill", code);
+        if (new URL(page.url).hostname.toLowerCase() !== host) {
+          throw new Error("Email code entry left the approved employer destination");
+        }
+        const codeFields = page.controls.filter(isEmailCodeControl);
+        const accepted = codeFields.length === 1 && codeFields[0]!.value === code;
+        const verifiedTransition = codeFields.length === 0
+          && /\b(email (?:address )?verified|email confirmed|verification successful)\b/i
+            .test(page.visibleText ?? "");
+        if (!accepted && !verifiedTransition) {
+          filled = { snapshot: page, blockers: ["Email verification code was not retained"], uploaded: false };
+          break;
+        }
+        recoveryPageUrl = page.url;
+      }
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
       resumeUploaded ||= filled.uploaded;
       if (filled.uploaded) loginRecoveryPending = false;
@@ -293,6 +330,7 @@ export async function runApplicationPackage(
           : "Application has ambiguous continue controls");
         break;
       }
+      emailChallengeStartedAt = new Date().toISOString();
       page = await browser.act(next[0]!.ref, "click");
       continued = true;
       if (new URL(page.url).hostname.toLowerCase() !== host) {

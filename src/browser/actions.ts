@@ -85,11 +85,13 @@ export class AgentBrowser {
           required: field.matches(":required") || field.getAttribute("aria-required") === "true",
           options: field.tagName === "SELECT"
             ? Array.from((field as HTMLSelectElement).options, (option) => option.label.trim()) : [],
+          value: field.tagName === "INPUT" && ["password", "hidden"].includes((field as HTMLInputElement).type)
+            ? null : "value" in field ? field.value : null,
         };
       });
       const name = metadata.label;
       const type = await handle.getAttribute("type");
-      const value = null;
+      const value = metadata.value;
       this.controls.set(ref, handle as ElementHandle<HTMLElement>);
       controls.push({ ref, tag, role, name: name.trim(), type, value,
         required: metadata.required, options: metadata.options });

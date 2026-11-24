@@ -17,9 +17,21 @@ the endpoint shown by BrowserOS neo. The provider's registered OAuth client
 must allow a loopback redirect for a desktop application. The callback page
 only confirms consent receipt; the command reports success after token storage.
 
-This module is not yet connected to application forms. Encrypted one-use
-message tracking and browser form entry remain required before automatic
-email codes can be enabled. The runner continues to pause for verification codes.
+When `autoEnter` is enabled, the queue and single-application runners can fill
+one clearly labeled **email** code field. The message must match the configured
+account, approved sender domain, company or portal host, and the active browser
+step that produced the code field. It checks for up to 30 seconds. Overlapping
+challenges for the same account and employer pause for ten minutes rather than
+compete for a code.
+A selected message is claimed in encrypted local state before browser entry, so
+a crash or a second run cannot use that message again. Missing, ambiguous,
+stale, or unretained codes pause for human review. Other MFA and
+security challenges remain human handoffs. This path has synthetic tests; live
+Gmail and Microsoft consent plus employer-portal flows require beta validation.
+Generic employer emails may lack a unique challenge identifier, so the workflow
+cannot prove exact form linkage if the user independently requests another code
+from the same employer during that window. Pause or disable `autoEnter` for that
+employer when this could happen.
 
 API contracts: [Gmail message search](https://developers.google.com/workspace/gmail/api/guides/filtering),
 [Gmail message retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/get),

@@ -576,4 +576,50 @@ describe("application runner", () => {
     await expect(runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
       "/tmp/profile")).rejects.toThrow("approved employer destination");
   });
+
+  it("enters only a verified email code before filling and submitting the application", async () => {
+    const codeControl = { ref: "code", tag: "input", role: "textbox", name: "Email verification code",
+      type: "text", value: null as string | null, required: true, options: [] };
+    const resumeControl = { ref: "resume", tag: "input", role: "button", name: "Resume",
+      type: "file", value: null, required: true, options: [] };
+    const submitControl = { ref: "submit", tag: "button", role: "button", name: "Submit application",
+      type: "submit", value: null, required: false, options: [] };
+    const page = () => ({ url: job.applicationUrl, title: "Apply", visibleText: "Example Co application",
+      controls: [codeControl, resumeControl, submitControl] });
+    const resolve = vi.fn(async () => "123456");
+    const act = vi.fn(async (_ref: string, _action: string, value?: string) => {
+      codeControl.value = value ?? null;
+      return page();
+    });
+    const submit = vi.fn(async () => "Thank you for applying");
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/email-code.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { validateOfficial: async () => true,
+        verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+          pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+          verifiedAt: new Date().toISOString() }), emailCode: { resolve },
+        browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+          navigate: async () => page(), act, fillBatch: async () => page(), submit }, close: async () => {} }),
+      });
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ accountEmail: "test@example.com",
+      company: "Example Co", portalHost: "jobs.example.com" }));
+    expect(act).toHaveBeenCalledWith("code", "fill", "123456");
+    expect(submit).toHaveBeenCalledOnce();
+    codeControl.value = null;
+    const verifiedPage = () => ({ ...page(), visibleText: "Example Co application. Email verified.",
+      controls: [resumeControl, submitControl] });
+    const autoAdvanced = await runApplicationPackage(pkg,
+      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
+        validateOfficial: async () => true, verify: async () => result.artifact,
+        emailCode: { resolve }, browserFactory: async () => ({ browser: {
+          currentUrl: () => job.applicationUrl, navigate: async () => page(),
+          act: async () => verifiedPage(), fillBatch: async () => verifiedPage(), submit,
+        }, close: async () => {} }),
+      });
+    expect(autoAdvanced.checkpoint.stage).toBe("submitted");
+  });
 });

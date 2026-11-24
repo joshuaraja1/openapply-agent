@@ -18,6 +18,12 @@ function key(control: BrowserControl): string {
   return `${control.tag}:${control.type ?? ""}:${control.name.trim().toLowerCase()}`;
 }
 
+export function isEmailCodeControl(control: BrowserControl): boolean {
+  return control.tag === "input" && [null, "text", "tel", "number"].includes(control.type)
+    && /^(email (?:verification|one.time|security) code|code (?:sent to|from) (?:your )?email)$/i
+      .test(control.name.trim());
+}
+
 function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePath: string): FormAction | undefined {
   const label = control.name.trim().toLowerCase().replace(/[*:]+$/, "").trim();
   const type = control.type?.toLowerCase() ?? null;
@@ -54,6 +60,7 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
   for (const control of snapshot.controls) counts.set(key(control), (counts.get(key(control)) ?? 0) + 1);
   for (const control of snapshot.controls) {
     if (control.tag === "button" || control.type === "submit" || control.tag === "a") continue;
+    if (isEmailCodeControl(control) && /^\d{6}$/.test(control.value ?? "")) continue;
     if (/captcha|verification code|one.time code|security question/i.test(control.name)) {
       blockers.push(`Human verification needed: ${control.name}`);
       continue;
