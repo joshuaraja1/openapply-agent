@@ -168,7 +168,7 @@ describe("application runner", () => {
       { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
         value: null, required: false, options: [] },
     ], visibleText: "Step 1 of 2" };
-    const click = vi.fn(async () => page);
+    const click = vi.fn(async () => ({ ...page, visibleText: `${page.visibleText}\nValidation failed` }));
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },

@@ -52,8 +52,10 @@ export interface ApplicationBrowserSurface {
 }
 
 function stepSignature(page: BrowserSnapshot): string {
-  return `${page.url}|${page.title}|${page.visibleText ?? ""}|${page.controls.map((control) =>
-    `${control.tag}:${control.type}:${control.name}:${control.value ?? ""}`).join("|")}`;
+  const headings = (page.visibleText ?? "").split("\n")
+    .filter((line) => /^\s*- heading\b/.test(line)).join("|");
+  return `${page.url}|${page.title}|${headings}|${page.controls.map((control) =>
+    `${control.tag}:${control.type}:${control.name}`).join("|")}`;
 }
 
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
