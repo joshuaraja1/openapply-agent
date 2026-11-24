@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, rmdir } from "node:fs/promises";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { AsyncEntry } from "@napi-rs/keyring";
 import type { SecretStore } from "./contracts.js";
@@ -47,7 +47,7 @@ export class MacKeychainSecretStore implements SecretStore {
 /** Lock key initialization under one canonical path per OS user and reference. */
 export async function getOrCreateStateKey(store: SecretStore, reference: string): Promise<Buffer> {
   accountFromReference(reference);
-  const root = join(homedir(), ".openapply-agent");
+  const root = join(userInfo().homedir, ".openapply-agent");
   const parentPath = join(root, "key-init");
   const name = createHash("sha256").update(reference).digest("hex");
   const lock = join(parentPath, `${name}.lock`);

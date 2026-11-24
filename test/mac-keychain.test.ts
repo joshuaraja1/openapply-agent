@@ -55,8 +55,15 @@ describe("macOS Keychain secret store", () => {
     };
     const first = getOrCreateStateKey(slow, keyReference);
     await vi.waitFor(() => expect(slow.get).toHaveBeenCalled());
-    await expect(getOrCreateStateKey(store, keyReference)).rejects.toThrow();
-    release();
-    await first;
+    const previousHome = process.env.HOME;
+    try {
+      process.env.HOME = "/tmp/openapply-different-home";
+      await expect(getOrCreateStateKey(store, keyReference)).rejects.toThrow();
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      release();
+      await first;
+    }
   });
 });
