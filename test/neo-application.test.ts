@@ -59,7 +59,9 @@ describe("BrowserOS application adapter", () => {
       let submitted = false;
       const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
         if (name === "name_session") return result("renamed");
-        if (name === "tabs" && args.action === "list") return result("tabs");
+        if (name === "tabs" && args.action === "list") return result(
+          "[8] https://jobs.example.com/[7] [group BBBBBBBBBBBBBBBB]\n"
+          + "[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
         if (name === "tabs" && args.action === "new") return result("opened page 7");
         if (name === "snapshot") return result(tree(filled, submitted));
         if (name === "act" && args.kind === "fill") { filled = true; return result("ok (fill)"); }
@@ -70,6 +72,9 @@ describe("BrowserOS application adapter", () => {
       }) };
       const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map([[path, hash]]));
       const first = await browser.navigate(url);
+      await expect(browser.attach(7, url, "BBBBBBBBBBBBBBBB"))
+        .rejects.toThrow("tab identity changed");
+      expect(await browser.attach(7, url, "AAAAAAAAAAAAAAAA")).toMatchObject({ url });
       const filledForm = await fillApplicationForm(browser, first, candidate, path);
       expect(filledForm.blockers).toEqual([]);
       expect(await browser.submit(filledForm.snapshot.controls.find((entry) => entry.type === "submit")!.ref,
@@ -83,9 +88,10 @@ describe("BrowserOS application adapter", () => {
   });
 
   it("stops before filling when an application redirects off the approved host", async () => {
-    const client: BrowserToolClient = { callTool: vi.fn(async ({ name }) => {
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
       if (name === "name_session") return result("renamed");
-      if (name === "tabs") return result("opened page 7");
+      if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
       if (name === "snapshot") return result(tree(false, false, "https://other.example/apply"));
       throw new Error(`Unexpected browser action ${name}`);
     }) };

@@ -10,6 +10,7 @@ import { applicationHandoffSchema } from "./handoff.js";
 import { fillApplicationForm } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
+import type { HumanAnswerApproval } from "./human-answers.js";
 
 export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
@@ -45,9 +46,12 @@ export interface ApplicationBrowserSurface {
   act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot>;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
   fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
+  pageId?(): number | undefined;
+  groupId?(): string | undefined;
+  attach?(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot>;
 }
 
-async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
+export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
   if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
   const batch = await fetchSourceBatch([pkg.source], 5000);
   return batch.jobs.some((official) => official.id === pkg.job.id
@@ -55,17 +59,8 @@ async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean
     && official.title === pkg.job.title && official.descriptionText === pkg.job.descriptionText);
 }
 
-export async function runApplicationPackage(
-  input: ApplicationPackage,
-  workflow: ApplicationWorkflow,
-  profileDirectory: string,
-  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
-    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string;
-    browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
-      Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
-): Promise<RunResult> {
-  const pkg = applicationPackageSchema.parse(input);
-  const job = pkg.job as DiscoveredJob;
+export function approvedDestinationHost(pkg: ApplicationPackage): string {
+  const job = pkg.job;
   const destination = new URL(job.applicationUrl);
   const host = destination.hostname.toLowerCase();
   const independentlyAllowed = pkg.source.allowedApplicationHosts
@@ -75,22 +70,62 @@ export async function runApplicationPackage(
   if (destination.protocol !== "https:" || destination.username || destination.password
     || new URL(job.sourceUrl).protocol !== "https:"
     || pkg.source.provider !== job.provider || pkg.source.company !== job.company
-    || pkg.handoff.jobId !== job.id
-    || pkg.handoff.applicationUrl !== job.applicationUrl
+    || pkg.handoff.jobId !== job.id || pkg.handoff.applicationUrl !== job.applicationUrl
     || !independentlyAllowed
     || !pkg.handoff.allowedDomains.map((domain) => domain.toLowerCase()).includes(host)) {
     throw new Error("Application package does not match its approved employer destination");
   }
+  return host;
+}
+
+export async function runApplicationPackage(
+  input: ApplicationPackage,
+  workflow: ApplicationWorkflow,
+  profileDirectory: string,
+  dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
+    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string; resumedJobId?: string;
+    packagePath?: string;
+    humanAnswerApproval?: HumanAnswerApproval;
+    browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
+      Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
+): Promise<RunResult> {
+  const pkg = applicationPackageSchema.parse(input);
+  const job = pkg.job as DiscoveredJob;
+  const host = approvedDestinationHost(pkg);
   const current = await workflow.current(job.id);
   if (current && current.officialUrl !== job.applicationUrl) throw new Error("Application ID already belongs to another URL");
   const resumingApproval = current?.stage === "waiting-human"
     && current.blocker === "Final submission approval required"
     && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval"
     && !pkg.handoff.stopConditions.includes("final-submit");
+  const resumingHuman = (current?.stage === "waiting-human"
+    && current.blocker !== "Final submission approval required" || current?.stage === "applying")
+    && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
+    && Boolean(dependencies.browserFactory);
+  if (resumingHuman && (!current?.browserGroupId || !current.browserEndpoint
+    || current.browserEndpoint !== pkg.browserEndpoint)) {
+    throw new Error("BrowserOS handoff requires the saved tab group and endpoint");
+  }
   if (dependencies.approvedJobId && !resumingApproval) {
     throw new Error("Approval requires a matching pending final-approval checkpoint");
   }
-  if (current && !resumingApproval
+  if (dependencies.resumedJobId && !resumingHuman) {
+    throw new Error("Human resume requires a matching pending BrowserOS handoff");
+  }
+  if (dependencies.humanAnswerApproval
+    && (!resumingHuman || dependencies.humanAnswerApproval.jobId !== job.id
+      || dependencies.humanAnswerApproval.browserPageId !== current?.browserPageId
+      || dependencies.humanAnswerApproval.approveFinalSubmission !== true)) {
+    throw new Error("Human answer approval does not match this BrowserOS handoff");
+  }
+  const handoff = resumingHuman && dependencies.humanAnswerApproval
+    ? { ...pkg.handoff, mode: "submit-after-approval" as const,
+      stopConditions: pkg.handoff.stopConditions.filter((condition) => condition !== "final-submit") }
+    : pkg.handoff;
+  if (current?.stage === "applying" && current.browserPageId && !resumingHuman) {
+    throw new Error("An interrupted BrowserOS handoff requires explicit same-tab resume");
+  }
+  if (current && !resumingApproval && !resumingHuman
     && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
     throw new Error(`Application is ${current.stage}; inspect or resume it before another run`);
   }
@@ -108,7 +143,6 @@ export async function runApplicationPackage(
     throw new Error("Application checkpoint belongs to a different résumé artifact or source");
   }
   let checkpoint = current ?? await workflow.create(job.id, job.applicationUrl);
-  if (resumingApproval) checkpoint = await workflow.advance(job.id, "applying");
   for (const stage of ["validated", "matched", "tailored"] as const) {
     if (checkpoint.stage === ({ validated: "discovered", matched: "validated", tailored: "matched" } as const)[stage]) {
       checkpoint = await workflow.advance(job.id, stage);
@@ -119,7 +153,7 @@ export async function runApplicationPackage(
     sourceFingerprint: artifact.sourceFingerprint,
   });
   if (checkpoint.stage === "rendered") checkpoint = await workflow.advance(job.id, "applying");
-  const runtime = dependencies.browserFactory
+  const runtime: { browser: ApplicationBrowserSurface; close(): Promise<void> } = dependencies.browserFactory
     ? await dependencies.browserFactory(new Set([host]), new Map([[artifact.path, artifact.pdfSha256]]))
     : await (async () => {
       const launched = await (dependencies.launch ?? launchBrowser)({ profileDirectory, headless: false });
@@ -128,26 +162,63 @@ export async function runApplicationPackage(
     })();
   try {
     const browser = runtime.browser;
-    const snapshot = await browser.navigate(job.applicationUrl);
-    const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path);
+    if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
+    const snapshot = resumingHuman
+      ? await browser.attach!(current!.browserPageId!, job.applicationUrl, current!.browserGroupId!)
+      : await browser.navigate(job.applicationUrl);
+    if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
+      checkpoint = await workflow.advance(job.id, "applying");
+    }
+    const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path,
+      resumingHuman && dependencies.humanAnswerApproval
+        ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {});
+    const pageId = browser.pageId?.();
+    const groupId = browser.groupId?.();
+    if (pageId && (!groupId || !pkg.browserEndpoint)) {
+      throw new Error("BrowserOS application needs a stable tab group and endpoint for recovery");
+    }
+    const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
+      ...(groupId ? { browserGroupId: groupId } : {}),
+      ...(pageId && pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
+      ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };
     if (filled.blockers.length) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: filled.blockers.join("; ") });
-    } else if (pkg.handoff.mode === "prepare" || pkg.handoff.stopConditions.includes("final-submit")) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Final submission approval required" });
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: filled.blockers.join("; "), ...pageDetails,
+      });
+    } else if (handoff.mode === "prepare" || handoff.stopConditions.includes("final-submit")) {
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Final submission approval required", ...pageDetails,
+      });
     } else if (!pkg.expectedConfirmation) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Expected employer confirmation text is not configured" });
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Expected employer confirmation text is not configured", ...pageDetails,
+      });
     } else {
       const submitControls = filled.snapshot.controls.filter((control) => control.type === "submit"
         || /\b(submit|apply now|send application)\b/i.test(control.name));
       if (submitControls.length !== 1) {
-        checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Final submit control is missing or ambiguous" });
+        checkpoint = await workflow.advance(job.id, "waiting-human", {
+          blocker: "Final submit control is missing or ambiguous", ...pageDetails,
+        });
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
-          pkg.expectedConfirmation, pkg.handoff);
+          pkg.expectedConfirmation, handoff, pkg.browserEndpoint);
         checkpoint = (await workflow.current(job.id))!;
       }
     }
     return { checkpoint, artifact };
+  } catch (error) {
+    const latest = await workflow.current(job.id);
+    if ((resumingApproval || resumingHuman) && latest?.stage === "applying") {
+      await workflow.advance(job.id, "waiting-human", {
+        blocker: current?.blocker ?? "Human handoff needs another review",
+        ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
+        ...(current?.browserGroupId ? { browserGroupId: current.browserGroupId } : {}),
+        ...(current?.browserEndpoint ? { browserEndpoint: current.browserEndpoint } : {}),
+        ...(current?.packagePath ? { packagePath: current.packagePath } : {}),
+      });
+    }
+    throw error;
   } finally {
     await runtime.close();
   }

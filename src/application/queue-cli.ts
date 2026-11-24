@@ -15,6 +15,7 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
+import { notifyHumanHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
@@ -77,12 +78,16 @@ try {
     });
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
     await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
+    const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
+      packagePath,
       browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
         close: async () => {},
       }),
     });
+    if (result.checkpoint.stage === "waiting-human") {
+      await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
+    }
   });
   console.log(JSON.stringify({ date: date(), outcomes }));
 } finally {

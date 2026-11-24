@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "jobId": "example-job-id",
+  "browserPageId": 7,
+  "confirmationUrl": "https://jobs.example.com/confirmation",
+  "expectedConfirmation": "Thank you for applying",
+  "attestCorrectJob": true
+}

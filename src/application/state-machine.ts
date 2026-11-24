@@ -20,10 +20,10 @@ const nextStages: Record<ApplicationStage, ReadonlySet<ApplicationStage>> = {
   matched: new Set(["tailored", "skipped"]),
   tailored: new Set(["rendered", "blocked"]),
   rendered: new Set(["applying", "blocked"]),
-  applying: new Set(["waiting-human", "submit-claimed", "blocked"]),
+  applying: new Set(["waiting-human", "submit-claimed", "submitted", "blocked"]),
   "submit-claimed": new Set(["submitted", "submission-uncertain"]),
   "submission-uncertain": new Set(["submitted"]),
-  "waiting-human": new Set(["applying", "blocked"]),
+  "waiting-human": new Set(["applying", "submitted", "blocked"]),
   submitted: new Set(),
   blocked: new Set(["rendered", "applying", "skipped"]),
   skipped: new Set(),
@@ -38,6 +38,10 @@ export interface ApplicationCheckpoint {
   sourceFingerprint?: string;
   confirmation?: string;
   blocker?: string;
+  browserPageId?: number;
+  browserGroupId?: string;
+  browserEndpoint?: string;
+  packagePath?: string;
   updatedAt: string;
 }
 
@@ -60,7 +64,7 @@ export class ApplicationWorkflow {
   async advance(
     jobId: string,
     stage: ApplicationStage,
-    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker"> = {},
+    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "browserGroupId" | "browserEndpoint" | "packagePath"> = {},
   ): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
     if (!current) throw new Error(`Application ${jobId} does not exist`);
@@ -76,6 +80,17 @@ export class ApplicationWorkflow {
     }
     if ((details.artifactPath || details.artifactSha256 || details.sourceFingerprint) && stage !== "rendered") {
       throw new Error("Resume artifact changes require a rendered checkpoint");
+    }
+    if (details.browserPageId !== undefined && (!["waiting-human", "submit-claimed"].includes(stage)
+      || !Number.isInteger(details.browserPageId)
+      || details.browserPageId < 1)) {
+      throw new Error("Browser page ID belongs only to a handoff or claimed submission");
+    }
+    if (details.packagePath && stage !== "waiting-human") {
+      throw new Error("Application package path belongs only to a human handoff");
+    }
+    if ((details.browserGroupId || details.browserEndpoint) && !["waiting-human", "submit-claimed"].includes(stage)) {
+      throw new Error("Browser identity belongs only to a handoff or claimed submission");
     }
     if (stage === "submitted" && !details.confirmation) {
       throw new Error("Submission requires an employer confirmation");
