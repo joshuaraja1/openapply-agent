@@ -55,6 +55,47 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
   groupId(): string | undefined { return this.group; }
 
+  async register(email: string, password: string): Promise<BrowserSnapshot> {
+    if (this.page === undefined || !this.latest || !email || !password) {
+      throw new Error("BrowserOS registration page is unavailable");
+    }
+    const controls = this.latest.controls;
+    const field = (name: RegExp) => controls.filter((control) => control.tag === "input"
+      && name.test(control.name.trim()));
+    const emailField = field(/^(email|email address|e-mail)$/i);
+    const passwordField = field(/^(password|create password)$/i);
+    const confirmationField = field(/^(confirm password|password confirmation|re-enter password)$/i);
+    const registerButton = controls.filter((control) => control.tag === "button"
+      && /^(create account|sign up|register)$/i.test(control.name.trim()));
+    if (emailField.length !== 1 || passwordField.length !== 1
+      || confirmationField.length !== 1 || registerButton.length !== 1
+      || /\b(captcha|verify you are human|security question|i agree|terms of service)\b/i
+        .test(this.latest.visibleText)
+      || controls.some((control) => control.required
+        && ![...emailField, ...passwordField, ...confirmationField].includes(control)
+        && control.tag !== "button")) {
+      throw new Error("Registration form requires human review");
+    }
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "fill", sensitive: true, diff: "none", fields: [
+        { ref: emailField[0]!.ref, value: email },
+        { ref: passwordField[0]!.ref, value: password },
+        { ref: confirmationField[0]!.ref, value: password },
+      ],
+    } }), "registration fill");
+    const filled = await this.snapshot();
+    const submit = filled.controls.filter((control) => control.tag === "button"
+      && /^(create account|sign up|register)$/i.test(control.name.trim()));
+    if (submit.length !== 1 || !filled.controls.some((control) => control.tag === "input"
+      && /^(email|email address|e-mail)$/i.test(control.name.trim()) && control.value === email)) {
+      throw new Error("Registration form changed during credential fill");
+    }
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "click", ref: submit[0]!.ref, diff: "none",
+    } }), "registration submission");
+    return this.snapshot();
+  }
+
   async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
     if (this.page === undefined || !this.latest || !email || !password
       || !this.latest.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))

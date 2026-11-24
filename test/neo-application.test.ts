@@ -25,6 +25,47 @@ const tree = (filled: boolean, submitted: boolean, origin = url) =>
   + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
 
 describe("BrowserOS application adapter", () => {
+  it("fills a guarded registration form and refuses unknown required controls", async () => {
+    let filled = false;
+    let registered = false;
+    const registration = () => `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`
+      + `- textbox "Email" [required] [ref=e1]${filled ? ': "test@example.com"' : ''}\n`
+      + '- textbox "Password" [required] [ref=e2]\n'
+      + '- textbox "Confirm password" [required] [ref=e3]\n'
+      + '- button "Create account" [ref=e4]\n'
+      + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(registered ? tree(false, false) : registration());
+      if (name === "act" && args.kind === "fill") { filled = true; return result("filled"); }
+      if (name === "act" && args.kind === "click") { registered = true; return result("clicked"); }
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
+    await browser.navigate(url);
+    expect(await browser.register("test@example.com", "private-password")).toMatchObject({ url });
+    const fill = vi.mocked(client.callTool).mock.calls.find(([call]) => call.name === "act"
+      && call.arguments.kind === "fill")![0];
+    expect(fill.arguments.sensitive).toBe(true);
+    expect(fill.arguments.fields).toEqual([{ ref: "e1", value: "test@example.com" },
+      { ref: "e2", value: "private-password" }, { ref: "e3", value: "private-password" }]);
+
+    const unsafe: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(registration().replace('- button "Create account"',
+        '- checkbox "Agree to terms" [required] [ref=e5]\n- button "Create account"'));
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const blocked = new NeoApplicationBrowser(unsafe, new Set(["jobs.example.com"]), new Map());
+    await blocked.navigate(url);
+    await expect(blocked.register("test@example.com", "private-password"))
+      .rejects.toThrow("human review");
+    expect(vi.mocked(unsafe.callTool).mock.calls.some(([call]) => call.name === "act")).toBe(false);
+  });
   it("fills an existing portal login from a supplied secret without saving it", async () => {
     let signedIn = false;
     const login = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`

@@ -73,10 +73,11 @@ BrowserOS profile when the package has a local endpoint, and records
 `submitted` only after a new confirmation appears.
 It returns `waiting-human` with an exact blocker for unknown required fields,
 missing confirmation configuration, ambiguous submit controls, or final
-approval required by policy. It does not yet create accounts, read email codes,
-or handle multi-step forms; those require provider adapters and onboarding.
+approval required by policy. Guarded exact-domain account creation and scoped
+email-code entry are available when configured. It supports up to five guarded
+form steps; arbitrary portal questions still need a human or a provider adapter.
 If final approval is required, set `OPENAPPLY_APPROVE_JOB_ID` to the exact job
-ID on the next run. Only that approval blocker is resumable this way. The
+ID on the next run. Other human handoffs use the saved same-tab resume path. The
 official posting, PDF hash, source fingerprint, and page state are rechecked
 before submission. Older checkpoints without both fingerprints cannot resume
 automatically and require operator inspection before recovery.

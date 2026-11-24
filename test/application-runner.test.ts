@@ -622,4 +622,57 @@ describe("application runner", () => {
       });
     expect(autoAdvanced.checkpoint.stage).toBe("submitted");
   });
+
+  it("claims a recoverable registration tab before creating an exact-domain account", async () => {
+    const registration = { url: job.applicationUrl, title: "Create account", controls: [
+      { ref: "email", tag: "input", role: "textbox", name: "Email", type: "email", value: null,
+        required: true, options: [] },
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "confirm", tag: "input", role: "textbox", name: "Confirm password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "register", tag: "button", role: "button", name: "Create account", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: job.applicationUrl, title: "Apply", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/registration.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const account = { id: "example", email: "test@example.com", domains: ["jobs.example.com"],
+      passwordSecretRef: "keychain://example", allowAccountCreation: true };
+    const verify = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
+    const register = vi.fn(async () => application);
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const advance = vi.spyOn(workflow, "advance");
+    const options = { verify, validateOfficial: async () => true, account,
+      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => registration, pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
+        register, act: async () => application, fillBatch: async () => application,
+        submit: async () => "Thank you for applying" }, close: async () => {} }),
+    };
+    const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(register).toHaveBeenCalledWith("test@example.com", "private-password");
+    expect(advance).toHaveBeenCalledWith(job.id, "waiting-human", expect.objectContaining({
+      blocker: "Account registration may need human completion", browserPageId: 7 }));
+    const failedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const failed = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
+      ...options, browserFactory: async () => ({ browser: {
+        ...(await options.browserFactory()).browser,
+        register: async () => { throw new Error("registration uncertain"); },
+      }, close: async () => {} }),
+    });
+    expect(failed.checkpoint.stage).toBe("waiting-human");
+    await expect(runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", options))
+      .rejects.toThrow("inspect or resume");
+  });
 });
