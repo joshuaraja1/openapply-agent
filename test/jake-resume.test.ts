@@ -57,6 +57,9 @@ describe("Jake résumé source generation", () => {
     const empty = candidateProfileSchema.parse({ ...candidate, experience: [], projects: [] });
     expect(() => createJakeResumeSource(template, job, empty)).toThrow("No approved");
     expect(() => createJakeResumeSource("\\documentclass{article}", job, candidate)).toThrow("markers");
+    const credentialUrl = candidateProfileSchema.parse({ ...candidate,
+      identity: { ...candidate.identity, portfolio: "https://user:secret@example.com/" } });
+    expect(() => createJakeResumeSource(template, job, credentialUrl)).toThrow("credentials");
   });
 
   it("escapes TeX control characters in user facts", () => {

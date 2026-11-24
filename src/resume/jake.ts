@@ -21,6 +21,7 @@ export function escapeLatex(value: string): string {
 function safeUrl(value: string): string {
   const url = new URL(value);
   if (!(["http:", "https:"].includes(url.protocol))) throw new Error("Résumé link must use HTTP or HTTPS");
+  if (url.username || url.password) throw new Error("Résumé link must not contain credentials");
   return escapeHref(url.href);
 }
 
