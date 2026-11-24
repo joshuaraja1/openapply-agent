@@ -47,6 +47,11 @@ npm start
 
 The output is a ranked local queue containing an evidence-filtered résumé brief and a guarded browser handoff. See [the workflow guide](docs/workflow.md), [architecture](docs/architecture.md), and [safety model](docs/safety.md).
 
+To process that queue sequentially with a restart-safe daily cap, use
+[`queue:run` and its setup guide](docs/queue-runner.md). This runner renders a
+role-specific PDF in Overleaf, creates a private application package, fills
+supported fields, and records the resulting checkpoint.
+
 For a single application, create private render input containing the selected
 `job`, its configured official `source`, `candidate`, BrowserOS endpoint,
 Overleaf project URL, and a private output directory. Generate the tailored
