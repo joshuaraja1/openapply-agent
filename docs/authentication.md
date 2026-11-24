@@ -44,6 +44,8 @@ Use the same secret reference in the private authentication policy. The
 onboarding UI and Windows/Linux backends are still planned. Never
 put passwords in Markdown, JSON, logs, command arguments, environment
 variables, generated artifacts, or the repository.
+The `keychain://application-state/` namespace is reserved for OpenApply's
+encryption key and cannot be used for account credentials.
 
 Set `authenticationPolicyPath` in the private queue configuration to enable
 automatic sign-in when a supported same-host portal shows a login form. The
@@ -52,6 +54,10 @@ Automatic sign-in requires an exact host in the account's `domains` list and
 a password already stored under its Keychain reference. BrowserOS fills the
 credential without saving it in the browser profile. Ambiguous login controls,
 identity-provider redirects, and failed sign-ins pause for human handling.
+If sign-in lands on a different page, OpenApply continues only when the same
+requisition identifier appears in both the original and returned URLs and the
+returned page visibly identifies the company and role. Otherwise it pauses
+before filling or submitting the form.
 
 New-account creation is still planned. The current runner pauses at registration
 forms, even when `allowAccountCreation` is true. A future implementation may

@@ -62,9 +62,13 @@ export class NeoApplicationBrowser {
         && /^(sign in|log in|login)$/i.test(control.name.trim())).length !== 1) {
       throw new Error("BrowserOS did not identify a portal login form");
     }
-    success(await this.client.callTool({ name: "credentials", arguments: {
+    const credentialResult = await this.client.callTool({ name: "credentials", arguments: {
       action: "fill", page: this.page, username: email, password,
-    } }), "credential fill");
+    } });
+    if (credentialResult.isError
+      || (credentialResult.structuredContent as { source?: unknown } | undefined)?.source !== "provided") {
+      throw new Error("BrowserOS did not confirm portal credential fill");
+    }
     const filled = await this.snapshot();
     const signIn = filled.controls.filter((control) => control.tag === "button"
       && /^(sign in|log in|login)$/i.test(control.name.trim()));

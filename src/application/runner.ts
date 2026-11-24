@@ -66,6 +66,17 @@ function identifiesJob(page: BrowserSnapshot, job: DiscoveredJob): boolean {
   return text.includes(job.title.toLowerCase()) && text.includes(job.company.toLowerCase());
 }
 
+function hasStableJobReference(page: BrowserSnapshot, job: DiscoveredJob): boolean {
+  const reference = job.id.split(":").at(-1)?.toLowerCase();
+  if (!reference || !/^[a-z0-9_-]{6,}$/.test(reference)) return false;
+  const contains = (url: string): boolean => {
+    const parsed = new URL(url);
+    return [...parsed.pathname.split("/"), ...parsed.searchParams.values()]
+      .some((part) => decodeURIComponent(part).toLowerCase() === reference);
+  };
+  return contains(job.applicationUrl) && contains(page.url) && identifiesJob(page, job);
+}
+
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
   if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
   const batch = await fetchSourceBatch([pkg.source], 5000);
@@ -178,7 +189,8 @@ export async function runApplicationPackage(
     })();
   let recoveryPageUrl = current?.browserPageUrl;
   let recoveryResumeUploaded = current?.resumeUploaded === true;
-  let loginRecoveryPending = false;
+  let loginRecoveryPending = resumingHuman
+    && current?.blocker?.startsWith("Portal sign-in needs human completion") === true;
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
@@ -190,16 +202,16 @@ export async function runApplicationPackage(
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
     }
-    if (resumingHuman && current!.blocker?.startsWith("Portal sign-in needs human completion")
-      && snapshot.url !== current!.browserPageUrl && !identifiesJob(snapshot, job)) {
-      throw new Error("Returned employer page does not identify the approved job");
+    let loginBlocker: string | undefined;
+    if (loginRecoveryPending && snapshot.url !== current!.browserPageUrl
+      && !hasStableJobReference(snapshot, job)) {
+      loginBlocker = "Post-login page cannot be bound to this requisition";
     }
     recoveryPageUrl = snapshot.url;
     const loginPage = snapshot.controls.some((control) =>
       /^(password|account password)$/i.test(control.name.trim()))
       && snapshot.controls.some((control) => control.tag === "button"
         && /^(sign in|log in|login)$/i.test(control.name.trim()));
-    let loginBlocker: string | undefined;
     let authenticatedRedirect = false;
     if (loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
       const account = dependencies.account;
@@ -216,8 +228,8 @@ export async function runApplicationPackage(
             throw new Error("Portal sign-in left the approved employer destination");
           }
           authenticatedRedirect = snapshot.url !== job.applicationUrl;
-          if (authenticatedRedirect && !identifiesJob(snapshot, job)) {
-            throw new Error("Signed-in employer page does not identify the approved job");
+          if (authenticatedRedirect && !hasStableJobReference(snapshot, job)) {
+            loginBlocker = "Post-login page cannot be bound to this requisition";
           }
           recoveryPageUrl = snapshot.url;
         }
@@ -236,7 +248,7 @@ export async function runApplicationPackage(
     let page = snapshot;
     let filled = { snapshot, blockers: [] as string[], uploaded: false };
     const visited = new Set<string>();
-    for (let step = 0; step < 5; step += 1) {
+    for (let step = 0; step < 5 && !loginBlocker; step += 1) {
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
       resumeUploaded ||= filled.uploaded;
       recoveryResumeUploaded = resumeUploaded;

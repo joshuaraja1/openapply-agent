@@ -63,6 +63,15 @@ describe("authentication policy", () => {
       ...validPolicy,
       accounts: [{ ...validPolicy.accounts[0], password: "plaintext" }],
     }).success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      accounts: [{ ...validPolicy.accounts[0], passwordSecretRef: "keychain://application-state/main" }],
+    }).success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      emailVerification: { ...validPolicy.emailVerification,
+        oauthSecretRef: "keychain://application-state/main" },
+    }).success).toBe(false);
   });
 
   it("requires OAuth details before enabling email-code automation", () => {

@@ -6,6 +6,10 @@ const secretReferenceSchema = z.string().regex(
   /^(keychain|credential-manager|secret-service):\/\/[A-Za-z0-9._/@:-]+$/,
   "Use an operating-system secret reference; never put a password in configuration",
 );
+const userSecretReferenceSchema = secretReferenceSchema.refine(
+  (reference) => !reference.startsWith("keychain://application-state/"),
+  "Application-state encryption keys cannot be used as account credentials",
+);
 
 const domainSchema = z.string().regex(
   /^(?:\*\.)?(?=.{4,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i,
@@ -17,7 +21,7 @@ export const siteAccountSchema = z.strictObject({
   email: z.string().email(),
   username: z.string().min(1).optional(),
   domains: z.array(domainSchema).min(1),
-  passwordSecretRef: secretReferenceSchema,
+  passwordSecretRef: userSecretReferenceSchema,
   allowAccountCreation: z.boolean().default(false),
 });
 
@@ -37,7 +41,7 @@ export const authenticationPolicySchema = z.strictObject({
     enabled: z.boolean().default(false),
     provider: z.enum(["gmail", "microsoft"]).optional(),
     accountId: z.string().min(1).optional(),
-    oauthSecretRef: secretReferenceSchema.optional(),
+    oauthSecretRef: userSecretReferenceSchema.optional(),
     allowedSenderDomains: z.array(domainSchema).default([]),
     maximumMessageAgeSeconds: z.number().int().min(30).max(900).default(300),
     autoEnter: z.boolean().default(false),
