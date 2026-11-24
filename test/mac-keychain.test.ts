@@ -1,6 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { MacKeychainSecretStore, getOrCreateStateKey } from "../src/storage/mac-keychain.js";
 
@@ -34,41 +32,31 @@ describe("macOS Keychain secret store", () => {
   });
 
   it("creates a 256-bit key once and reuses it across launches", async () => {
-    const root = await mkdtemp(join(tmpdir(), "openapply-key-test-"));
-    try {
-      const { store, values } = fakeKeychain();
-      const lock = join(root, "key.lock");
-      const first = await getOrCreateStateKey(store, reference, lock);
-      const second = await getOrCreateStateKey(store, reference, lock);
-      expect(first).toHaveLength(32);
-      expect(second).toEqual(first);
-      values.set("com.openapply.agent:application-state/main", "invalid");
-      await expect(getOrCreateStateKey(store, reference, lock)).rejects.toThrow("invalid");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    const { store, values } = fakeKeychain();
+    const keyReference = `keychain://test/${randomUUID()}`;
+    const first = await getOrCreateStateKey(store, keyReference);
+    const second = await getOrCreateStateKey(store, keyReference);
+    expect(first).toHaveLength(32);
+    expect(second).toEqual(first);
+    values.set(`com.openapply.agent:test/${keyReference.split("/").at(-1)}`, "invalid");
+    await expect(getOrCreateStateKey(store, keyReference)).rejects.toThrow("invalid");
   });
 
   it("keeps a second initializer out while the key lock exists", async () => {
-    const root = await mkdtemp(join(tmpdir(), "openapply-key-test-"));
-    try {
-      const { store } = fakeKeychain();
-      const lock = join(root, "key.lock");
-      let release!: () => void;
-      const pending = new Promise<void>((resolve) => { release = resolve; });
-      const slow = {
-        get: vi.fn().mockImplementationOnce(async () => { await pending; return undefined; })
-          .mockImplementation(store.get.bind(store)),
-        put: store.put.bind(store),
-        delete: store.delete.bind(store),
-      };
-      const first = getOrCreateStateKey(slow, reference, lock);
-      await vi.waitFor(() => expect(slow.get).toHaveBeenCalled());
-      await expect(getOrCreateStateKey(store, reference, lock)).rejects.toThrow();
-      release();
-      await first;
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+    const { store } = fakeKeychain();
+    const keyReference = `keychain://test/${randomUUID()}`;
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const slow = {
+      get: vi.fn().mockImplementationOnce(async () => { await pending; return undefined; })
+        .mockImplementation(store.get.bind(store)),
+      put: store.put.bind(store),
+      delete: store.delete.bind(store),
+    };
+    const first = getOrCreateStateKey(slow, keyReference);
+    await vi.waitFor(() => expect(slow.get).toHaveBeenCalled());
+    await expect(getOrCreateStateKey(store, keyReference)).rejects.toThrow();
+    release();
+    await first;
   });
 });

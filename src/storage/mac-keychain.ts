@@ -1,6 +1,7 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, rmdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { AsyncEntry } from "@napi-rs/keyring";
 import type { SecretStore } from "./contracts.js";
 
@@ -43,14 +44,20 @@ export class MacKeychainSecretStore implements SecretStore {
   }
 }
 
-/** Lock key initialization so concurrent processes cannot overwrite each other's key. */
-export async function getOrCreateStateKey(store: SecretStore, reference: string, lockPath: string): Promise<Buffer> {
-  const lock = resolve(lockPath);
-  await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-  const parent = await lstat(dirname(lock));
-  if (!parent.isDirectory() || parent.isSymbolicLink()) throw new Error("Key lock parent must be a real directory");
-  if (process.getuid && parent.uid !== process.getuid()) throw new Error("Key lock directory has another owner");
-  if (process.platform !== "win32" && (parent.mode & 0o077) !== 0) throw new Error("Key lock directory must be private");
+/** Lock key initialization under one canonical path per OS user and reference. */
+export async function getOrCreateStateKey(store: SecretStore, reference: string): Promise<Buffer> {
+  accountFromReference(reference);
+  const root = join(homedir(), ".openapply-agent");
+  const parentPath = join(root, "key-init");
+  const name = createHash("sha256").update(reference).digest("hex");
+  const lock = join(parentPath, `${name}.lock`);
+  await mkdir(parentPath, { recursive: true, mode: 0o700 });
+  for (const path of [root, parentPath]) {
+    const metadata = await lstat(path);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Key lock parent must be a real directory");
+    if (process.getuid && metadata.uid !== process.getuid()) throw new Error("Key lock directory has another owner");
+    if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) throw new Error("Key lock directory must be private");
+  }
   await mkdir(lock, { mode: 0o700 });
   try {
     const existing = await store.get(reference);

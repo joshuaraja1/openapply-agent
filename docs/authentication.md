@@ -56,9 +56,9 @@ secret store.
 The encrypted checkpoint store takes a 32-byte key from a trusted secret store.
 The key must stay outside the repository, configuration files, and process
 arguments. `getOrCreateStateKey` creates and retrieves it from Keychain under
-a private filesystem lock. The lock path must be in a directory owned by the
-current user with mode `0700`. If initialization crashes, inspect active
-OpenApply processes before removing the empty lock directory. After a crash,
+a canonical private filesystem lock in `~/.openapply-agent/key-init/`. If
+initialization crashes, inspect active OpenApply processes before removing
+the empty lock directory. After a crash,
 inspect active OpenApply processes before calling
 `recoverLockAfterInspection(true)` on the checkpoint store. This explicit
 recovery preserves the single-writer guarantee.
