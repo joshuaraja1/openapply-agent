@@ -7,7 +7,8 @@ OpenApply prepares, explains, and audits. It does not assume that every visible 
 ## Mandatory stops
 
 - CAPTCHA or anti-bot challenge.
-- MFA, one-time codes, or login recovery.
+- Authenticator-app MFA, security keys, login recovery, or any ambiguous verification message.
+- Email verification when OAuth consent is absent, the sender or application does not match, the code is stale, or more than one code is plausible.
 - Missing work-authorization, demographic, legal, clearance, GPA, SAT, or ACT facts.
 - A claim not supported by an allowed source.
 - A privacy, AI-use, conflict-of-interest, export-control, or criminal-history attestation that has not been reviewed.

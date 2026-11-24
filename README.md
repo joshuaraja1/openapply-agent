@@ -32,7 +32,7 @@ npm run check
 
 ## Quick start
 
-1. Copy `templates/user/` to a private directory and complete the Markdown files.
+1. Copy `templates/user/` to a private directory and complete the Markdown files, including the authentication and browser-profile policy.
 2. Copy the JSON files in `examples/` and replace the examples with private, verified data.
 3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
@@ -73,9 +73,15 @@ uses browser workflows.
 During BrowserOS neo onboarding, import the browser profile you intend to use,
 or sign in manually to each required service inside BrowserOS neo. At minimum,
 verify the relevant job boards and Overleaf. Employer portals may still require
-their own account, MFA, or one-time code. Never place account passwords,
+their own account, MFA, or one-time code. Configure which email each site should
+use and whether account creation is allowed in the private authentication policy.
+Enter actual passwords only through the local onboarding UI so they are stored in
+the operating-system secret store. Never place account passwords,
 session cookies, MFA secrets, or recovery codes in this repository or its JSON
 configuration files.
+
+See [authentication and session handling](docs/authentication.md) for profile
+import, persistent cookies, account creation, and scoped email-code automation.
 
 ### 3. Connect your coding agent
 

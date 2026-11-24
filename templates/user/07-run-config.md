@@ -10,6 +10,7 @@ Keep the completed copy private. Use absolute paths where possible.
 - Claim-source policy: `{{ABSOLUTE PATH}}`
 - Resume-tailoring rules: `{{ABSOLUTE PATH}}`
 - Approved application answers: `{{ABSOLUTE PATH}}`
+- Authentication policy: `{{ABSOLUTE PATH TO PRIVATE AUTHENTICATION JSON}}`
 - Master resume template: `{{ABSOLUTE PATH TO LATEX OR DOCX}}`
 - Resume template choice: `{{DEFAULT JAKE GUTIERREZ TEMPLATE / USER-APPROVED CUSTOM TEMPLATE}}`
 - Private Overleaf project URL: `{{URL}}`
@@ -24,6 +25,7 @@ Keep the completed copy private. Use absolute paths where possible.
 - Browser-search configuration: `{{ABSOLUTE PATH TO BROWSER SEARCH JSON}}`
 - Persistent discovery state: `{{ABSOLUTE PATH}}`
 - BrowserOS endpoint: `{{EXAMPLE: http://127.0.0.1:9010/mcp}}`
+- Browser profile: `{{DEDICATED PERSISTENT PROFILE NAME}}`
 - Search frequency: `{{EXAMPLE: HOURLY}}`
 - Time zone: `{{IANA TIME ZONE}}`
 
@@ -41,7 +43,8 @@ Keep the completed copy private. Use absolute paths where possible.
 Confirm whether each item must stop for the user:
 
 - CAPTCHA: `{{YES}}`
-- MFA or one-time code: `{{YES}}`
+- Email-address verification code: `{{AUTOMATIC WHEN UNAMBIGUOUS / STOP}}`
+- Authenticator app, security key, recovery flow, or other MFA: `{{YES}}`
 - Missing required fact: `{{YES}}`
 - Legal or compliance attestation not already approved: `{{YES}}`
 - Compensation without a published range: `{{YES/NO}}`

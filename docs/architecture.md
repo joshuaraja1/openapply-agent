@@ -29,6 +29,8 @@ Private candidate facts ──► evidence matching│
 - `src/resume`: a brief containing only supported claims.
 - `src/application`: domain restrictions and mandatory stop conditions.
 - `src/browser`: signed-in lead discovery through BrowserOS neo; output remains unverified until official-source validation.
+- `src/auth`: local browser-profile, account-selection, secret-reference, and email-verification policy.
 - `src/cli.ts`: local orchestration and auditable JSON output.
 
 Discovery can run on a scheduler. Résumé files, browser sessions, MFA, and application answers stay local.
+Passwords and OAuth refresh tokens are represented only by operating-system secret references.

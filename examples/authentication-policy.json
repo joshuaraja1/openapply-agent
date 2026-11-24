@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "browserProfile": {
+    "strategy": "import-once",
+    "sourceBrowser": "chrome",
+    "sourceProfile": "Default",
+    "importCookies": true,
+    "importPasswords": true,
+    "persistSessions": true,
+    "requireInteractiveConsent": true
+  },
+  "accounts": [
+    {
+      "id": "job-search",
+      "email": "candidate@example.com",
+      "domains": ["linkedin.com", "*.myworkdayjobs.com", "*.greenhouse.io", "*.ashbyhq.com"],
+      "passwordSecretRef": "keychain://openapply/job-search",
+      "allowAccountCreation": true
+    }
+  ],
+  "emailVerification": {
+    "enabled": true,
+    "provider": "gmail",
+    "accountId": "job-search",
+    "oauthSecretRef": "keychain://openapply/gmail-oauth",
+    "allowedSenderDomains": ["example.com"],
+    "maximumMessageAgeSeconds": 300,
+    "autoEnter": true
+  }
+}
