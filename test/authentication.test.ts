@@ -29,6 +29,7 @@ const validPolicy = {
     enabled: true,
     provider: "gmail",
     accountId: "jobs",
+    oauthClientId: "test-client.apps.googleusercontent.com",
     oauthSecretRef: "keychain://openapply/gmail-oauth",
     allowedSenderDomains: ["example.com"],
     maximumMessageAgeSeconds: 300,

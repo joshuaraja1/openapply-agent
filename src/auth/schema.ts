@@ -41,6 +41,8 @@ export const authenticationPolicySchema = z.strictObject({
     enabled: z.boolean().default(false),
     provider: z.enum(["gmail", "microsoft"]).optional(),
     accountId: z.string().min(1).optional(),
+    oauthClientId: z.string().regex(/^[A-Za-z0-9._-]{10,200}$/).optional(),
+    microsoftTenant: z.string().regex(/^(?:common|organizations|consumers|[a-f0-9-]{36})$/i).optional(),
     oauthSecretRef: userSecretReferenceSchema.optional(),
     allowedSenderDomains: z.array(domainSchema).default([]),
     maximumMessageAgeSeconds: z.number().int().min(30).max(900).default(300),
@@ -54,7 +56,7 @@ export const authenticationPolicySchema = z.strictObject({
       });
     }
     if (!value.enabled) return;
-    for (const field of ["provider", "accountId", "oauthSecretRef"] as const) {
+    for (const field of ["provider", "accountId", "oauthClientId", "oauthSecretRef"] as const) {
       if (!value[field]) {
         context.addIssue({
           code: "custom",
