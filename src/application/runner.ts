@@ -70,7 +70,11 @@ export async function runApplicationPackage(
   if (current && current.officialUrl !== job.applicationUrl) throw new Error("Application ID already belongs to another URL");
   const resumingApproval = current?.stage === "waiting-human"
     && current.blocker === "Final submission approval required"
-    && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval";
+    && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval"
+    && !pkg.handoff.stopConditions.includes("final-submit");
+  if (dependencies.approvedJobId && !resumingApproval) {
+    throw new Error("Approval requires a matching pending final-approval checkpoint");
+  }
   if (current && !resumingApproval
     && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
     throw new Error(`Application is ${current.stage}; inspect or resume it before another run`);
@@ -83,8 +87,10 @@ export async function runApplicationPackage(
   if (artifact.jobId !== job.id || artifact.sourceFingerprint !== pkg.resumeSource.fingerprint) {
     throw new Error("Verified résumé artifact belongs to another job or source");
   }
-  if (current?.artifactPath && current.artifactPath !== artifact.path) {
-    throw new Error("Application checkpoint belongs to a different résumé artifact");
+  if (current?.artifactPath && (current.artifactPath !== artifact.path
+    || current.artifactSha256 !== artifact.pdfSha256
+    || current.sourceFingerprint !== artifact.sourceFingerprint)) {
+    throw new Error("Application checkpoint belongs to a different résumé artifact or source");
   }
   let checkpoint = current ?? await workflow.create(job.id, job.applicationUrl);
   if (resumingApproval) checkpoint = await workflow.advance(job.id, "applying");
@@ -93,7 +99,10 @@ export async function runApplicationPackage(
       checkpoint = await workflow.advance(job.id, stage);
     }
   }
-  if (checkpoint.stage === "tailored") checkpoint = await workflow.advance(job.id, "rendered", { artifactPath: artifact.path });
+  if (checkpoint.stage === "tailored") checkpoint = await workflow.advance(job.id, "rendered", {
+    artifactPath: artifact.path, artifactSha256: artifact.pdfSha256,
+    sourceFingerprint: artifact.sourceFingerprint,
+  });
   if (checkpoint.stage === "rendered") checkpoint = await workflow.advance(job.id, "applying");
   const runtime = await (dependencies.launch ?? launchBrowser)({ profileDirectory, headless: false });
   try {
@@ -102,7 +111,7 @@ export async function runApplicationPackage(
     const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path);
     if (filled.blockers.length) {
       checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: filled.blockers.join("; ") });
-    } else if (pkg.handoff.mode === "prepare") {
+    } else if (pkg.handoff.mode === "prepare" || pkg.handoff.stopConditions.includes("final-submit")) {
       checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Final submission approval required" });
     } else if (!pkg.expectedConfirmation) {
       checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Expected employer confirmation text is not configured" });

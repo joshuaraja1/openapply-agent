@@ -21,7 +21,8 @@ async function ready() {
   await workflow.advance("job", "validated");
   await workflow.advance("job", "matched");
   await workflow.advance("job", "tailored");
-  await workflow.advance("job", "rendered", { artifactPath: "/private/job.pdf" });
+  await workflow.advance("job", "rendered", { artifactPath: "/private/job.pdf",
+    artifactSha256: "a".repeat(64), sourceFingerprint: "b".repeat(64) });
   await workflow.advance("job", "applying");
   return { store, workflow };
 }
@@ -53,6 +54,8 @@ describe("submission verification", () => {
     const browser = { currentUrl: () => handoff.applicationUrl, submit: vi.fn(async () => "Thank you") };
     await expect(submitApplication(workflow, browser, "job", "1:0", "Thank you", { ...handoff, mode: "prepare" }))
       .rejects.toThrow("not authorized");
+    await expect(submitApplication(workflow, browser, "job", "1:0", "Thank you",
+      { ...handoff, stopConditions: ["captcha", "final-submit"] })).rejects.toThrow("not authorized");
     await expect(submitApplication(workflow, browser, "job", "1:0", "Thank you", { ...handoff, applicationUrl: "https://wrong.example/job" }))
       .rejects.toThrow("not authorized");
     const wrongTab = { currentUrl: () => "https://jobs.example.com/another-job", submit: browser.submit };

@@ -76,4 +76,6 @@ approval required by policy. It does not yet create accounts, read email codes,
 or handle multi-step forms; those require provider adapters and onboarding.
 If final approval is required, set `OPENAPPLY_APPROVE_JOB_ID` to the exact job
 ID on the next run. Only that approval blocker is resumable this way. The
-official posting, PDF, and page state are rechecked before submission.
+official posting, PDF hash, source fingerprint, and page state are rechecked
+before submission. Older checkpoints without both fingerprints cannot resume
+automatically and require operator inspection before recovery.

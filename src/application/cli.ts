@@ -12,7 +12,8 @@ const pkg = applicationPackageSchema.parse(JSON.parse(await readFile(packagePath
 const approvedJobId = process.env.OPENAPPLY_APPROVE_JOB_ID;
 if (approvedJobId && approvedJobId !== pkg.job.id) throw new Error("Approval job ID does not match the package");
 const authorizedPackage = approvedJobId
-  ? { ...pkg, handoff: { ...pkg.handoff, mode: "submit-after-approval" as const } } : pkg;
+  ? { ...pkg, handoff: { ...pkg.handoff, mode: "submit-after-approval" as const,
+    stopConditions: pkg.handoff.stopConditions.filter((condition) => condition !== "final-submit") } } : pkg;
 const home = join(userInfo().homedir, ".openapply-agent");
 const statePath = join(home, "applications.enc.json");
 const profileDirectory = join(home, "browser-profile");

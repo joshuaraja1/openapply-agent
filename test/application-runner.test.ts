@@ -141,8 +141,14 @@ describe("application runner", () => {
       expect(result.checkpoint.blocker).toContain("approval");
       expect(browser.uploaded[0]).toEqual(bytes);
       const approved = applicationPackageSchema.parse({ ...pkg,
-        handoff: { ...pkg.handoff, mode: "submit-after-approval" },
+        handoff: { ...pkg.handoff, mode: "submit-after-approval",
+          stopConditions: pkg.handoff.stopConditions.filter((condition) => condition !== "final-submit") },
         expectedConfirmation: "Thank you for applying" });
+      await expect(runApplicationPackage(approved, workflow, join(root, "other-profile"), {
+        verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+          pdfSha256: "0".repeat(64), path, pages: 1, verifiedAt: new Date().toISOString() }),
+        validateOfficial: async () => true, approvedJobId: job.id,
+      })).rejects.toThrow("different résumé artifact");
       const resumed = await runApplicationPackage(approved, workflow,
         join(root, "other-profile"), { verify: async () => ({ jobId: job.id,
           sourceFingerprint: pkg.resumeSource.fingerprint,
@@ -153,5 +159,14 @@ describe("application runner", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("rejects an approval token before a final-approval checkpoint exists", async () => {
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/resume.pdf", expectedConfirmation: "Thank you for applying" });
+    await expect(runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { approvedJobId: job.id })).rejects.toThrow("pending final-approval");
   });
 });

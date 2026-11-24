@@ -34,6 +34,8 @@ export interface ApplicationCheckpoint {
   officialUrl: string;
   stage: ApplicationStage;
   artifactPath?: string;
+  artifactSha256?: string;
+  sourceFingerprint?: string;
   confirmation?: string;
   blocker?: string;
   updatedAt: string;
@@ -58,27 +60,32 @@ export class ApplicationWorkflow {
   async advance(
     jobId: string,
     stage: ApplicationStage,
-    details: Pick<ApplicationCheckpoint, "artifactPath" | "confirmation" | "blocker"> = {},
+    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker"> = {},
   ): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
     if (!current) throw new Error(`Application ${jobId} does not exist`);
     if (!nextStages[current.state.stage].has(stage)) {
       throw new Error(`Invalid application transition ${current.state.stage} -> ${stage}`);
     }
-    if (stage === "applying" && !current.state.artifactPath) {
+    if (stage === "applying" && (!current.state.artifactPath || !current.state.artifactSha256
+      || !current.state.sourceFingerprint)) {
       throw new Error("A verified resume artifact is required before applying");
     }
     if (details.confirmation && stage !== "submitted") {
       throw new Error("Employer confirmation belongs only to a submitted application");
     }
-    if (details.artifactPath && stage !== "rendered") {
+    if ((details.artifactPath || details.artifactSha256 || details.sourceFingerprint) && stage !== "rendered") {
       throw new Error("Resume artifact changes require a rendered checkpoint");
     }
     if (stage === "submitted" && !details.confirmation) {
       throw new Error("Submission requires an employer confirmation");
     }
-    if (stage === "rendered" && !details.artifactPath) {
+    if (stage === "rendered" && (!details.artifactPath || !details.artifactSha256 || !details.sourceFingerprint)) {
       throw new Error("A verified resume artifact is required before applying");
+    }
+    if (stage === "rendered" && (!/^[a-f0-9]{64}$/.test(details.artifactSha256!)
+      || !/^[a-f0-9]{64}$/.test(details.sourceFingerprint!))) {
+      throw new Error("Verified résumé fingerprints must be SHA-256 digests");
     }
     if ((stage === "blocked" || stage === "waiting-human" || stage === "submission-uncertain") && !details.blocker) {
       throw new Error("A blocked application needs an exact reason");
