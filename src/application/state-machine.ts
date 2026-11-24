@@ -42,6 +42,10 @@ export interface ApplicationCheckpoint {
 export class ApplicationWorkflow {
   constructor(private readonly store: ApplicationStateStore<ApplicationCheckpoint>) {}
 
+  async current(jobId: string): Promise<ApplicationCheckpoint | undefined> {
+    return (await this.store.read(jobId))?.state;
+  }
+
   async create(jobId: string, officialUrl: string): Promise<ApplicationCheckpoint> {
     const checkpoint: ApplicationCheckpoint = {
       jobId, officialUrl, stage: "discovered", updatedAt: new Date().toISOString(),
