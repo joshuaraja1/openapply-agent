@@ -2,6 +2,13 @@
 
 OpenApply uses Jake Gutierrez's MIT-licensed LaTeX resume as its default layout. Users provide facts and preferences through private copies of the Markdown templates; the agent supplies only verified, role-relevant content.
 
+`createJakeResumeSource` now produces a separate LaTeX source and SHA-256
+fingerprint per job from approved candidate claims. It preserves the template
+preamble and layout, keeps experience chronology, orders supported bullets by
+relevance, and escapes candidate text. If no supported claim matches the
+posting, generation stops. It does not compile or verify a PDF yet; that
+renderer boundary must be completed before any automatic upload.
+
 ## One-time setup
 
 1. Create a blank Overleaf project.
