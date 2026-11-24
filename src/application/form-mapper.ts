@@ -46,6 +46,9 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
 export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
+  if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
+    blockers.push("Human verification is present on the application page");
+  }
   const counts = new Map<string, number>();
   for (const control of snapshot.controls) counts.set(key(control), (counts.get(key(control)) ?? 0) + 1);
   for (const control of snapshot.controls) {
@@ -65,13 +68,18 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
 }
 
 export async function fillApplicationForm(
-  browser: AgentBrowser,
+  browser: Pick<AgentBrowser, "act"> & { fillBatch?: (actions: FormAction[]) => Promise<BrowserSnapshot> },
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
+  if (browser.fillBatch) {
+    const filled = await browser.fillBatch(plan.actions);
+    if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");
+    return { snapshot: filled, blockers: [] };
+  }
   let current = snapshot;
   for (const action of plan.actions) {
     if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");

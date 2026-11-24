@@ -19,10 +19,11 @@ The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](te
 
 ## Development
 
-Requires Node.js 22.13 or later. BrowserOS neo supports signed-in job-board
-discovery and the current Overleaf workflow. The guarded application runner uses
-its own persistent local Chromium profile; public ATS discovery needs neither
-browser.
+Requires Node.js 22.13 or later. BrowserOS neo supplies one persistent signed-in
+profile for job-board discovery, Overleaf rendering, and queued applications.
+The single-job runner also uses BrowserOS when its private package contains a
+local endpoint. A separate persistent Chromium fallback remains available for
+packages without that endpoint. Public ATS discovery needs no browser.
 
 ```bash
 git clone https://github.com/joshuaraja1/openapply-agent.git

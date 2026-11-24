@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentBrowser } from "../browser/actions.js";
+import { AgentBrowser, type BrowserSnapshot } from "../browser/actions.js";
 import { launchBrowser, type BrowserRuntime } from "../browser/runtime.js";
 import { candidateProfileSchema } from "../candidate/schema.js";
 import { sourceSchema } from "../config.js";
@@ -31,6 +31,7 @@ export const applicationPackageSchema = z.object({
   resumeSource: z.object({ latex: z.string().min(1), fingerprint: z.string().length(64),
     renderToken: z.string().length(64), claimIds: z.array(z.string()).min(1) }),
   resumePdfPath: z.string().min(1),
+  browserEndpoint: z.url().optional(),
   expectedConfirmation: z.string().min(1).optional(),
 });
 
@@ -38,6 +39,13 @@ export type ApplicationPackage = z.infer<typeof applicationPackageSchema>;
 export interface RunResult { checkpoint: ApplicationCheckpoint; artifact: VerifiedResumeArtifact }
 
 type BrowserLaunch = (options: { profileDirectory: string; headless: boolean }) => Promise<BrowserRuntime>;
+export interface ApplicationBrowserSurface {
+  currentUrl(): string;
+  navigate(url: string): Promise<BrowserSnapshot>;
+  act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot>;
+  submit(ref: string, expectedConfirmation: string): Promise<string>;
+  fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
+}
 
 async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
   if (pkg.source.provider !== pkg.job.provider || pkg.source.company !== pkg.job.company) return false;
@@ -52,7 +60,9 @@ export async function runApplicationPackage(
   workflow: ApplicationWorkflow,
   profileDirectory: string,
   dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
-    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string } = {},
+    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string;
+    browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
+      Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
 ): Promise<RunResult> {
   const pkg = applicationPackageSchema.parse(input);
   const job = pkg.job as DiscoveredJob;
@@ -109,9 +119,15 @@ export async function runApplicationPackage(
     sourceFingerprint: artifact.sourceFingerprint,
   });
   if (checkpoint.stage === "rendered") checkpoint = await workflow.advance(job.id, "applying");
-  const runtime = await (dependencies.launch ?? launchBrowser)({ profileDirectory, headless: false });
+  const runtime = dependencies.browserFactory
+    ? await dependencies.browserFactory(new Set([host]), new Map([[artifact.path, artifact.pdfSha256]]))
+    : await (async () => {
+      const launched = await (dependencies.launch ?? launchBrowser)({ profileDirectory, headless: false });
+      return { browser: new AgentBrowser(launched.context, new Set([host]),
+        new Map([[artifact.path, artifact.pdfSha256]])), close: () => launched.close() };
+    })();
   try {
-    const browser = new AgentBrowser(runtime.context, new Set([host]), new Map([[artifact.path, artifact.pdfSha256]]));
+    const browser = runtime.browser;
     const snapshot = await browser.navigate(job.applicationUrl);
     const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path);
     if (filled.blockers.length) {

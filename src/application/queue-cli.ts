@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
+import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
@@ -70,13 +71,18 @@ try {
     const host = new URL(job.applicationUrl).hostname;
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
-      resumeSource, resumePdfPath: artifact.path,
+      resumeSource, resumePdfPath: artifact.path, browserEndpoint: config.browserEndpoint,
       ...(config.expectedConfirmationByDomain[host]
         ? { expectedConfirmation: config.expectedConfirmationByDomain[host] } : {}),
     });
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
     await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    await runApplicationPackage(pkg, workflow, join(root, "browser-profile"));
+    await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
+      browserFactory: async (allowedHosts, approvedArtifacts) => ({
+        browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
+        close: async () => {},
+      }),
+    });
   });
   console.log(JSON.stringify({ date: date(), outcomes }));
 } finally {
