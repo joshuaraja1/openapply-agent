@@ -3,6 +3,7 @@ import { z } from "zod";
 const baseSource = z.object({
   company: z.string().min(1),
   enabled: z.boolean().default(true),
+  allowedApplicationHosts: z.array(z.string().regex(/^[a-z0-9.-]+$/i)).default([]),
 });
 
 export const sourceSchema = z.discriminatedUnion("provider", [

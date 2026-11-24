@@ -24,7 +24,8 @@ const candidate = candidateProfileSchema.parse({ version: 1,
   authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
   skills: {}, education: [], experience: [], projects: [],
 });
-const source = { provider: "greenhouse" as const, boardToken: "example", company: "Example Co", enabled: true };
+const source = { provider: "greenhouse" as const, boardToken: "example", company: "Example Co",
+  enabled: true, allowedApplicationHosts: ["jobs.example.com"] };
 
 function browserFixture(extraRequired = false) {
   let confirmationVisible = false;
@@ -168,5 +169,15 @@ describe("application runner", () => {
       resumePdfPath: "/tmp/resume.pdf", expectedConfirmation: "Thank you for applying" });
     await expect(runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
       "/tmp/profile", { approvedJobId: job.id })).rejects.toThrow("pending final-approval");
+  });
+
+  it("rejects a posting whose application host was not independently configured", async () => {
+    const pkg = applicationPackageSchema.parse({ version: 1, job,
+      source: { ...source, allowedApplicationHosts: [] }, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/resume.pdf" });
+    await expect(runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile")).rejects.toThrow("approved employer destination");
   });
 });

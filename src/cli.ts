@@ -1,12 +1,13 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { createApplicationHandoff } from "./application/handoff.js";
+import { mergePendingQueue } from "./application/queue-merge.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
 import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.js";
 import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
+import { persistDiscoveryOutput } from "./storage/discovery-output.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -43,7 +44,7 @@ const evaluated = fetched.flatMap((job) => {
   return result && result.isFresh && !previous?.reportedAt ? [result] : [];
 });
 const tier = selectFreshnessTier(evaluated, input.preferredFreshnessHours, input.maximumFreshnessHours, now);
-const queue = tier.jobs
+const newQueue = tier.jobs
   .map((job) => ({ job, match: scoreJob(job, candidate, preferences) }))
   .filter((entry) => entry.match.eligible)
   .sort((a, b) => b.match.score - a.match.score)
@@ -54,12 +55,18 @@ const queue = tier.jobs
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-markJobsReported(state, queue.map((entry) => entry.job.id), now);
+markJobsReported(state, newQueue.map((entry) => entry.job.id), now);
+let previousQueue: typeof newQueue = [];
+try {
+  const previous = JSON.parse(await readFile(outputPath, "utf8")) as { queue?: unknown };
+  if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is (typeof newQueue)[number] =>
+    typeof entry === "object" && entry !== null && "job" in entry
+    && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
+    && typeof entry.job.id === "string");
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+const queue = mergePendingQueue(previousQueue, newQueue);
 
-await mkdir(dirname(outputPath), { recursive: true });
-await mkdir(dirname(statePath), { recursive: true });
-await Promise.all([
-  writeFile(outputPath, `${JSON.stringify({ generatedAt: now.toISOString(), tier: tier.tier, queue }, null, 2)}\n`),
-  writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`),
-]);
+await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
 console.log(`Prepared ${queue.length} application handoff(s) in ${outputPath}`);
