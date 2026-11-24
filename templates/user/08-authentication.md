@@ -37,7 +37,7 @@ and writes only the secret reference above to configuration.
 - Account label: `{{ACCOUNT LABEL FROM ABOVE}}`
 - Automatically enter a single unambiguous code: `{{YES/NO}}`
 - Maximum email age: `{{EXAMPLE: 5 MINUTES}}`
-- Allowed sender domains, or blank to learn per active portal: `{{DOMAINS}}`
+- Allowed sender domains (required for automatic entry): `{{DOMAINS}}`
 
 This permission covers short-lived email-address verification codes for the
 active job application only. CAPTCHA, authenticator-app codes, security keys,

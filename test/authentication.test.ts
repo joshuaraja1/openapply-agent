@@ -84,4 +84,19 @@ describe("authentication policy", () => {
     expect(accountForUrl(policy, "http://greenhouse.io/job")).toBeUndefined();
     expect(accountForUrl(policy, "https://jobs.greenhouse.io/job")).toBeUndefined();
   });
+
+  it("selects the most specific account and rejects duplicate domain mappings", () => {
+    const policy = authenticationPolicySchema.parse({
+      ...validPolicy,
+      accounts: [
+        validPolicy.accounts[0],
+        { id: "tenant", email: "tenant@example.com", domains: ["salesforce.wd12.myworkdayjobs.com"], passwordSecretRef: "keychain://openapply/tenant" },
+      ],
+    });
+    expect(accountForUrl(policy, "https://salesforce.wd12.myworkdayjobs.com/job")?.id).toBe("tenant");
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      accounts: [validPolicy.accounts[0], { ...validPolicy.accounts[0], id: "duplicate" }],
+    }).success).toBe(false);
+  });
 });

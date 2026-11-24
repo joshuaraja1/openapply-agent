@@ -70,6 +70,10 @@ export const authenticationPolicySchema = z.strictObject({
   if (new Set(accountIds).size !== accountIds.length) {
     context.addIssue({ code: "custom", path: ["accounts"], message: "Account IDs must be unique" });
   }
+  const domains = policy.accounts.flatMap((account) => account.domains.map((domain) => domain.toLowerCase()));
+  if (new Set(domains).size !== domains.length) {
+    context.addIssue({ code: "custom", path: ["accounts"], message: "A domain may belong to only one account" });
+  }
   if (policy.emailVerification.enabled && !accountIds.includes(policy.emailVerification.accountId ?? "")) {
     context.addIssue({ code: "custom", path: ["emailVerification", "accountId"], message: "Select a configured account" });
   }
@@ -85,10 +89,15 @@ export function accountForUrl(
   const parsed = new URL(url);
   if (parsed.protocol !== "https:") return undefined;
   const hostname = parsed.hostname.toLowerCase();
-  return policy.accounts.find((account) => account.domains.some((configuredDomain) => {
-    const domain = configuredDomain.toLowerCase().replace(/^\*\./, "");
-    return configuredDomain.startsWith("*.")
-      ? hostname.endsWith(`.${domain}`)
-      : hostname === domain;
-  }));
+  const matches = policy.accounts.flatMap((account) => account.domains
+    .filter((configuredDomain) => {
+      const domain = configuredDomain.toLowerCase().replace(/^\*\./, "");
+      return configuredDomain.startsWith("*.")
+        ? hostname.endsWith(`.${domain}`)
+        : hostname === domain;
+    })
+    .map((domain) => ({ account, specificity: domain.length })));
+  matches.sort((a, b) => b.specificity - a.specificity);
+  if (matches[0] && matches[1] && matches[0].specificity === matches[1].specificity) return undefined;
+  return matches[0]?.account;
 }
