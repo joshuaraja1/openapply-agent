@@ -52,9 +52,7 @@ export interface ApplicationBrowserSurface {
 }
 
 function stepSignature(page: BrowserSnapshot): string {
-  const headings = (page.visibleText ?? "").split("\n")
-    .filter((line) => /^\s*- heading\b/.test(line)).join("|");
-  return `${page.url}|${page.title}|${headings}|${page.controls.map((control) =>
+  return `${page.url}|${page.title}|${page.controls.map((control) =>
     `${control.tag}:${control.type}:${control.name}`).join("|")}`;
 }
 
