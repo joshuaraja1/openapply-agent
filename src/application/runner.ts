@@ -47,7 +47,8 @@ export interface ApplicationBrowserSurface {
   submit(ref: string, expectedConfirmation: string): Promise<string>;
   fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
   pageId?(): number | undefined;
-  attach?(pageId: number, expectedUrl: string): Promise<BrowserSnapshot>;
+  groupId?(): string | undefined;
+  attach?(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot>;
 }
 
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
@@ -101,6 +102,10 @@ export async function runApplicationPackage(
     && current.blocker !== "Final submission approval required" || current?.stage === "applying")
     && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
     && Boolean(dependencies.browserFactory);
+  if (resumingHuman && (!current?.browserGroupId || !current.browserEndpoint
+    || current.browserEndpoint !== pkg.browserEndpoint)) {
+    throw new Error("BrowserOS handoff requires the saved tab group and endpoint");
+  }
   if (dependencies.approvedJobId && !resumingApproval) {
     throw new Error("Approval requires a matching pending final-approval checkpoint");
   }
@@ -113,6 +118,10 @@ export async function runApplicationPackage(
       || dependencies.humanAnswerApproval.approveFinalSubmission !== true)) {
     throw new Error("Human answer approval does not match this BrowserOS handoff");
   }
+  const handoff = resumingHuman && dependencies.humanAnswerApproval
+    ? { ...pkg.handoff, mode: "submit-after-approval" as const,
+      stopConditions: pkg.handoff.stopConditions.filter((condition) => condition !== "final-submit") }
+    : pkg.handoff;
   if (current?.stage === "applying" && current.browserPageId && !resumingHuman) {
     throw new Error("An interrupted BrowserOS handoff requires explicit same-tab resume");
   }
@@ -155,7 +164,7 @@ export async function runApplicationPackage(
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     const snapshot = resumingHuman
-      ? await browser.attach!(current!.browserPageId!, job.applicationUrl)
+      ? await browser.attach!(current!.browserPageId!, job.applicationUrl, current!.browserGroupId!)
       : await browser.navigate(job.applicationUrl);
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
@@ -164,13 +173,19 @@ export async function runApplicationPackage(
       resumingHuman && dependencies.humanAnswerApproval
         ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {});
     const pageId = browser.pageId?.();
+    const groupId = browser.groupId?.();
+    if (pageId && (!groupId || !pkg.browserEndpoint)) {
+      throw new Error("BrowserOS application needs a stable tab group and endpoint for recovery");
+    }
     const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
+      ...(groupId ? { browserGroupId: groupId } : {}),
+      ...(pageId && pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
       ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };
     if (filled.blockers.length) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: filled.blockers.join("; "), ...pageDetails,
       });
-    } else if (pkg.handoff.mode === "prepare" || pkg.handoff.stopConditions.includes("final-submit")) {
+    } else if (handoff.mode === "prepare" || handoff.stopConditions.includes("final-submit")) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: "Final submission approval required", ...pageDetails,
       });
@@ -187,7 +202,7 @@ export async function runApplicationPackage(
         });
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
-          pkg.expectedConfirmation, pkg.handoff);
+          pkg.expectedConfirmation, handoff, pkg.browserEndpoint);
         checkpoint = (await workflow.current(job.id))!;
       }
     }
@@ -198,6 +213,8 @@ export async function runApplicationPackage(
       await workflow.advance(job.id, "waiting-human", {
         blocker: current?.blocker ?? "Human handoff needs another review",
         ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
+        ...(current?.browserGroupId ? { browserGroupId: current.browserGroupId } : {}),
+        ...(current?.browserEndpoint ? { browserEndpoint: current.browserEndpoint } : {}),
         ...(current?.packagePath ? { packagePath: current.packagePath } : {}),
       });
     }

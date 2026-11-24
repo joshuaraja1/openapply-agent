@@ -25,7 +25,8 @@ describe("manual submission reconciliation", () => {
         allowedApplicationHosts: ["jobs.example.com"] },
       handoff: createApplicationHandoff(job, true),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
-      resumePdfPath: "/private/resume.pdf", expectedConfirmation: "Thank you for applying" });
+      resumePdfPath: "/private/resume.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     await workflow.create(job.id, job.applicationUrl);
     await workflow.advance(job.id, "validated");
@@ -34,7 +35,8 @@ describe("manual submission reconciliation", () => {
     await workflow.advance(job.id, "rendered", { artifactPath: pkg.resumePdfPath,
       artifactSha256: "b".repeat(64), sourceFingerprint: pkg.resumeSource.fingerprint });
     await workflow.advance(job.id, "applying");
-    await workflow.advance(job.id, "waiting-human", { blocker: "CAPTCHA requires human action", browserPageId: 7 });
+    await workflow.advance(job.id, "waiting-human", { blocker: "CAPTCHA requires human action", browserPageId: 7,
+      browserGroupId: "AAAAAAAAAAAAAAAA", browserEndpoint: pkg.browserEndpoint! });
     const verify = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "b".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
     const unconfirmed = { inspectHandoff: async () => ({ url: "https://jobs.example.com/other",

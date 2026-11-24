@@ -39,6 +39,9 @@ const humanAnswerApproval = answerPath
   ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
 const endpoint = process.env.OPENAPPLY_BROWSER_ENDPOINT ?? pkg.browserEndpoint;
 if (endpoint) assertLocalBrowserEndpoint(endpoint);
+if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
+  throw new Error("BrowserOS endpoint differs from the saved application package");
+}
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>

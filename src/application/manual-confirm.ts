@@ -1,3 +1,6 @@
+import { lstat, readFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
+import { z } from "zod";
 import type { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { verifyResumePdf } from "../resume/verify-pdf.js";
 import type { DiscoveredJob } from "../types.js";
@@ -28,6 +31,8 @@ export async function confirmManualSubmission(
   const checkpoint = await workflow.current(pkg.job.id);
   if (!checkpoint || !["waiting-human", "applying", "submit-claimed", "submission-uncertain"].includes(checkpoint.stage)
     || checkpoint.officialUrl !== pkg.job.applicationUrl || !checkpoint.browserPageId
+    || !checkpoint.browserGroupId || !checkpoint.browserEndpoint
+    || checkpoint.browserEndpoint !== pkg.browserEndpoint
     || !pkg.expectedConfirmation) {
     throw new Error("No matching BrowserOS application awaits confirmation");
   }
@@ -41,7 +46,7 @@ export async function confirmManualSubmission(
     || checkpoint.sourceFingerprint !== artifact.sourceFingerprint) {
     throw new Error("Manual confirmation belongs to a different résumé artifact");
   }
-  const page = await browser.inspectHandoff(checkpoint.browserPageId);
+  const page = await browser.inspectHandoff(checkpoint.browserPageId, checkpoint.browserGroupId);
   const pageUrl = new URL(page.url);
   if (pageUrl.protocol !== "https:" || pageUrl.hostname.toLowerCase() !== approvedHost) {
     throw new Error("Employer confirmation page left the approved destination");
@@ -55,6 +60,3 @@ export async function confirmManualSubmission(
   }
   await workflow.advance(pkg.job.id, "submitted", { confirmation: expected });
 }
-import { lstat, readFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
-import { z } from "zod";

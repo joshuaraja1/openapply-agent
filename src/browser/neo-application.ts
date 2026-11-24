@@ -38,6 +38,7 @@ export function parseNeoSnapshot(message: string): BrowserSnapshot & { visibleTe
 
 export class NeoApplicationBrowser {
   private page: number | undefined;
+  private group: string | undefined;
   private latest: (BrowserSnapshot & { visibleText: string }) | undefined;
 
   constructor(private readonly client: BrowserToolClient,
@@ -50,17 +51,28 @@ export class NeoApplicationBrowser {
   }
 
   pageId(): number | undefined { return this.page; }
+  groupId(): string | undefined { return this.group; }
 
-  async attach(pageId: number, expectedUrl: string): Promise<BrowserSnapshot> {
-    const snapshot = await this.inspectHandoff(pageId);
+  private async listedGroup(pageId: number): Promise<string> {
+    const listing = success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
+    const line = listing.split("\n").find((entry) => entry.includes(`[${pageId}]`));
+    const group = line?.match(/\[group ([a-f0-9]{16,})\]/i)?.[1];
+    if (!group) throw new Error("BrowserOS handoff tab identity is unavailable");
+    return group;
+  }
+
+  async attach(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot> {
+    const snapshot = await this.inspectHandoff(pageId, expectedGroupId);
     if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
     return snapshot;
   }
 
-  async inspectHandoff(pageId: number): Promise<BrowserSnapshot & { visibleText: string }> {
+  async inspectHandoff(pageId: number, expectedGroupId: string): Promise<BrowserSnapshot & { visibleText: string }> {
     if (!Number.isInteger(pageId) || pageId < 1) throw new Error("Invalid BrowserOS handoff page");
-    success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
+    const group = await this.listedGroup(pageId);
+    if (group !== expectedGroupId) throw new Error("BrowserOS handoff tab identity changed");
     this.page = pageId;
+    this.group = group;
     return this.snapshot();
   }
 
@@ -83,6 +95,7 @@ export class NeoApplicationBrowser {
     const opened = await this.client.callTool({ name: "tabs", arguments: { action: "new", url } });
     success(opened, "open application");
     this.page = pageIdFromResult(opened);
+    this.group = await this.listedGroup(this.page);
     return this.snapshot();
   }
 

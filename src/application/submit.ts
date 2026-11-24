@@ -5,6 +5,7 @@ export interface SubmissionBrowser {
   currentUrl(): string;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
   pageId?(): number | undefined;
+  groupId?(): string | undefined;
 }
 
 export async function submitApplication(
@@ -14,6 +15,7 @@ export async function submitApplication(
   submitRef: string,
   expectedConfirmation: string,
   handoff: ApplicationHandoff,
+  browserEndpoint?: string,
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -25,7 +27,13 @@ export async function submitApplication(
     throw new Error("Application submission is not authorized for this job and destination");
   }
   const pageId = browser.pageId?.();
-  await workflow.advance(jobId, "submit-claimed", pageId ? { browserPageId: pageId } : {});
+  const groupId = browser.groupId?.();
+  const endpoint = browserEndpoint ?? current.browserEndpoint;
+  if (pageId && (!groupId || !endpoint)) {
+    throw new Error("BrowserOS submission lacks its saved browser identity");
+  }
+  await workflow.advance(jobId, "submit-claimed", pageId ? { browserPageId: pageId,
+    browserGroupId: groupId!, browserEndpoint: endpoint! } : {});
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
     await workflow.advance(jobId, "submitted", { confirmation });
