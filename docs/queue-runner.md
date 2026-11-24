@@ -39,6 +39,22 @@ for human handling. The queue output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a
 confirmed submission from a human handoff.
 
+On macOS, build the project, copy `examples/schedule.example.json` to a private
+path, set its paths and interval, then install a LaunchAgent. It runs at login
+and each interval while the user session is active. The installer writes a
+private plist and local logs; it does not store account passwords or cookies.
+
+```bash
+npm run build
+OPENAPPLY_SCHEDULE_CONFIG=/private/schedule.json npm run schedule:install
+npm run schedule:remove
+```
+
+Installing fails if an OpenApply LaunchAgent is already present. Remove it
+before changing the schedule. BrowserOS and Overleaf sessions must remain
+available for unattended runs; an unavailable session produces a failed job
+and eventually quarantines it for review.
+
 For unattended final submission, set `requireFinalApproval` to `false` in the
 private preferences and provide an exact employer confirmation string in
 `expectedConfirmationByDomain`. Missing confirmation text causes a safe pause.
