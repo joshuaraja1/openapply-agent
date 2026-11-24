@@ -8,6 +8,8 @@ export interface BrowserControl {
   name: string;
   type: string | null;
   value: string | null;
+  required: boolean;
+  options: string[];
 }
 
 export interface BrowserSnapshot {
@@ -49,7 +51,7 @@ export class AgentBrowser {
             return;
           }
         }
-        await route.continue();
+        await route.fallback();
       });
       this.routingReady = true;
     }
@@ -71,13 +73,23 @@ export class AgentBrowser {
       const ref = `${this.generation}:${controls.length}`;
       const tag = await handle.evaluate((element) => (element as Element).tagName.toLowerCase());
       const role = await handle.getAttribute("role");
-      const name = (await handle.getAttribute("aria-label"))
-        ?? (await handle.getAttribute("name"))
-        ?? (await handle.innerText().catch(() => ""));
+      const metadata = await handle.evaluate((element) => {
+        const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+        const label = field.labels?.[0]?.textContent?.trim();
+        return {
+          label: label ?? field.getAttribute("aria-label") ?? field.getAttribute("placeholder")
+            ?? field.getAttribute("name") ?? field.textContent ?? "",
+          required: field.matches(":required") || field.getAttribute("aria-required") === "true",
+          options: field.tagName === "SELECT"
+            ? Array.from((field as HTMLSelectElement).options, (option) => option.label.trim()) : [],
+        };
+      });
+      const name = metadata.label;
       const type = await handle.getAttribute("type");
       const value = null;
       this.controls.set(ref, handle as ElementHandle<HTMLElement>);
-      controls.push({ ref, tag, role, name: name.trim(), type, value });
+      controls.push({ ref, tag, role, name: name.trim(), type, value,
+        required: metadata.required, options: metadata.options });
     }
     return { url: page.url(), title: await page.title(), controls };
   }
@@ -101,7 +113,11 @@ export class AgentBrowser {
       await handle.fill(value);
       if (await handle.inputValue() !== value) throw new Error("Form value was not accepted");
     }
-    else if (action === "select" && value !== undefined) await handle.selectOption(value);
+    else if (action === "select" && value !== undefined) {
+      await handle.selectOption({ label: value });
+      const selected = await handle.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label.trim());
+      if (selected !== value) throw new Error("Selected option was not accepted");
+    }
     else if (action === "upload" && value !== undefined) {
       if (!this.approvedArtifacts.has(resolve(value))) throw new Error("Upload artifact is not approved for this application");
       await handle.setInputFiles(value);

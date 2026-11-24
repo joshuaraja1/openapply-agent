@@ -8,8 +8,10 @@ function fixture(fieldName = "email", fieldType: string | null = null) {
   let confirmationVisible = false;
   const handle = {
     isVisible: async () => true,
-    evaluate: async (callback: (node: { tagName: string; isConnected: boolean }) => unknown) =>
-      callback({ tagName: "INPUT", isConnected: connected }),
+    evaluate: async (callback: (node: object) => unknown) => callback({
+      tagName: "INPUT", isConnected: connected, labels: [], textContent: "",
+      matches: () => false, getAttribute: (name: string) => name === "name" ? fieldName : null,
+    }),
     getAttribute: async (name: string) => name === "name" ? fieldName : name === "type" ? fieldType : null,
     innerText: async () => "",
     inputValue: async () => value,
