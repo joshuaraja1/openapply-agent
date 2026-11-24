@@ -24,8 +24,12 @@ function normalize(value: string): string {
 }
 
 interface TextBox { x: number; y: number; width: number; height: number }
+const maxTextItemsPerPage = 1_500;
 
-function assertNoTextOverlap(boxes: TextBox[]): void {
+export function assertNoTextOverlap(boxes: TextBox[]): void {
+  if (boxes.length > maxTextItemsPerPage) {
+    throw new Error("Résumé PDF has too many text items to verify safely");
+  }
   for (let first = 0; first < boxes.length; first += 1) {
     const a = boxes[first]!;
     for (let second = first + 1; second < boxes.length; second += 1) {
@@ -92,6 +96,9 @@ export async function verifyResumePdf(
       }
       const content = await page.getTextContent();
       if (!content.items.length) throw new Error("Résumé PDF has no extractable text");
+      if (content.items.length > maxTextItemsPerPage) {
+        throw new Error("Résumé PDF has too many text items to verify safely");
+      }
       const text = content.items.flatMap((item) => "str" in item ? [item.str] : []);
       pageTexts.push(text.join(" "));
       const boxes: TextBox[] = [];

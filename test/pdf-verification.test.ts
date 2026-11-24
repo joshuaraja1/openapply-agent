@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PDFDocument, PDFString } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
-import { verifyResumePdf } from "../src/resume/verify-pdf.js";
+import { assertNoTextOverlap, verifyResumePdf } from "../src/resume/verify-pdf.js";
 import type { ResumeSource } from "../src/resume/jake.js";
 import type { DiscoveredJob } from "../src/types.js";
 
@@ -56,6 +56,12 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
 }
 
 describe("job-bound PDF verification", () => {
+  it("bounds the geometry scan before comparing a hostile number of text items", () => {
+    const boxes = Array.from({ length: 1_501 }, (_, index) => ({
+      x: 40, y: index * 12, width: 10, height: 10,
+    }));
+    expect(() => assertNoTextOverlap(boxes)).toThrow("too many text items");
+  });
   it("accepts a readable role-specific PDF and fingerprints its exact bytes", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
     try {
