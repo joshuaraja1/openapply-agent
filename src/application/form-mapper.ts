@@ -43,7 +43,8 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
 }
 
 /** Only maps exact common fields. Unknown required questions need a human or a provider adapter. */
-export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string): FormPlan {
+export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string,
+  options: { allowHumanEnteredValues?: boolean } = {}): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
   if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
@@ -59,7 +60,10 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
     }
     const action = valueFor(control, candidate, resumePath);
     if (action && counts.get(key(control)) === 1) actions.push(action);
-    else if (control.required) blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
+    else if (control.required && !(options.allowHumanEnteredValues && control.value?.trim()
+      && !["checkbox", "radio", "select", "file"].includes(control.type ?? control.tag))) {
+      blockers.push(`Required field needs an answer: ${control.name || control.type || control.tag}`);
+    }
   }
   if (!actions.some((action) => action.action === "upload")) {
     blockers.push("Resume upload control was not found; verify this application step before submission");
@@ -72,13 +76,14 @@ export async function fillApplicationForm(
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
+  options: { allowHumanEnteredValues?: boolean } = {},
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
-  const plan = planApplicationForm(snapshot, candidate, resumePath);
+  const plan = planApplicationForm(snapshot, candidate, resumePath, options);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
   const initialCounts = new Map<string, number>();
   for (const control of snapshot.controls) initialCounts.set(key(control), (initialCounts.get(key(control)) ?? 0) + 1);
   const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] => {
-    const blockers = planApplicationForm(current, candidate, resumePath).blockers.filter((blocker) =>
+    const blockers = planApplicationForm(current, candidate, resumePath, options).blockers.filter((blocker) =>
       !uploaded || blocker !== "Resume upload control was not found; verify this application step before submission");
     const seen = new Map<string, number>();
     for (const control of current.controls) {

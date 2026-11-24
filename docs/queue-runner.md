@@ -38,6 +38,11 @@ question, account creation, email code, CAPTCHA, or MFA, the application pauses
 for human handling. The queue output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a
 confirmed submission from a human handoff.
+On macOS, a paused application also triggers a generic desktop notification.
+Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
+blocker and private package path from encrypted local state. The BrowserOS tab
+stays open for the user. After resolving an unknown field, run
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> npm run application:run`.
 
 On macOS, build the project, copy `examples/schedule.example.json` to a private
 path, set its paths and interval, then install a LaunchAgent. It runs at login

@@ -49,6 +49,17 @@ export class NeoApplicationBrowser {
     return this.latest.url;
   }
 
+  pageId(): number | undefined { return this.page; }
+
+  async attach(pageId: number, expectedUrl: string): Promise<BrowserSnapshot> {
+    if (!Number.isInteger(pageId) || pageId < 1) throw new Error("Invalid BrowserOS handoff page");
+    success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
+    this.page = pageId;
+    const snapshot = await this.snapshot();
+    if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
+    return snapshot;
+  }
+
   private assertAllowed(snapshot: BrowserSnapshot): void {
     const url = new URL(snapshot.url);
     if (url.protocol !== "https:" || !this.allowedHosts.has(url.hostname.toLowerCase())) {

@@ -14,6 +14,9 @@ if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private applicatio
 const pkg = applicationPackageSchema.parse(JSON.parse(await readFile(packagePath, "utf8")));
 const approvedJobId = process.env.OPENAPPLY_APPROVE_JOB_ID;
 if (approvedJobId && approvedJobId !== pkg.job.id) throw new Error("Approval job ID does not match the package");
+const resumedJobId = process.env.OPENAPPLY_RESUME_JOB_ID;
+if (resumedJobId && resumedJobId !== pkg.job.id) throw new Error("Resume job ID does not match the package");
+if (approvedJobId && resumedJobId) throw new Error("Use approval or human resume for one run, not both");
 const authorizedPackage = approvedJobId
   ? { ...pkg, handoff: { ...pkg.handoff, mode: "submit-after-approval" as const,
     stopConditions: pkg.handoff.stopConditions.filter((condition) => condition !== "final-submit") } } : pkg;
@@ -29,7 +32,7 @@ try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
     await connection.client.callTool(request) as BrowserToolResult };
   const result = await runApplicationPackage(authorizedPackage, new ApplicationWorkflow(store), profileDirectory,
-    { ...(approvedJobId ? { approvedJobId } : {}),
+    { packagePath, ...(approvedJobId ? { approvedJobId } : {}), ...(resumedJobId ? { resumedJobId } : {}),
       ...(client ? { browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts), close: async () => {},
       }) } : {}),

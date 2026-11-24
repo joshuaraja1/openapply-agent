@@ -88,6 +88,14 @@ résumé. To resume that one job after approval, run the same package with
 `OPENAPPLY_APPROVE_JOB_ID` set to its exact job ID. The runner re-fetches the
 official posting, re-verifies the PDF, and reloads the page before submission.
 
+When BrowserOS pauses for an unknown required field, keep its application tab
+open and complete that field yourself. Inspect the encrypted checkpoint with
+`OPENAPPLY_JOB_ID=<job-id> npm run application:status`, then resume the package
+path it reports with `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> npm run application:run`
+after fixing the blocker. The runner attaches to the saved tab and rechecks
+the official posting and résumé before continuing. CAPTCHA and MFA may still
+require a person to finish the portal flow; the agent does not bypass them.
+
 ## Set up BrowserOS neo
 
 [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) is the local,

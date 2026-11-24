@@ -38,6 +38,8 @@ export interface ApplicationCheckpoint {
   sourceFingerprint?: string;
   confirmation?: string;
   blocker?: string;
+  browserPageId?: number;
+  packagePath?: string;
   updatedAt: string;
 }
 
@@ -60,7 +62,7 @@ export class ApplicationWorkflow {
   async advance(
     jobId: string,
     stage: ApplicationStage,
-    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker"> = {},
+    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "packagePath"> = {},
   ): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
     if (!current) throw new Error(`Application ${jobId} does not exist`);
@@ -76,6 +78,13 @@ export class ApplicationWorkflow {
     }
     if ((details.artifactPath || details.artifactSha256 || details.sourceFingerprint) && stage !== "rendered") {
       throw new Error("Resume artifact changes require a rendered checkpoint");
+    }
+    if (details.browserPageId !== undefined && (stage !== "waiting-human" || !Number.isInteger(details.browserPageId)
+      || details.browserPageId < 1)) {
+      throw new Error("Browser page ID belongs only to a human handoff");
+    }
+    if (details.packagePath && stage !== "waiting-human") {
+      throw new Error("Application package path belongs only to a human handoff");
     }
     if (stage === "submitted" && !details.confirmation) {
       throw new Error("Submission requires an employer confirmation");

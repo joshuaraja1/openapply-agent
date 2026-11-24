@@ -45,6 +45,8 @@ export interface ApplicationBrowserSurface {
   act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot>;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
   fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
+  pageId?(): number | undefined;
+  attach?(pageId: number, expectedUrl: string): Promise<BrowserSnapshot>;
 }
 
 async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
@@ -60,7 +62,8 @@ export async function runApplicationPackage(
   workflow: ApplicationWorkflow,
   profileDirectory: string,
   dependencies: { launch?: BrowserLaunch; verify?: typeof verifyResumePdf;
-    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string;
+    validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string; resumedJobId?: string;
+    packagePath?: string;
     browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
       Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
 ): Promise<RunResult> {
@@ -87,10 +90,17 @@ export async function runApplicationPackage(
     && current.blocker === "Final submission approval required"
     && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval"
     && !pkg.handoff.stopConditions.includes("final-submit");
+  const resumingHuman = current?.stage === "waiting-human"
+    && current.blocker !== "Final submission approval required"
+    && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
+    && Boolean(dependencies.browserFactory);
   if (dependencies.approvedJobId && !resumingApproval) {
     throw new Error("Approval requires a matching pending final-approval checkpoint");
   }
-  if (current && !resumingApproval
+  if (dependencies.resumedJobId && !resumingHuman) {
+    throw new Error("Human resume requires a matching pending BrowserOS handoff");
+  }
+  if (current && !resumingApproval && !resumingHuman
     && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
     throw new Error(`Application is ${current.stage}; inspect or resume it before another run`);
   }
@@ -108,7 +118,6 @@ export async function runApplicationPackage(
     throw new Error("Application checkpoint belongs to a different résumé artifact or source");
   }
   let checkpoint = current ?? await workflow.create(job.id, job.applicationUrl);
-  if (resumingApproval) checkpoint = await workflow.advance(job.id, "applying");
   for (const stage of ["validated", "matched", "tailored"] as const) {
     if (checkpoint.stage === ({ validated: "discovered", matched: "validated", tailored: "matched" } as const)[stage]) {
       checkpoint = await workflow.advance(job.id, stage);
@@ -119,7 +128,7 @@ export async function runApplicationPackage(
     sourceFingerprint: artifact.sourceFingerprint,
   });
   if (checkpoint.stage === "rendered") checkpoint = await workflow.advance(job.id, "applying");
-  const runtime = dependencies.browserFactory
+  const runtime: { browser: ApplicationBrowserSurface; close(): Promise<void> } = dependencies.browserFactory
     ? await dependencies.browserFactory(new Set([host]), new Map([[artifact.path, artifact.pdfSha256]]))
     : await (async () => {
       const launched = await (dependencies.launch ?? launchBrowser)({ profileDirectory, headless: false });
@@ -128,19 +137,35 @@ export async function runApplicationPackage(
     })();
   try {
     const browser = runtime.browser;
-    const snapshot = await browser.navigate(job.applicationUrl);
-    const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path);
+    if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
+    const snapshot = resumingHuman
+      ? await browser.attach!(current!.browserPageId!, job.applicationUrl)
+      : await browser.navigate(job.applicationUrl);
+    if (resumingApproval || resumingHuman) checkpoint = await workflow.advance(job.id, "applying");
+    const filled = await fillApplicationForm(browser, snapshot, pkg.candidate, artifact.path,
+      { allowHumanEnteredValues: resumingHuman });
+    const pageId = browser.pageId?.();
+    const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
+      ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };
     if (filled.blockers.length) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: filled.blockers.join("; ") });
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: filled.blockers.join("; "), ...pageDetails,
+      });
     } else if (pkg.handoff.mode === "prepare" || pkg.handoff.stopConditions.includes("final-submit")) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Final submission approval required" });
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Final submission approval required", ...pageDetails,
+      });
     } else if (!pkg.expectedConfirmation) {
-      checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Expected employer confirmation text is not configured" });
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Expected employer confirmation text is not configured", ...pageDetails,
+      });
     } else {
       const submitControls = filled.snapshot.controls.filter((control) => control.type === "submit"
         || /\b(submit|apply now|send application)\b/i.test(control.name));
       if (submitControls.length !== 1) {
-        checkpoint = await workflow.advance(job.id, "waiting-human", { blocker: "Final submit control is missing or ambiguous" });
+        checkpoint = await workflow.advance(job.id, "waiting-human", {
+          blocker: "Final submit control is missing or ambiguous", ...pageDetails,
+        });
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
           pkg.expectedConfirmation, pkg.handoff);
@@ -148,6 +173,16 @@ export async function runApplicationPackage(
       }
     }
     return { checkpoint, artifact };
+  } catch (error) {
+    const latest = await workflow.current(job.id);
+    if ((resumingApproval || resumingHuman) && latest?.stage === "applying") {
+      await workflow.advance(job.id, "waiting-human", {
+        blocker: current?.blocker ?? "Human handoff needs another review",
+        ...(current?.browserPageId ? { browserPageId: current.browserPageId } : {}),
+        ...(current?.packagePath ? { packagePath: current.packagePath } : {}),
+      });
+    }
+    throw error;
   } finally {
     await runtime.close();
   }

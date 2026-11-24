@@ -171,6 +171,55 @@ describe("application runner", () => {
       "/tmp/profile", { approvedJobId: job.id })).rejects.toThrow("pending final-approval");
   });
 
+  it("resumes the exact BrowserOS handoff after a human fills an unknown field", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-handoff-"));
+    try {
+      const path = join(root, "resume.pdf");
+      const bytes = Buffer.from("%PDF-1.4\ncontrolled-test-pdf\n%%EOF\n");
+      await writeFile(path, bytes);
+      const pdfSha256 = createHash("sha256").update(bytes).digest("hex");
+      const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+        handoff: createApplicationHandoff(job, false),
+        resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+        resumePdfPath: path, expectedConfirmation: "Thank you for applying" });
+      const controls = (humanAnswered: boolean) => ({ url: job.applicationUrl, title: "Apply", controls: [
+        { ref: "email", tag: "input", role: "textbox", name: "Email", type: null, value: null, required: true, options: [] },
+        { ref: "salary", tag: "input", role: "textbox", name: "Salary expectation", type: null,
+          value: humanAnswered ? "Negotiable" : null, required: true, options: [] },
+        { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file", value: null,
+          required: false, options: [] },
+        { ref: "submit", tag: "button", role: "button", name: "Submit", type: "submit", value: null,
+          required: false, options: [] },
+      ] });
+      const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+      const verification = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256, path, pages: 1, verifiedAt: new Date().toISOString() });
+      const first = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        verify: verification, validateOfficial: async () => true, packagePath: join(root, "application.json"),
+        browserFactory: async () => ({ browser: {
+          currentUrl: () => job.applicationUrl, navigate: async () => controls(false),
+          act: async () => controls(false), submit: async () => "", pageId: () => 7,
+        }, close: async () => {} }),
+      });
+      expect(first.checkpoint.stage).toBe("waiting-human");
+      expect(first.checkpoint.browserPageId).toBe(7);
+      expect(first.checkpoint.packagePath).toBe(join(root, "application.json"));
+      const attach = vi.fn(async () => controls(true));
+      const resumed = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        verify: verification, validateOfficial: async () => true, resumedJobId: job.id,
+        browserFactory: async () => ({ browser: {
+          currentUrl: () => job.applicationUrl, navigate: async () => { throw new Error("Opened a new tab"); },
+          attach, act: async () => controls(true), fillBatch: async () => controls(true),
+          submit: async () => "Thank you for applying", pageId: () => 7,
+        }, close: async () => {} }),
+      });
+      expect(attach).toHaveBeenCalledWith(7, job.applicationUrl);
+      expect(resumed.checkpoint.stage).toBe("submitted");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a posting whose application host was not independently configured", async () => {
     const pkg = applicationPackageSchema.parse({ version: 1, job,
       source: { ...source, allowedApplicationHosts: [] }, candidate,
