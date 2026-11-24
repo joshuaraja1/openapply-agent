@@ -145,6 +145,48 @@ describe("application runner", () => {
     expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
     expect(resumed.checkpoint.stage).toBe("submitted");
   });
+
+  it("keeps a human login handoff resumable when credentials leave an MFA form", async () => {
+    const login = { url: job.applicationUrl, title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: "https://jobs.example.com/apply/step-1", title: "Apply",
+      visibleText: "Example Co Software Engineer application", controls: [
+        { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+          value: null, required: false, options: [] },
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/mfa.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let currentUrl = job.applicationUrl;
+    const attach = vi.fn(async () => { currentUrl = application.url; return application; });
+    const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
+      pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
+      fillBatch: async () => application, submit: async () => "Thank you for applying",
+      authenticate: async () => login };
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      account: { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+        passwordSecretRef: "keychain://example", allowAccountCreation: false },
+      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser, close: async () => {} }) };
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint.stage).toBe("waiting-human");
+    expect(pending.checkpoint.blocker).toContain("Portal sign-in needs human completion");
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: job.id });
+    expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
+    expect(resumed.checkpoint.stage).toBe("submitted");
+  });
   it("continues a two-step form and uploads the verified résumé before submitting", async () => {
     const input = (ref: string, name: string, type: string | null = null) => ({
       ref, tag: "input", role: "textbox", name, type, value: null, required: true, options: [],

@@ -184,13 +184,13 @@ export async function runApplicationPackage(
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     let snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
-        current!.blocker === "Portal sign-in needs human completion")
+        current!.blocker?.startsWith("Portal sign-in needs human completion") === true)
       : await browser.navigate(job.applicationUrl);
     if (new URL(snapshot.url).protocol !== "https:"
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
     }
-    if (resumingHuman && current!.blocker === "Portal sign-in needs human completion"
+    if (resumingHuman && current!.blocker?.startsWith("Portal sign-in needs human completion")
       && snapshot.url !== current!.browserPageUrl && !identifiesJob(snapshot, job)) {
       throw new Error("Returned employer page does not identify the approved job");
     }
@@ -220,7 +220,8 @@ export async function runApplicationPackage(
             throw new Error("Signed-in employer page does not identify the approved job");
           }
           recoveryPageUrl = snapshot.url;
-          loginRecoveryPending = false;
+          loginRecoveryPending = !snapshot.controls.some((control) => control.type === "file"
+            && /\b(resume|résumé|cv)\b/i.test(control.name));
         }
       }
     } else if (loginPage) {
@@ -294,6 +295,10 @@ export async function runApplicationPackage(
       ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}) };
     if (!filled.blockers.length && !resumeUploaded) {
       filled.blockers.push("Verified résumé was not uploaded on any application step");
+    }
+    if (resumeUploaded) loginRecoveryPending = false;
+    if (loginRecoveryPending && filled.blockers.length) {
+      filled.blockers.unshift("Portal sign-in needs human completion");
     }
     if (loginBlocker) filled.blockers.unshift(loginBlocker);
     if (filled.blockers.length) {
