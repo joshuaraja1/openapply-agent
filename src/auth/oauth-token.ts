@@ -19,6 +19,18 @@ function requiredScopes(provider: "gmail" | "microsoft"): string[] {
     : ["Mail.Read", "User.Read"];
 }
 
+export function mailboxConsentScopes(provider: "gmail" | "microsoft"): string[] {
+  return provider === "gmail" ? requiredScopes(provider) : [...requiredScopes(provider), "offline_access"];
+}
+
+function tokenEndpoint(provider: "gmail" | "microsoft", tenant?: string): string {
+  if (tenant && !/^(?:common|organizations|consumers|[a-f0-9-]{36})$/i.test(tenant)) {
+    throw new Error("Microsoft tenant is invalid");
+  }
+  return provider === "gmail" ? "https://oauth2.googleapis.com/token"
+    : `https://login.microsoftonline.com/${tenant ?? "common"}/oauth2/v2.0/token`;
+}
+
 function assertScopes(provider: "gmail" | "microsoft", scopes: string[]): void {
   const names = new Set(scopes.map((scope) => scope.toLowerCase()));
   if (!requiredScopes(provider).every((scope) => names.has(scope.toLowerCase()))) {
@@ -59,11 +71,7 @@ async function readTokenResponse(response: Response): Promise<string> {
 
 async function refreshToken(token: StoredMailboxToken, tenant: string | undefined,
   fetcher: typeof fetch, now: number): Promise<StoredMailboxToken> {
-  if (tenant && !/^(?:common|organizations|consumers|[a-f0-9-]{36})$/i.test(tenant)) {
-    throw new Error("Microsoft tenant is invalid");
-  }
-  const endpoint = token.provider === "gmail" ? "https://oauth2.googleapis.com/token"
-    : `https://login.microsoftonline.com/${tenant ?? "common"}/oauth2/v2.0/token`;
+  const endpoint = tokenEndpoint(token.provider, tenant);
   const body = new URLSearchParams({ client_id: token.clientId,
     grant_type: "refresh_token", refresh_token: token.refreshToken });
   if (token.provider === "microsoft") body.set("scope", "Mail.Read User.Read offline_access");
@@ -78,6 +86,47 @@ async function refreshToken(token: StoredMailboxToken, tenant: string | undefine
   return { ...token, refreshToken: renewed.refresh_token ?? token.refreshToken,
     accessToken: renewed.access_token, expiresAt: new Date(now + renewed.expires_in * 1000).toISOString(),
     scopes };
+}
+
+/** Exchanges a loopback PKCE authorization code and stores it only after mailbox identity verification. */
+export async function exchangeMailboxAuthorizationCode(policy: AuthenticationPolicy,
+  secrets: SecretStore, code: string, verifier: string, redirectUri: string,
+  fetcher: typeof fetch = fetch, now = Date.now()): Promise<void> {
+  const config = policy.emailVerification;
+  if (!config.enabled || !config.provider || !config.accountId || !config.oauthClientId
+    || !config.oauthSecretRef) throw new Error("Mailbox OAuth setup is not configured");
+  const account = policy.accounts.find((entry) => entry.id === config.accountId);
+  if (!account) throw new Error("Mailbox account is not configured");
+  const redirect = new URL(redirectUri);
+  if (redirect.protocol !== "http:" || redirect.hostname !== "127.0.0.1"
+    || !redirect.port || redirect.pathname !== "/callback" || redirect.search || redirect.hash
+    || redirect.username || redirect.password
+    || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)
+    || !code || code.length > 4096 || /[\r\n]/.test(code)) {
+    throw new Error("Mailbox OAuth callback is invalid");
+  }
+  const body = new URLSearchParams({ client_id: config.oauthClientId,
+    grant_type: "authorization_code", code, code_verifier: verifier,
+    redirect_uri: redirectUri });
+  if (config.provider === "microsoft") body.set("scope", mailboxConsentScopes(config.provider).join(" "));
+  const response = await fetcher(tokenEndpoint(config.provider, config.microsoftTenant), {
+    method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    redirect: "error", signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`Mailbox OAuth exchange failed with HTTP ${response.status}`);
+  const result = refreshedTokenSchema.parse(JSON.parse(await readTokenResponse(response)));
+  if (!result.refresh_token || !result.scope) {
+    throw new Error("Mailbox OAuth consent did not grant durable read-only access");
+  }
+  const scopes = result.scope.split(/\s+/).filter(Boolean);
+  assertScopes(config.provider, scopes);
+  const mailboxEmail = await fetchMailboxAccountEmail(config.provider, result.access_token, fetcher);
+  if (mailboxEmail !== account.email.toLowerCase()) throw new Error("Mailbox identity does not match the selected account");
+  const token: StoredMailboxToken = { version: 1, provider: config.provider,
+    accountEmail: account.email, clientId: config.oauthClientId,
+    refreshToken: result.refresh_token, accessToken: result.access_token,
+    expiresAt: new Date(now + result.expires_in * 1000).toISOString(), scopes };
+  await secrets.put(config.oauthSecretRef, JSON.stringify(token));
 }
 
 /** Reads and refreshes only the configured account's mailbox token, then verifies mailbox identity. */

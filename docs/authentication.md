@@ -67,7 +67,9 @@ Keychain password; it must not invent security answers.
 ## Email verification
 
 Email-code automation is still planned and currently pauses the application.
-With explicit OAuth consent, a future implementation can observe the selected
+`npm run oauth:connect` performs explicit one-time consent in BrowserOS neo and
+stores the token in macOS Keychain. See [email verification](email-verification.md)
+for setup. After form integration, the workflow can observe the selected
 Gmail or Microsoft mailbox during an active application. It would consider only recent
 messages associated with the active portal and expected email address. A single
 unambiguous email-address verification code may be entered automatically and is
