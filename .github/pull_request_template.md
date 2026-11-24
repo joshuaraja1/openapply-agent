@@ -4,7 +4,11 @@
 
 ## Verification
 
-<!-- List commands and relevant manual checks. -->
+- [ ] `npm run check`
+- [ ] New behavior has automated tests
+- [ ] I reviewed the diff for secrets, personal data, and generated artifacts
+
+<!-- List additional commands and relevant manual checks. -->
 
 ## Risks and rollback
 
