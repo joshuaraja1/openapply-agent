@@ -55,8 +55,10 @@ export class NeoApplicationBrowser {
 
   private async listedGroup(pageId: number): Promise<string> {
     const listing = success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
-    const line = listing.split("\n").find((entry) => entry.includes(`[${pageId}]`));
-    const group = line?.match(/\[group ([a-f0-9]{16,})\]/i)?.[1];
+    const rows = listing.split("\n").filter((entry) =>
+      new RegExp(`^\\s*\\[${pageId}\\]\\s`).test(entry));
+    if (rows.length !== 1) throw new Error("BrowserOS handoff tab identity is ambiguous");
+    const group = rows[0]?.match(/\[group ([a-f0-9]{16,})\]/i)?.[1];
     if (!group) throw new Error("BrowserOS handoff tab identity is unavailable");
     return group;
   }
