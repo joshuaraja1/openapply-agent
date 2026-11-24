@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
+import { EmailCodeEntry } from "../auth/email-entry.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { loadApprovedHumanAnswers } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
@@ -48,6 +49,9 @@ const runtimePackage = endpoint ? { ...authorizedPackage, browserEndpoint: endpo
 const authPolicy = runtimePackage.authenticationPolicyPath
   ? await loadAuthenticationPolicy(runtimePackage.authenticationPolicyPath) : undefined;
 const account = authPolicy ? accountForUrl(authPolicy, pkg.job.applicationUrl) : undefined;
+const emailCode = authPolicy?.emailVerification.autoEnter
+  ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
+    join(home, "email-code-claims.enc.json"), key)) : undefined;
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
@@ -63,6 +67,7 @@ try {
   const result = await runApplicationPackage(runtimePackage, workflow, profileDirectory,
     { packagePath, ...(approvedJobId ? { approvedJobId } : {}), ...(resumedJobId ? { resumedJobId } : {}),
       ...(account ? { account, secretStore: secrets } : {}),
+      ...(emailCode ? { emailCode } : {}),
       ...(humanAnswerApproval ? { humanAnswerApproval } : {}),
       ...(client ? { browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts), close: async () => {},

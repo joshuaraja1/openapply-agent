@@ -6,6 +6,7 @@ import { z } from "zod";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
+import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
@@ -45,6 +46,9 @@ const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord
   join(root, "daily-quota.enc.json"), key));
 const retries = new RetryLedger(new EncryptedApplicationStateStore<RetryRecord>(
   join(root, "retry-ledger.enc.json"), key));
+const emailCode = authPolicy?.emailVerification.autoEnter
+  ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
+    join(root, "email-code-claims.enc.json"), key)) : undefined;
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
@@ -88,6 +92,7 @@ try {
     const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
       packagePath,
       ...(account ? { account, secretStore: secrets } : {}),
+      ...(emailCode ? { emailCode } : {}),
       browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
         close: async () => {},
