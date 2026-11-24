@@ -24,3 +24,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Check committed artifacts and private data
+        shell: bash
+        run: |
+          if git ls-files | grep -E '(^|/)(data/private|storage|output|dist|coverage)/|\.(pdf|zip)$'; then
+            echo 'Generated or private artifacts are tracked' >&2
+            exit 1
+          fi
+      - run: git diff --exit-code
