@@ -68,8 +68,9 @@ command are still required before this can run unattended on employer portals.
 source, candidate facts,
 authorized handoff, generated résumé source, verified PDF path, and optionally
 the employer confirmation text. The runner verifies the PDF again, checkpoints
-each stage in encrypted local storage, fills supported fields in a persistent
-Chromium profile, and records `submitted` only after a new confirmation appears.
+each stage in encrypted local storage, fills supported fields in the signed-in
+BrowserOS profile when the package has a local endpoint, and records
+`submitted` only after a new confirmation appears.
 It returns `waiting-human` with an exact blocker for unknown required fields,
 missing confirmation configuration, ambiguous submit controls, or final
 approval required by policy. It does not yet create accounts, read email codes,

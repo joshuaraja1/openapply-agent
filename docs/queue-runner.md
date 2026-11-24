@@ -32,8 +32,8 @@ Run these two commands from the repository root on a schedule using the local
 operating system scheduler. `OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json npm run autopilot`
 runs both commands in order, using the queue configuration as the only source
 for discovery and candidate paths. BrowserOS neo and Overleaf must already be signed
-in. The application browser uses a separate persistent Chromium profile; a
-site account must already be signed in there as well. If a form asks an unknown
+in. Queued applications use that same BrowserOS profile and its existing site
+sessions. If a form asks an unknown
 question, account creation, email code, CAPTCHA, or MFA, the application pauses
 for human handling. The queue output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a

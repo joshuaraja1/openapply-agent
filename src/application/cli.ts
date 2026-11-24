@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
+import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
+import { NeoApplicationBrowser } from "../browser/neo-application.js";
+import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { getOrCreateStateKey, MacKeychainSecretStore } from "../storage/mac-keychain.js";
 import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
@@ -19,7 +22,20 @@ const statePath = join(home, "applications.enc.json");
 const profileDirectory = join(home, "browser-profile");
 const key = await getOrCreateStateKey(new MacKeychainSecretStore(), "keychain://application-state/main");
 const store = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
-const result = await runApplicationPackage(authorizedPackage, new ApplicationWorkflow(store), profileDirectory,
-  approvedJobId ? { approvedJobId } : {});
-console.log(JSON.stringify({ jobId: pkg.job.id, stage: result.checkpoint.stage,
-  blocker: result.checkpoint.blocker ?? null }));
+const endpoint = process.env.OPENAPPLY_BROWSER_ENDPOINT ?? pkg.browserEndpoint;
+if (endpoint) assertLocalBrowserEndpoint(endpoint);
+const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
+try {
+  const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
+    await connection.client.callTool(request) as BrowserToolResult };
+  const result = await runApplicationPackage(authorizedPackage, new ApplicationWorkflow(store), profileDirectory,
+    { ...(approvedJobId ? { approvedJobId } : {}),
+      ...(client ? { browserFactory: async (allowedHosts, approvedArtifacts) => ({
+        browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts), close: async () => {},
+      }) } : {}),
+    });
+  console.log(JSON.stringify({ jobId: pkg.job.id, stage: result.checkpoint.stage,
+    blocker: result.checkpoint.blocker ?? null }));
+} finally {
+  await connection?.close();
+}

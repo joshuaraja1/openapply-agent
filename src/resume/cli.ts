@@ -32,7 +32,7 @@ try {
     input.candidate, resumeSource, input.outputDirectory);
   const pkg = applicationPackageSchema.parse({ version: 1, job, source: input.source,
     candidate: input.candidate, handoff: createApplicationHandoff(job, input.requireFinalApproval),
-    resumeSource, resumePdfPath: artifact.path,
+    resumeSource, resumePdfPath: artifact.path, browserEndpoint: input.browserEndpoint,
     ...(input.expectedConfirmation ? { expectedConfirmation: input.expectedConfirmation } : {}),
   });
   const packagePath = join(input.outputDirectory, `application-${randomUUID()}.json`);

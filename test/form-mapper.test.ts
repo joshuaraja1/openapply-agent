@@ -69,6 +69,20 @@ describe("deterministic application field mapping", () => {
       .rejects.toThrow("changed during form filling");
   });
 
+  it("pauses when filling reveals a new required question", async () => {
+    const initial = snapshot(field("1", "First name"), field("2", "Resume", "file"));
+    const conditional = snapshot(field("3", "First name"), field("4", "Resume", "file"),
+      field("5", "Salary expectation"));
+    const browser = { act: vi.fn(), fillBatch: vi.fn().mockResolvedValue(conditional) };
+    const result = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf");
+    expect(result.blockers).toContain("Required field needs an answer: Salary expectation");
+    const known = snapshot(field("3", "First name"), field("4", "Resume", "file"),
+      field("5", "Phone"));
+    browser.fillBatch = vi.fn().mockResolvedValue(known);
+    const knownResult = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf");
+    expect(knownResult.blockers).toContain("New required field appeared after filling: Phone");
+  });
+
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("fills labeled fields in real Chromium", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-form-"));
     try {

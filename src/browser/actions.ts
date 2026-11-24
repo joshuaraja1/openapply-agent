@@ -18,6 +18,7 @@ export interface BrowserSnapshot {
   url: string;
   title: string;
   controls: BrowserControl[];
+  visibleText?: string;
 }
 
 export class AgentBrowser {

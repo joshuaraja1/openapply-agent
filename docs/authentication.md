@@ -1,12 +1,12 @@
 # Authentication and session handling
 
-OpenApply uses a dedicated persistent Chromium profile. The profile is local to
-the user's machine and retains cookies, local storage, downloads, and successful
-logins between runs.
+Queued applications use the same persistent BrowserOS neo profile as signed-in
+discovery and Overleaf. Sign in once in that profile; its cookies and local
+storage remain in BrowserOS across runs.
 
-The embedded profile is separate from BrowserOS neo. BrowserOS cookies do not
-automatically transfer into it. The user must sign in inside the embedded
-browser until a reviewed, consented import flow is implemented.
+The optional Playwright fallback profile is separate from BrowserOS neo.
+BrowserOS cookies do not automatically transfer into it. Sign in inside that
+fallback browser if you choose to use it.
 
 The embedded runtime uses Playwright's Chromium binary. Install it with
 `npx playwright install chromium` after `npm ci`. Pass a dedicated private
