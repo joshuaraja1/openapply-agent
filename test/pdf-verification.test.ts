@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PDFDocument, PDFString } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
-import { verifyResumePdf } from "../src/resume/verify-pdf.js";
+import { assertNoTextOverlap, verifyResumePdf } from "../src/resume/verify-pdf.js";
 import type { ResumeSource } from "../src/resume/jake.js";
 import type { DiscoveredJob } from "../src/types.js";
 
@@ -31,7 +31,9 @@ const latex = `\\hypersetup{pdfsubject={OpenApply:${renderToken}}}\nfixture`;
 const source: ResumeSource = { latex, renderToken, fingerprint: createHash("sha256")
   .update(`${job.id}\0${latex}`).digest("hex"), claimIds: ["claim-1"] };
 
-async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean; link?: boolean; subject?: string; extraLink?: string } = {}): Promise<void> {
+async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean;
+  overlap?: boolean; link?: boolean; subject?: string;
+  extraLink?: string } = {}): Promise<void> {
   const pdf = await PDFDocument.create();
   pdf.setSubject(options.subject ?? `OpenApply:${renderToken}`);
   const page = pdf.addPage([612, 792]);
@@ -39,6 +41,7 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
   page.drawText(options.title ?? "Backend Engineer", { x: 40, y: 720 });
   page.drawText("Example Co", { x: 40, y: 700 });
   page.drawText(options.claim ?? "Built Python services", { x: options.offPage ? 800 : 40, y: 680 });
+  if (options.overlap) page.drawText("Overlapping sentence", { x: 40, y: 680 });
   if (options.link !== false) {
     const annotation = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 730, 150, 745],
       Border: [0, 0, 0], A: { Type: "Action", S: "URI", URI: PDFString.of("mailto:test@example.com") } });
@@ -53,6 +56,12 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
 }
 
 describe("job-bound PDF verification", () => {
+  it("bounds the geometry scan before comparing a hostile number of text items", () => {
+    const boxes = Array.from({ length: 1_501 }, (_, index) => ({
+      x: 40, y: index * 12, width: 10, height: 10,
+    }));
+    expect(() => assertNoTextOverlap(boxes)).toThrow("too many text items");
+  });
   it("accepts a readable role-specific PDF and fingerprints its exact bytes", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
     try {
@@ -76,12 +85,14 @@ describe("job-bound PDF verification", () => {
     }
   });
 
-  it("rejects off-page text, missing links, and non-PDF uploads", async () => {
+  it("rejects off-page or overlapping text, missing links, and non-PDF uploads", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
     try {
       const path = join(root, "resume.pdf");
       await fixture(path, { offPage: true });
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow();
+      await fixture(path, { overlap: true });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("overlapping text");
       await fixture(path, { link: false });
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("email link");
       await fixture(path, { extraLink: "https://unapproved.example/" });

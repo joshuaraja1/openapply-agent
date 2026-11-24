@@ -23,6 +23,26 @@ function normalize(value: string): string {
   return value.toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
+interface TextBox { x: number; y: number; width: number; height: number }
+const maxTextItemsPerPage = 1_500;
+
+export function assertNoTextOverlap(boxes: TextBox[]): void {
+  if (boxes.length > maxTextItemsPerPage) {
+    throw new Error("Résumé PDF has too many text items to verify safely");
+  }
+  for (let first = 0; first < boxes.length; first += 1) {
+    const a = boxes[first]!;
+    for (let second = first + 1; second < boxes.length; second += 1) {
+      const b = boxes[second]!;
+      const horizontal = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      const vertical = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      if (horizontal > 4 && vertical > Math.min(a.height, b.height) * 0.6) {
+        throw new Error("Résumé PDF contains overlapping text");
+      }
+    }
+  }
+}
+
 function approvedClaimTexts(candidate: CandidateProfile, ids: string[]): Array<{ label: string; text: string }> {
   const claims = [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
     ...candidate.projects.flatMap((project) => project.claims)];
@@ -76,16 +96,24 @@ export async function verifyResumePdf(
       }
       const content = await page.getTextContent();
       if (!content.items.length) throw new Error("Résumé PDF has no extractable text");
+      if (content.items.length > maxTextItemsPerPage) {
+        throw new Error("Résumé PDF has too many text items to verify safely");
+      }
       const text = content.items.flatMap((item) => "str" in item ? [item.str] : []);
       pageTexts.push(text.join(" "));
+      const boxes: TextBox[] = [];
       for (const item of content.items) {
         if (!("str" in item) || !item.str.trim()) continue;
         const x = item.transform[4] ?? -1;
         const y = item.transform[5] ?? -1;
-        if (x < -2 || y < -2 || x + item.width > viewport.width + 2 || y > viewport.height + 2) {
+        const height = Math.abs(item.height);
+        if (x < -2 || y < -2 || x + item.width > viewport.width + 2
+          || y + height > viewport.height + 2) {
           throw new Error("Résumé PDF contains text outside the page bounds");
         }
+        if (item.width > 0 && height > 0) boxes.push({ x, y, width: item.width, height });
       }
+      assertNoTextOverlap(boxes);
       const annotations = await page.getAnnotations();
       for (const annotation of annotations) {
         if (annotation.subtype !== "Link") continue;
