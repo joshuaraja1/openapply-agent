@@ -75,18 +75,25 @@ export async function fillApplicationForm(
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[] }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers };
+  const postFillBlockers = (current: BrowserSnapshot, uploaded: boolean): string[] =>
+    planApplicationForm(current, candidate, resumePath).blockers.filter((blocker) =>
+      !uploaded || blocker !== "Resume upload control was not found; verify this application step before submission");
   if (browser.fillBatch) {
     const filled = await browser.fillBatch(plan.actions);
     if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");
-    return { snapshot: filled, blockers: [] };
+    return { snapshot: filled, blockers: postFillBlockers(filled, true) };
   }
   let current = snapshot;
+  let uploaded = false;
   for (const action of plan.actions) {
     if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");
     const matching = current.controls.filter((control) => key(control) === `${action.tag}:${action.type ?? ""}:${action.name.trim().toLowerCase()}`);
     if (matching.length !== 1) throw new Error(`Form field changed during filling: ${action.name}`);
     current = await browser.act(matching[0]!.ref, action.action, action.value);
+    uploaded ||= action.action === "upload";
+    const blockers = postFillBlockers(current, uploaded);
+    if (blockers.length) return { snapshot: current, blockers };
   }
   if (current.url !== snapshot.url) throw new Error("Application page changed during form filling");
-  return { snapshot: current, blockers: [] };
+  return { snapshot: current, blockers: postFillBlockers(current, uploaded) };
 }
