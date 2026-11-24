@@ -9,6 +9,6 @@ data/private/
 data/candidate.json
 data/application-log.csv
 output/
-storage/
+/storage/
 *.pdf
 *.zip
