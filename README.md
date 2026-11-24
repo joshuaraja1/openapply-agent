@@ -84,8 +84,9 @@ OPENAPPLY_PACKAGE=/private/application-package.json npm run application:run
 
 On macOS, the runner stores its encryption key in Keychain and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
-stops on unknown required answers, and submits only when the handoff mode
-authorizes it and a new employer confirmation is found. Opt-in exact-domain
+stops on unknown required answers, submits only when the handoff mode
+authorizes it, and records submission only after a new employer confirmation
+is found. Opt-in exact-domain
 account creation and scoped email-code entry are available with a private auth
 policy and consented mailbox. Provider-specific adapters and automated
 page-image inspection are pending; review the
