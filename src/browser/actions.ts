@@ -28,6 +28,10 @@ export class AgentBrowser {
     private readonly approvedArtifacts: ReadonlySet<string> = new Set(),
   ) {}
 
+  currentUrl(): string {
+    return this.requirePage().url();
+  }
+
   async navigate(url: string): Promise<BrowserSnapshot> {
     const destination = new URL(url);
     if (destination.protocol !== "https:" || !this.allowedHosts.has(destination.hostname.toLowerCase())) {
@@ -123,10 +127,17 @@ export class AgentBrowser {
     if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
       throw new Error("Selected control is not a submit action");
     }
+    if (await page.getByText(expectedConfirmation, { exact: false }).count()) {
+      throw new Error("Confirmation was already visible before submission");
+    }
+    const existingPages = new Set(this.context.pages());
     await handle.click();
+    const popup = this.context.pages().find((candidate) => !existingPages.has(candidate) && !candidate.isClosed());
+    if (popup) this.page = popup;
     this.assertAllowedPage();
-    await page.getByText(expectedConfirmation, { exact: false }).waitFor({ timeout: 10000 });
-    return expectedConfirmation;
+    const confirmation = this.requirePage().getByText(expectedConfirmation, { exact: false }).first();
+    await confirmation.waitFor({ timeout: 10000 });
+    return (await confirmation.innerText()).trim();
   }
 
   private requirePage(): Page {

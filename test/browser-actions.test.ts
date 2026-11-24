@@ -5,6 +5,7 @@ import { AgentBrowser } from "../src/browser/actions.js";
 function fixture(fieldName = "email", fieldType: string | null = null) {
   let connected = true;
   let value = "";
+  let confirmationVisible = false;
   const handle = {
     isVisible: async () => true,
     evaluate: async (callback: (node: { tagName: string; isConnected: boolean }) => unknown) =>
@@ -13,19 +14,29 @@ function fixture(fieldName = "email", fieldType: string | null = null) {
     innerText: async () => "",
     inputValue: async () => value,
     fill: async (next: string) => { value = next; },
+    click: async () => { confirmationVisible = true; },
   };
   const page = {
     url: () => "https://jobs.example.com/apply",
     title: async () => "Apply",
     goto: vi.fn(async () => {}),
     locator: () => ({ elementHandles: async () => [handle] }),
+    getByText: () => ({
+      count: async () => confirmationVisible ? 1 : 0,
+      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }),
+    }),
   };
   const context = {
     route: vi.fn(async () => {}),
     newPage: vi.fn(async () => page),
     pages: () => [page],
   } as unknown as BrowserContext;
-  return { browser: new AgentBrowser(context, new Set(["jobs.example.com"])), page, getValue: () => value, disconnect: () => { connected = false; } };
+  return {
+    browser: new AgentBrowser(context, new Set(["jobs.example.com"])), page,
+    getValue: () => value,
+    setConfirmation: () => { confirmationVisible = true; },
+    disconnect: () => { connected = false; },
+  };
 }
 
 describe("agent browser controls", () => {
@@ -67,5 +78,13 @@ describe("agent browser controls", () => {
     const second = await upload.browser.navigate("https://jobs.example.com/apply");
     await expect(upload.browser.act(second.controls[0]?.ref ?? "", "upload", "/tmp/private.txt"))
       .rejects.toThrow("not approved");
+  });
+
+  it("rejects pre-existing confirmation text before submitting", async () => {
+    const { browser, setConfirmation } = fixture("apply", "submit");
+    const snapshot = await browser.navigate("https://jobs.example.com/apply");
+    setConfirmation();
+    await expect(browser.submit(snapshot.controls[0]?.ref ?? "", "Thank you for applying"))
+      .rejects.toThrow("already visible");
   });
 });
