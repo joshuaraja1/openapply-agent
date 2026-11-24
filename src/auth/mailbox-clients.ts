@@ -21,7 +21,29 @@ async function getJson(url: URL, token: string, fetcher: Fetcher, headers: Recor
   const response = await fetcher(url, { headers: { Authorization: `Bearer ${token}`, ...headers },
     redirect: "error", signal: AbortSignal.timeout(10000) });
   if (!response.ok) throw new Error(`Mailbox API request failed with HTTP ${response.status}`);
-  return response.json();
+  const maximumBytes = 2_000_000;
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maximumBytes) throw new Error("Mailbox API response is too large");
+  if (!response.body) throw new Error("Mailbox API response has no body");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maximumBytes) throw new Error("Mailbox API response is too large");
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
 }
 
 function gmailHeader(headers: Array<{ name: string; value: string }>, name: string): string {

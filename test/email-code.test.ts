@@ -51,4 +51,9 @@ describe("scoped email-code selection", () => {
     expect(selectEmailCode([{ ...unrelated, subject: "AI verification" }], shortCompany))
       .toEqual({ messageId: "message-1", code: "123456" });
   });
+
+  it("rejects a verification window that has already expired", () => {
+    expect(() => selectEmailCode([message], { ...request,
+      now: "2026-11-24T16:10:00Z" })).toThrow("request is invalid");
+  });
 });

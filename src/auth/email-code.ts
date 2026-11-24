@@ -66,6 +66,8 @@ export function selectEmailCode(messages: MailboxMessage[], request: EmailCodeRe
   const requestedAt = Date.parse(request.requestedAt);
   const now = Date.parse(request.now);
   if (!Number.isFinite(requestedAt) || !Number.isFinite(now) || requestedAt > now
+    || now - requestedAt > request.maximumMessageAgeSeconds * 1000
+    || !Number.isFinite(request.maximumMessageAgeSeconds)
     || request.maximumMessageAgeSeconds < 30 || request.maximumMessageAgeSeconds > 900
     || !request.allowedSenderDomains.length) {
     throw new Error("Email-code request is invalid");

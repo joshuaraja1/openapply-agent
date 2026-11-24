@@ -48,4 +48,11 @@ describe("scoped mailbox API clients", () => {
       bodyText: "Your verification code is 123456." });
     expect(fetcher).toHaveBeenCalledOnce();
   });
+
+  it("rejects an oversized mailbox response without a Content-Length header", async () => {
+    const huge = { value: [], filler: "x".repeat(2_000_001) };
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(huge), { status: 200 })) as unknown as typeof fetch;
+    await expect(fetchMicrosoftMessages("private-token", "2026-11-24T16:00:00Z", fetcher))
+      .rejects.toThrow("too large");
+  });
 });
