@@ -2,8 +2,9 @@
 
 OpenApply Agent is a privacy-first, human-in-the-loop workflow for discovering fresh jobs, ranking them against evidence-backed candidate facts, tailoring application materials, and preparing guarded browser handoffs.
 
-The scheduled runner can submit supported applications after employer confirmation
-when the user's private policy authorizes it. This repository is still a
+The scheduled runner can submit supported applications when the user's private
+policy authorizes it and records them as submitted only after employer
+confirmation. This repository is still a
 development project, not a packaged autonomous consumer app. Queued runs depend
 on a separately installed BrowserOS neo and a signed-in Overleaf project; some
 portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
@@ -12,7 +13,7 @@ It does not include anyone's résumé, address, credentials, application history
 
 When the repository is opened in a coding-agent workspace, [`AGENTS.md`](AGENTS.md) supplies the end-to-end operating contract: continue from discovery through per-role tailoring, PDF inspection, guarded BrowserOS form filling, explicit submission verification, and private outcome logging.
 
-The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](templates/resume/main.tex). New users complete the private Markdown templates; the agent then produces a separate, evidence-backed resume in that layout for every role, compiles it in Overleaf, downloads the PDF, and visually verifies it before upload. See the [Overleaf workflow](docs/overleaf.md).
+The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](templates/resume/main.tex). New users complete the private Markdown templates; the agent then produces a separate, evidence-backed resume in that layout for every role, compiles it in Overleaf, and downloads the PDF. A person or coding agent must visually inspect every page before upload until automated page-image inspection is implemented. See the [Overleaf workflow](docs/overleaf.md).
 
 ## Principles
 
