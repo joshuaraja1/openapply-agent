@@ -1,4 +1,5 @@
 import type { BrowserContext, ElementHandle, Page } from "playwright";
+import { resolve } from "node:path";
 
 export interface BrowserControl {
   ref: string;
@@ -24,6 +25,7 @@ export class AgentBrowser {
   constructor(
     private readonly context: BrowserContext,
     private readonly allowedHosts: ReadonlySet<string>,
+    private readonly approvedArtifacts: ReadonlySet<string> = new Set(),
   ) {}
 
   async navigate(url: string): Promise<BrowserSnapshot> {
@@ -69,9 +71,7 @@ export class AgentBrowser {
         ?? (await handle.getAttribute("name"))
         ?? (await handle.innerText().catch(() => ""));
       const type = await handle.getAttribute("type");
-      const value = ["input", "textarea", "select"].includes(tag)
-        ? await handle.inputValue()
-        : null;
+      const value = null;
       this.controls.set(ref, handle as ElementHandle<HTMLElement>);
       controls.push({ ref, tag, role, name: name.trim(), type, value });
     }
@@ -82,12 +82,30 @@ export class AgentBrowser {
     const page = this.requirePage();
     const handle = this.controls.get(ref);
     if (!handle || !ref.startsWith(`${this.generation}:`)) throw new Error("Stale browser control reference");
+    this.controls.clear();
+    this.generation += 1;
     if (!(await handle.evaluate((element) => element.isConnected))) throw new Error("Browser control changed; take a new snapshot");
-    if (action === "click") await handle.click();
-    else if (action === "fill" && value !== undefined) await handle.fill(value);
+    const existingPages = new Set(this.context.pages());
+    if (action === "click") {
+      const type = await handle.getAttribute("type");
+      const label = ((await handle.getAttribute("aria-label")) ?? (await handle.innerText().catch(() => ""))).trim();
+      if (type === "submit" || /\b(submit|apply now|send application)\b/i.test(label)) {
+        throw new Error("Submission requires a separate approved action");
+      }
+      await handle.click();
+    } else if (action === "fill" && value !== undefined) {
+      await handle.fill(value);
+      if (await handle.inputValue() !== value) throw new Error("Form value was not accepted");
+    }
     else if (action === "select" && value !== undefined) await handle.selectOption(value);
-    else if (action === "upload" && value !== undefined) await handle.setInputFiles(value);
+    else if (action === "upload" && value !== undefined) {
+      if (!this.approvedArtifacts.has(resolve(value))) throw new Error("Upload artifact is not approved for this application");
+      await handle.setInputFiles(value);
+    }
     else throw new Error("This browser action requires a value");
+    const pages = this.context.pages();
+    const popup = pages.find((candidate) => !existingPages.has(candidate) && !candidate.isClosed());
+    if (popup) this.page = popup;
     this.assertAllowedPage();
     return this.snapshot();
   }
