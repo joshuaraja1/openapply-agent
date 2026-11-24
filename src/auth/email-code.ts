@@ -19,7 +19,15 @@ export interface EmailCodeRequest {
 }
 
 function senderAddress(value: string): string | undefined {
-  if (value.includes(",") || (value.match(/</g)?.length ?? 0) > 1
+  let quoted = false;
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) { escaped = false; continue; }
+    if (quoted && character === "\\") { escaped = true; continue; }
+    if (character === '"') quoted = !quoted;
+    if (character === "," && !quoted) return undefined;
+  }
+  if (quoted || (value.match(/</g)?.length ?? 0) > 1
     || (value.match(/>/g)?.length ?? 0) > 1) return undefined;
   const bracketed = value.match(/<([^<>\s]+@[^<>\s]+)>\s*$/);
   const address = (bracketed?.[1] ?? value.trim()).toLowerCase();

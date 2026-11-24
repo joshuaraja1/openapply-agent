@@ -17,6 +17,8 @@ describe("scoped email-code selection", () => {
     expect(selectEmailCode([message], request)).toEqual({ messageId: "message-1", code: "123456" });
     expect(selectEmailCode([message], { ...request, consumedMessageIds: new Set(["message-1"]) }))
       .toBeUndefined();
+    expect(selectEmailCode([{ ...message,
+      from: '"Example, Inc." <verify@mail.example.com>' }], request)?.code).toBe("123456");
   });
 
   it("ignores spoofed, stale, wrong-account, and unrelated messages", () => {
