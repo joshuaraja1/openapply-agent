@@ -4,10 +4,13 @@ import { dirname } from "node:path";
 
 /** Publish a complete file without overwriting a different existing version. */
 export async function createPrivateOutput(path: string, content: string): Promise<void> {
+  if (process.platform === "win32") {
+    throw new Error("Private output requires a reviewed Windows ACL implementation");
+  }
   const existing = async (): Promise<boolean> => {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())
-      || (process.platform !== "win32" && (info.mode & 0o077) !== 0)) {
+      || (info.mode & 0o077) !== 0) {
       throw new Error("Existing private output has unsafe permissions");
     }
     if (await readFile(path, "utf8") !== content) {
@@ -34,10 +37,8 @@ export async function createPrivateOutput(path: string, content: string): Promis
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST" || !(await existing())) throw error;
     }
-    if (process.platform !== "win32") {
-      const directory = await open(dirname(path), "r");
-      try { await directory.sync(); } finally { await directory.close(); }
-    }
+    const directory = await open(dirname(path), "r");
+    try { await directory.sync(); } finally { await directory.close(); }
   } finally {
     await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "ENOENT") throw error;

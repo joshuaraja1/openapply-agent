@@ -3,6 +3,10 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { compileCandidateMarkdown, compileSearchMarkdown } from "./markdown.js";
 import { createPrivateOutput } from "../storage/private-output.js";
 
+if (process.platform === "win32") {
+  throw new Error("Markdown onboarding requires a reviewed Windows ACL implementation");
+}
+
 const variables = ["OPENAPPLY_PROFILE_MD", "OPENAPPLY_WORK_MD", "OPENAPPLY_SEARCH_MD",
   "OPENAPPLY_PROFILE_OUTPUT", "OPENAPPLY_PREFERENCES_OUTPUT"] as const;
 const paths = variables.map((name) => {
@@ -15,7 +19,7 @@ if (resolve(profileOutput) === resolve(preferencesOutput)) throw new Error("Cand
 for (const input of [profileMd, workMd, searchMd]) {
   const info = await lstat(input);
   if (!info.isFile() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())
-    || (process.platform !== "win32" && (info.mode & 0o077) !== 0)) {
+    || (info.mode & 0o077) !== 0) {
     throw new Error("Completed Markdown inputs must be private to this user");
   }
 }
@@ -28,7 +32,7 @@ for (const output of [profileOutput, preferencesOutput]) {
   await mkdir(dirname(output), { recursive: true, mode: 0o700 });
   const info = await lstat(dirname(output));
   if (!info.isDirectory() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())
-    || (process.platform !== "win32" && (info.mode & 0o077) !== 0)) {
+    || (info.mode & 0o077) !== 0) {
     throw new Error("Candidate output directories must be private to this user");
   }
 }

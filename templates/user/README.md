@@ -33,3 +33,5 @@ The command refuses unresolved placeholders, unapproved résumé claims, and
 world-readable inputs. It creates output files with user-only permissions and
 will not overwrite different existing files. If interrupted between outputs,
 rerun the same command to finish; move old outputs before changing source facts.
+The compiler currently runs on macOS and Linux; Windows needs a reviewed
+user-only ACL implementation before handling private candidate data.
