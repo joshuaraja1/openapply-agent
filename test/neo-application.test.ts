@@ -53,6 +53,9 @@ describe("BrowserOS application adapter", () => {
     expect(snapshot.controls.map(({ name, type, required }) => [name, type, required]))
       .toEqual([["First name", null, true], ["Email", null, true],
         ["Resume", "file", false], ["Submit application", "submit", false]]);
+    const resumeApplication = parseNeoSnapshot(tree(false, false)
+      .replace('button "Resume"', 'button "Resume application"'));
+    expect(resumeApplication.controls[2]?.type).toBeNull();
     expect(() => parseNeoSnapshot(tree(false, false, "http://localhost/apply"))).toThrow("HTTPS");
     expect(planApplicationForm({ ...snapshot, visibleText: `${snapshot.visibleText}\nVerify you are human` },
       candidate, "/private/resume.pdf").blockers).toContain("Human verification is present on the application page");

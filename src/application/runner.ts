@@ -220,8 +220,6 @@ export async function runApplicationPackage(
             throw new Error("Signed-in employer page does not identify the approved job");
           }
           recoveryPageUrl = snapshot.url;
-          loginRecoveryPending = !snapshot.controls.some((control) => control.type === "file"
-            && /\b(resume|résumé|cv)\b/i.test(control.name));
         }
       }
     } else if (loginPage) {

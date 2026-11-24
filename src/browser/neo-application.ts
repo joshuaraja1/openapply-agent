@@ -24,7 +24,8 @@ export function parseNeoSnapshot(message: string): BrowserSnapshot & { visibleTe
     const [, role, label, attributes, ref, value] = match;
     const name = label ?? "";
     const submit = role === "button" && /\b(submit|apply now|send application)\b/i.test(name!);
-    const resume = role === "button" && /\b(resume|résumé|cv)\b/i.test(name!);
+    const resume = role === "button" && /^(?:(?:upload|attach|add|choose|select)\s+)?(?:resume|résumé|cv)(?:\s+(?:file|document))?$/i
+      .test(name!.trim());
     controls.push({ ref: ref!, role: role!, name,
       required: attributes!.includes("[required]") || ["checkbox", "radio", "combobox"].includes(role!),
       tag: role === "link" ? "a" : role === "button" && !resume ? "button"
