@@ -14,6 +14,7 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { createApplicationHandoff } from "./handoff.js";
 import { runApplicationQueue } from "./queue-runner.js";
+import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 
@@ -41,6 +42,8 @@ const workflow = new ApplicationWorkflow(new EncryptedApplicationStateStore<Appl
   join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord>(
   join(root, "daily-quota.enc.json"), key));
+const retries = new RetryLedger(new EncryptedApplicationStateStore<RetryRecord>(
+  join(root, "retry-ledger.enc.json"), key));
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
@@ -59,10 +62,12 @@ const connection = await connectBrowserOs(config.browserEndpoint);
 const client: BrowserToolClient = { callTool: async (request) =>
   await connection.client.callTool(request) as BrowserToolResult };
 try {
-  const now = new Date();
-  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const date = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  };
   const cap = Math.min(preferences.applicationPolicy.dailyTarget, preferences.applicationPolicy.dailyHardCap);
-  const outcomes = await runApplicationQueue(eligible, quota, date, cap, async (job) => {
+  const outcomes = await runApplicationQueue(eligible, quota, retries, date, cap, async (job) => {
     const source = sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
     const artifact = await renderOverleafResume(client, config.overleafProjectUrl, job, candidate,
@@ -78,7 +83,7 @@ try {
     await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     await runApplicationPackage(pkg, workflow, join(root, "browser-profile"));
   });
-  console.log(JSON.stringify({ date, outcomes }));
+  console.log(JSON.stringify({ date: date(), outcomes }));
 } finally {
   await connection.close();
 }

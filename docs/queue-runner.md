@@ -6,6 +6,8 @@ each official application in the persistent local browser. It processes jobs
 sequentially. A Keychain-backed encrypted reservation file enforces the lower
 of `dailyTarget` and `dailyHardCap` across restarts. Reservations remain spent
 after failures or uncertain submissions so a crash cannot exceed the cap.
+Each job is quarantined after three failed runs; inspect its private checkpoint
+and source before retrying manually.
 
 1. Copy `examples/queue-runner.example.json` outside the repository and set its
    paths, local BrowserOS endpoint, and private Overleaf project URL.

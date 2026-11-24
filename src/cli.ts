@@ -1,5 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { createApplicationHandoff } from "./application/handoff.js";
 import { mergePendingQueue } from "./application/queue-merge.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
@@ -8,6 +7,7 @@ import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.
 import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
+import { persistDiscoveryOutput } from "./storage/discovery-output.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -68,10 +68,5 @@ try {
 }
 const queue = mergePendingQueue(previousQueue, newQueue);
 
-await mkdir(dirname(outputPath), { recursive: true });
-await mkdir(dirname(statePath), { recursive: true });
-await Promise.all([
-  writeFile(outputPath, `${JSON.stringify({ generatedAt: now.toISOString(), tier: tier.tier, queue }, null, 2)}\n`),
-  writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`),
-]);
+await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
 console.log(`Prepared ${queue.length} application handoff(s) in ${outputPath}`);
