@@ -1,5 +1,7 @@
 import type { BrowserContext, ElementHandle, Page } from "playwright";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 
 export interface BrowserControl {
   ref: string;
@@ -27,7 +29,7 @@ export class AgentBrowser {
   constructor(
     private readonly context: BrowserContext,
     private readonly allowedHosts: ReadonlySet<string>,
-    private readonly approvedArtifacts: ReadonlySet<string> = new Set(),
+    private readonly approvedArtifacts: ReadonlyMap<string, string> = new Map(),
   ) {}
 
   currentUrl(): string {
@@ -119,8 +121,12 @@ export class AgentBrowser {
       if (selected !== value) throw new Error("Selected option was not accepted");
     }
     else if (action === "upload" && value !== undefined) {
-      if (!this.approvedArtifacts.has(resolve(value))) throw new Error("Upload artifact is not approved for this application");
-      await handle.setInputFiles(value);
+      const expectedHash = this.approvedArtifacts.get(resolve(value));
+      if (!expectedHash) throw new Error("Upload artifact is not approved for this application");
+      const bytes = await readFile(value);
+      const actualHash = createHash("sha256").update(bytes).digest("hex");
+      if (actualHash !== expectedHash) throw new Error("Upload artifact changed after verification");
+      await handle.setInputFiles({ name: basename(value), mimeType: "application/pdf", buffer: bytes });
     }
     else throw new Error("This browser action requires a value");
     const pages = this.context.pages();

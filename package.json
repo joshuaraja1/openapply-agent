@@ -4,7 +4,7 @@
   "description": "A privacy-first, human-in-the-loop job discovery and application workflow.",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "start": "tsx src/cli.ts",
@@ -18,11 +18,13 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@napi-rs/keyring": "^2.1.2",
+    "pdfjs-dist": "^6.5.438",
     "playwright": "^1.65.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "pdf-lib": "^1.17.1",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

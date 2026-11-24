@@ -7,6 +7,7 @@ type Claim = CandidateProfile["education"][number];
 export interface ResumeSource {
   latex: string;
   fingerprint: string;
+  renderToken: string;
   claimIds: string[];
 }
 
@@ -120,6 +121,10 @@ export function createJakeResumeSource(template: string, job: DiscoveredJob, can
     sections.push("\\resumeSubHeadingListEnd");
   }
   sections.push("\\section{Technical Skills}", `\\small{${escapeLatex(skills.join(", "))}}`);
-  const latex = template.slice(0, begin) + sections.join("\n") + "\n\n" + template.slice(end);
-  return { latex, fingerprint: createHash("sha256").update(`${job.id}\0${latex}`).digest("hex"), claimIds };
+  const content = template.slice(0, begin) + sections.join("\n") + "\n\n" + template.slice(end);
+  const renderToken = createHash("sha256").update(`${job.id}\0${content}`).digest("hex");
+  const marker = `\\hypersetup{pdfsubject={OpenApply:${renderToken}}}\n`;
+  const latex = content.slice(0, begin) + marker + content.slice(begin);
+  return { latex, fingerprint: createHash("sha256").update(`${job.id}\0${latex}`).digest("hex"),
+    renderToken, claimIds };
 }

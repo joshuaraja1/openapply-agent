@@ -50,6 +50,7 @@ describe("Jake résumé source generation", () => {
     expect(source.latex).not.toContain("FULL NAME");
     expect(source.claimIds).toEqual(["degree", "aws", "sql"]);
     expect(source.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(source.latex).toContain(`\\hypersetup{pdfsubject={OpenApply:${source.renderToken}}}`);
     expect(createJakeResumeSource(template, job, candidate).fingerprint).toBe(source.fingerprint);
   });
 

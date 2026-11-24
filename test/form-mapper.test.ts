@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,7 +93,9 @@ describe("deterministic application field mapping", () => {
         const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true,
           launch: (path, options) => chromium.launchPersistentContext(path, { ...options, ignoreHTTPSErrors: true }) });
         try {
-          const browser = new AgentBrowser(runtime.context, new Set(["127.0.0.1"]), new Set([resumePath]));
+          const verifiedBytes = await readFile(resumePath);
+          const browser = new AgentBrowser(runtime.context, new Set(["127.0.0.1"]),
+            new Map([[resumePath, createHash("sha256").update(verifiedBytes).digest("hex")]]));
           const first = await browser.navigate(url);
           const result = await fillApplicationForm(browser, first, candidate, resumePath);
           expect(result.blockers).toEqual([]);
@@ -101,6 +104,9 @@ describe("deterministic application field mapping", () => {
           expect(await page.locator("#email").inputValue()).toBe("test@example.com");
           expect(await page.locator("#reason").inputValue()).toBe("");
           expect(await page.locator("#resume").evaluate((element) => (element as HTMLInputElement).files?.[0]?.name)).toBe("resume.pdf");
+          await writeFile(resumePath, "%PDF-1.4\nchanged\n%%EOF\n");
+          const resumeRef = result.snapshot.controls.find((control) => control.name === "Resume")?.ref ?? "";
+          await expect(browser.act(resumeRef, "upload", resumePath)).rejects.toThrow("changed after verification");
         } finally {
           await runtime.close();
         }
