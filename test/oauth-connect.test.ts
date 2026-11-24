@@ -49,4 +49,10 @@ describe("local mailbox consent", () => {
     expect(put).toHaveBeenCalledOnce();
     expect(JSON.parse(put.mock.calls[0]![1])).toMatchObject({ refreshToken: "new-refresh" });
   });
+
+  it("bounds a hung browser opener and closes the callback listener", async () => {
+    const secrets = { get: async () => undefined, put: async () => {}, delete: async () => {} };
+    await expect(connectMailboxOAuth(policy, secrets,
+      async () => new Promise<void>(() => {}), fetch, 1000)).rejects.toThrow("timed out");
+  });
 });

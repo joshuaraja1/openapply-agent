@@ -55,10 +55,8 @@ export async function connectMailboxOAuth(policy: AuthenticationPolicy, secrets:
     throw new Error("OAuth setup timeout is invalid");
   }
   let resolveCode!: (code: string) => void;
-  let rejectCode!: (error: Error) => void;
-  const codeReceived = new Promise<string>((resolve, reject) => {
+  const codeReceived = new Promise<string>((resolve) => {
     resolveCode = resolve;
-    rejectCode = reject;
   });
   let expectedState = "";
   const server = createServer((request, response) => {
@@ -94,9 +92,10 @@ export async function connectMailboxOAuth(policy: AuthenticationPolicy, secrets:
     const redirectUri = `http://127.0.0.1:${port}/callback`;
     const authorization = createOAuthAuthorizationRequest(policy, redirectUri);
     expectedState = authorization.state;
-    timeout = setTimeout(() => rejectCode(new Error("Mailbox OAuth consent timed out")), timeoutMs);
-    await openUrl(authorization.url);
-    const code = await codeReceived;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error("Mailbox OAuth consent timed out")), timeoutMs);
+    });
+    const code = await Promise.race([openUrl(authorization.url).then(() => codeReceived), deadline]);
     await exchangeMailboxAuthorizationCode(policy, secrets, code, authorization.verifier,
       redirectUri, fetcher);
   } finally {
