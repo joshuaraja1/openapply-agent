@@ -52,6 +52,13 @@ For a single application, create private render input containing the selected
 Overleaf project URL, and a private output directory. Generate the tailored
 PDF and application package with:
 
+Use [the synthetic render-input example](examples/render-input.example.json)
+for the field structure. Copy a real `job` from the discovery queue, its exact
+configured `source`, and your private candidate profile. Use the BrowserOS
+endpoint shown by your installation and a dedicated private Overleaf project.
+`expectedConfirmation` must match an employer confirmation after submission;
+without it, the runner pauses for a human instead of reporting success.
+
 ```bash
 OPENAPPLY_RENDER_INPUT=/private/render-input.json npm run resume:render
 ```

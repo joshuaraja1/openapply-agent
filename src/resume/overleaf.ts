@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { pageIdFromResult, resultText, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
@@ -90,12 +91,23 @@ export async function renderOverleafResume(
       page, mode: "interactive", depth: 3,
     } }), "PDF snapshot");
     const downloadRef = controlRef(compiled, "link", "Download PDF");
+    const downloadStartedAt = Date.now();
     const downloaded = downloadPath(await client.callTool({ name: "download", arguments: {
       page, ref: downloadRef,
     } }), downloadsDirectory);
-    const file = await lstat(downloaded);
-    if (!file.isFile() || file.isSymbolicLink() || file.size < 100 || file.size > 5_000_000) {
-      throw new Error("Overleaf downloaded an invalid PDF file");
+    const handle = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let bytes: Buffer;
+    let downloadedIdentity: { dev: number; ino: number };
+    try {
+      const file = await handle.stat();
+      if (!file.isFile() || file.size < 100 || file.size > 5_000_000
+        || file.mtimeMs + 2_000 < downloadStartedAt) {
+        throw new Error("Overleaf downloaded an invalid or stale PDF file");
+      }
+      downloadedIdentity = { dev: file.dev, ino: file.ino };
+      bytes = await handle.readFile();
+    } finally {
+      await handle.close();
     }
     const directory = resolve(outputDirectory);
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -107,9 +119,13 @@ export async function renderOverleafResume(
     }
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     const artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
-    await writeFile(artifactPath, await readFile(downloaded), { flag: "wx", mode: 0o600 });
+    await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
     const artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source);
-    await unlink(downloaded);
+    const currentDownload = await lstat(downloaded);
+    if (currentDownload.isFile() && !currentDownload.isSymbolicLink()
+      && currentDownload.dev === downloadedIdentity.dev && currentDownload.ino === downloadedIdentity.ino) {
+      await unlink(downloaded);
+    }
     completed = true;
     return artifact;
   } finally {
