@@ -49,3 +49,11 @@ The workflow pauses for CAPTCHA, authenticator-app codes, security keys, account
 recovery, unexpected sender domains, multiple plausible codes, or a code outside
 the configured age window. OAuth refresh tokens remain in the operating-system
 secret store.
+
+## Application checkpoint encryption
+
+The encrypted checkpoint store takes a 32-byte key from a trusted secret store.
+The key must stay outside the repository, configuration files, and process
+arguments. After a crash, inspect active OpenApply processes before calling
+`recoverLockAfterInspection(true)` on the checkpoint store. This explicit
+recovery preserves the single-writer guarantee.
