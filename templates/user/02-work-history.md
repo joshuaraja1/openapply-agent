@@ -65,3 +65,34 @@ Put conflicting, outdated, unverified, or disallowed claims here. The workflow m
 - Claim: `{{CLAIM}}`
   - Reason quarantined: `{{CONFLICT / NO EVIDENCE / OUTDATED / CONFIDENTIAL}}`
   - Required resolution: `{{USER CONFIRMATION OR SOURCE}}`
+
+## Structured work history for OpenApply
+
+Put every résumé fact you authorize in this JSON block. Each claim needs a
+source, an evidence location, a status, and allowed uses. Keep unsupported
+claims in `quarantinedClaims` instead of promoting them.
+
+```openapply-history-json
+{
+  "version": 1,
+  "skills": { "languages": ["{{VERIFIED_SKILL}}"] },
+  "experience": [{
+    "employer": "{{EMPLOYER}}",
+    "title": "{{JOB_TITLE}}",
+    "employmentType": "{{FULL-TIME_OR_PART-TIME_OR_CONTRACT_OR_INTERN}}",
+    "start": "{{MONTH_YEAR}}",
+    "end": "{{MONTH_YEAR_OR_PRESENT}}",
+    "claims": [{
+      "id": "{{UNIQUE_CLAIM_ID}}",
+      "claim": "{{VERIFIED_RESULT_AND_ACTION}}",
+      "skills": ["{{VERIFIED_SKILL}}"],
+      "metrics": [],
+      "evidence": [{ "source": "{{SOURCE_NAME}}", "uri": "{{PRIVATE_FILE_PATH_OR_URL}}" }],
+      "status": "user-confirmed",
+      "allowedUses": ["matching", "resume", "application"]
+    }]
+  }],
+  "projects": [],
+  "quarantinedClaims": []
+}
+```

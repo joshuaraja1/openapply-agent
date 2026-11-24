@@ -34,8 +34,8 @@ npm run check
 
 ## Quick start
 
-1. Copy `templates/user/` to a private directory and complete the Markdown files, including the authentication and browser-profile policy.
-2. Copy the JSON files in `examples/` and replace the examples with private, verified data.
+1. Copy `templates/user/` to a private directory and complete the Markdown files, including the structured JSON blocks in files 01–03. Run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON.
+2. Copy the remaining JSON files in `examples/` and replace the examples with private, verified data.
 3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
 
