@@ -40,7 +40,9 @@ export class MacKeychainSecretStore implements SecretStore {
   }
 
   async delete(reference: string): Promise<void> {
-    await this.entry(service, accountFromReference(reference)).deletePassword();
+    const entry = this.entry(service, accountFromReference(reference));
+    await entry.deletePassword();
+    if (await entry.getPassword() !== null) throw new Error("Keychain did not delete the secret");
   }
 }
 

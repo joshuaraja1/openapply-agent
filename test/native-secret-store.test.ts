@@ -34,4 +34,13 @@ describe("native secret-store selection", () => {
     expect(() => new LinuxSecretServiceStore(undefined, "darwin"))
       .toThrow("only on Linux");
   });
+
+  it("does not report deletion when a Linux credential remains readable", async () => {
+    const store = new LinuxSecretServiceStore(() => ({
+      getPassword: async () => "still-present",
+      setPassword: async () => {}, deletePassword: async () => false,
+    }), "linux");
+    await expect(store.delete("secret-service://portal/account"))
+      .rejects.toThrow("did not delete");
+  });
 });

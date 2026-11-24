@@ -35,7 +35,9 @@ export class LinuxSecretServiceStore implements SecretStore {
   }
 
   async delete(reference: string): Promise<void> {
-    await this.entry(service, this.account(reference)).deletePassword();
+    const entry = this.entry(service, this.account(reference));
+    await entry.deletePassword();
+    if (await entry.getPassword() !== null) throw new Error("Secret Service did not delete the secret");
   }
 }
 
