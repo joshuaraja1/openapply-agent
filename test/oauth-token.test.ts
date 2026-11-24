@@ -25,7 +25,7 @@ describe("Keychain-backed mailbox OAuth token", () => {
     const calls: Array<{ url: string; options: RequestInit }> = [];
     const fetcher = vi.fn(async (input: URL | RequestInfo, options: RequestInit = {}) => {
       calls.push({ url: String(input), options });
-      return String(input).includes("oauth2.googleapis.com")
+      return new URL(String(input)).hostname === "oauth2.googleapis.com"
         ? json({ access_token: "new-access", expires_in: 3600, token_type: "Bearer",
           scope: "https://www.googleapis.com/auth/gmail.readonly" })
         : json({ emailAddress: "candidate@example.com" });
@@ -42,7 +42,7 @@ describe("Keychain-backed mailbox OAuth token", () => {
   it("rejects a token for the wrong mailbox before storing refresh output", async () => {
     const put = vi.fn(async (_reference: string, _value: string) => {});
     const secrets = { get: async () => JSON.stringify(token), put, delete: async () => {} };
-    const fetcher = vi.fn(async (input: URL | RequestInfo) => String(input).includes("oauth2.googleapis.com")
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => new URL(String(input)).hostname === "oauth2.googleapis.com"
       ? json({ access_token: "new-access", expires_in: 3600, token_type: "Bearer" })
       : json({ emailAddress: "other@example.com" })) as unknown as typeof fetch;
     await expect(getMailboxAccessToken(policy, secrets, fetcher, now)).rejects.toThrow("identity");
@@ -74,7 +74,7 @@ describe("Keychain-backed mailbox OAuth token", () => {
     const calls: string[] = [];
     const fetcher = vi.fn(async (input: URL | RequestInfo) => {
       calls.push(String(input));
-      return String(input).includes("login.microsoftonline.com")
+      return new URL(String(input)).hostname === "login.microsoftonline.com"
         ? json({ access_token: "graph-access", expires_in: 3600, token_type: "Bearer",
           scope: "Mail.Read User.Read offline_access" })
         : json({ mail: "candidate@example.com", userPrincipalName: "candidate@example.com" });
