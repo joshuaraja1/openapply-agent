@@ -97,9 +97,10 @@ after fixing the blocker. For an unknown required answer, provide a private
 that names the exact job, tab, field, and value. The runner attaches to the
 saved tab and rechecks the official posting and résumé before continuing.
 If you manually finish a CAPTCHA or MFA and submit in that tab, use
-`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> npm run application:run`.
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> OPENAPPLY_CONFIRMATION_ATTESTATION=<private-attestation-file> npm run application:run`.
 It records submission only when the configured employer confirmation is visible
-on the approved host.
+on the approved host and your [attestation](examples/manual-confirmation-attestation.example.json)
+names that exact job, tab, and confirmation URL.
 
 ## Set up BrowserOS neo
 

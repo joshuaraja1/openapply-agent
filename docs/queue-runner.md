@@ -49,8 +49,10 @@ outside the repository with user-only permissions. Setting
 `approveFinalSubmission: true` explicitly authorizes submission after these
 exact answers are verified. For CAPTCHA or MFA, finish
 the portal flow yourself. If you submit manually, run
-`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> npm run application:run`
+`OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> OPENAPPLY_CONFIRMATION_ATTESTATION=<private-attestation-file> npm run application:run`
 to verify the employer confirmation in that same tab before recording success.
+The attestation follows `examples/manual-confirmation-attestation.example.json`
+and is your explicit statement that the confirmation belongs to this job.
 
 On macOS, build the project, copy `examples/schedule.example.json` to a private
 path, set its paths and interval, then install a LaunchAgent. It runs at login

@@ -9,7 +9,7 @@ import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { getOrCreateStateKey, MacKeychainSecretStore } from "../storage/mac-keychain.js";
 import { applicationPackageSchema, approvedDestinationHost, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
-import { confirmManualSubmission } from "./manual-confirm.js";
+import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private application package JSON file");
@@ -45,8 +45,10 @@ try {
     await connection.client.callTool(request) as BrowserToolResult };
   if (confirmJobId) {
     if (!client) throw new Error("Manual confirmation requires the saved BrowserOS endpoint");
+    const attestationPath = process.env.OPENAPPLY_CONFIRMATION_ATTESTATION;
+    if (!attestationPath) throw new Error("Manual confirmation requires a private job-bound attestation file");
     const browser = new NeoApplicationBrowser(client, new Set([approvedDestinationHost(pkg)]), new Map());
-    await confirmManualSubmission(pkg, workflow, browser);
+    await confirmManualSubmission(pkg, workflow, browser, await loadManualAttestation(attestationPath));
     console.log(JSON.stringify({ jobId: pkg.job.id, stage: "submitted" }));
   } else {
   const result = await runApplicationPackage(authorizedPackage, workflow, profileDirectory,

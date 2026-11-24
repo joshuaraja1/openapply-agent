@@ -39,12 +39,18 @@ describe("manual submission reconciliation", () => {
       pdfSha256: "b".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
     const unconfirmed = { inspectHandoff: async () => ({ url: "https://jobs.example.com/other",
       title: "Apply", controls: [], visibleText: '- paragraph "Thank you for applying"' }) };
-    await expect(confirmManualSubmission(pkg, workflow, unconfirmed as never, verify))
+    const attestation = { version: 1 as const, jobId: job.id, browserPageId: 7,
+      confirmationUrl: "https://jobs.example.com/other", expectedConfirmation: "Thank you for applying",
+      attestCorrectJob: true as const };
+    await expect(confirmManualSubmission(pkg, workflow, unconfirmed as never, attestation, verify))
       .rejects.toThrow("not visible");
     expect((await workflow.current(job.id))?.stage).toBe("waiting-human");
     const confirmed = { inspectHandoff: async () => ({ url: "https://jobs.example.com/confirmation",
       title: "Confirmation", controls: [], visibleText: '- heading "Thank you for applying"' }) };
-    await confirmManualSubmission(pkg, workflow, confirmed as never, verify);
+    await expect(confirmManualSubmission(pkg, workflow, confirmed as never, attestation, verify))
+      .rejects.toThrow("changed after attestation");
+    await confirmManualSubmission(pkg, workflow, confirmed as never,
+      { ...attestation, confirmationUrl: "https://jobs.example.com/confirmation" }, verify);
     expect((await workflow.current(job.id))?.stage).toBe("submitted");
   });
 });
