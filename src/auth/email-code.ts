@@ -56,8 +56,15 @@ function verificationCodes(text: string): string[] {
 }
 
 function containsContext(text: string, phrase: string): boolean {
-  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "iu").test(text);
+  let index = text.indexOf(phrase);
+  while (index >= 0) {
+    const before = index > 0 ? text[index - 1] : undefined;
+    const after = text[index + phrase.length];
+    if ((!before || !/[\p{L}\p{N}]/u.test(before))
+      && (!after || !/[\p{L}\p{N}]/u.test(after))) return true;
+    index = text.indexOf(phrase, index + 1);
+  }
+  return false;
 }
 
 /** Selects only one fresh, job-bound email code. Ambiguity always pauses automation. */
