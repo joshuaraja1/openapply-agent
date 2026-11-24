@@ -84,9 +84,12 @@ export class NeoApplicationBrowser {
     return group;
   }
 
-  async attach(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot> {
+  async attach(pageId: number, expectedUrl: string, expectedGroupId: string,
+    allowChangedEmployerUrl = false): Promise<BrowserSnapshot> {
     const snapshot = await this.inspectHandoff(pageId, expectedGroupId);
-    if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
+    if (snapshot.url !== expectedUrl && !allowChangedEmployerUrl) {
+      throw new Error("Handoff page moved; inspect it before resuming");
+    }
     return snapshot;
   }
 

@@ -51,13 +51,19 @@ export interface ApplicationBrowserSurface {
   fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
   pageId?(): number | undefined;
   groupId?(): string | undefined;
-  attach?(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot>;
+  attach?(pageId: number, expectedUrl: string, expectedGroupId: string,
+    allowChangedEmployerUrl?: boolean): Promise<BrowserSnapshot>;
   authenticate?(email: string, password: string): Promise<BrowserSnapshot>;
 }
 
 function stepSignature(page: BrowserSnapshot): string {
   return `${page.url}|${page.title}|${page.controls.map((control) =>
     `${control.tag}:${control.type}:${control.name}`).join("|")}`;
+}
+
+function identifiesJob(page: BrowserSnapshot, job: DiscoveredJob): boolean {
+  const text = (page.visibleText ?? "").toLowerCase().replace(/\s+/g, " ");
+  return text.includes(job.title.toLowerCase()) && text.includes(job.company.toLowerCase());
 }
 
 export async function validateOfficialPosting(pkg: ApplicationPackage): Promise<boolean> {
@@ -172,15 +178,21 @@ export async function runApplicationPackage(
     })();
   let recoveryPageUrl = current?.browserPageUrl;
   let recoveryResumeUploaded = current?.resumeUploaded === true;
+  let loginRecoveryPending = false;
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     let snapshot = resumingHuman
-      ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!)
+      ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
+        current!.blocker === "Portal sign-in needs human completion")
       : await browser.navigate(job.applicationUrl);
     if (new URL(snapshot.url).protocol !== "https:"
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
+    }
+    if (resumingHuman && current!.blocker === "Portal sign-in needs human completion"
+      && snapshot.url !== current!.browserPageUrl && !identifiesJob(snapshot, job)) {
+      throw new Error("Returned employer page does not identify the approved job");
     }
     recoveryPageUrl = snapshot.url;
     const loginPage = snapshot.controls.some((control) =>
@@ -188,6 +200,7 @@ export async function runApplicationPackage(
       && snapshot.controls.some((control) => control.tag === "button"
         && /^(sign in|log in|login)$/i.test(control.name.trim()));
     let loginBlocker: string | undefined;
+    let authenticatedRedirect = false;
     if (loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
       const account = dependencies.account;
       if (!account.domains.some((domain) => domain.toLowerCase() === host)) {
@@ -196,8 +209,18 @@ export async function runApplicationPackage(
         const password = await dependencies.secretStore.get(account.passwordSecretRef);
         if (!password) loginBlocker = "Configured portal password is unavailable in the OS secret store";
         else {
+          loginRecoveryPending = true;
           snapshot = await browser.authenticate(account.email, password);
+          if (new URL(snapshot.url).protocol !== "https:"
+            || new URL(snapshot.url).hostname.toLowerCase() !== host) {
+            throw new Error("Portal sign-in left the approved employer destination");
+          }
+          authenticatedRedirect = snapshot.url !== job.applicationUrl;
+          if (authenticatedRedirect && !identifiesJob(snapshot, job)) {
+            throw new Error("Signed-in employer page does not identify the approved job");
+          }
           recoveryPageUrl = snapshot.url;
+          loginRecoveryPending = false;
         }
       }
     } else if (loginPage) {
@@ -295,7 +318,7 @@ export async function runApplicationPackage(
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
           pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
-          continued || resumingHuman ? filled.snapshot.url : undefined);
+          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined);
         checkpoint = (await workflow.current(job.id))!;
       }
     }
@@ -307,7 +330,8 @@ export async function runApplicationPackage(
       const pageId = runtime.browser.pageId?.() ?? current?.browserPageId;
       const groupId = runtime.browser.groupId?.() ?? current?.browserGroupId;
       await workflow.advance(job.id, "waiting-human", {
-        blocker: current?.blocker ?? "Human handoff needs another review",
+        blocker: loginRecoveryPending ? "Portal sign-in needs human completion"
+          : current?.blocker ?? "Human handoff needs another review",
         ...(pageId ? { browserPageId: pageId, browserPageUrl: recoveryPageUrl } : {}),
         ...(groupId ? { browserGroupId: groupId } : {}),
         ...(pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
