@@ -12,23 +12,18 @@ import { getOrCreateStateKey, MacKeychainSecretStore } from "../storage/mac-keyc
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
+import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 
-const configSchema = z.object({
-  version: z.literal(1), queuePath: z.string().min(1), candidatePath: z.string().min(1),
-  preferencesPath: z.string().min(1), discoveryInputPath: z.string().min(1),
-  browserEndpoint: z.url(), overleafProjectUrl: z.url(), outputDirectory: z.string().min(1),
-  expectedConfirmationByDomain: z.record(z.string(), z.string().min(1)).default({}),
-});
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
-const config = configSchema.parse(await json(configPath));
+const config = queueRunnerConfigSchema.parse(await json(configPath));
 assertLocalBrowserEndpoint(config.browserEndpoint);
 const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.queuePath).then((value) => queueSchema.parse(value)),

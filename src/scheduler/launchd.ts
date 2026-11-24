@@ -1,18 +1,17 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { lstat, mkdir, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
+import { queueRunnerConfigSchema } from "../application/queue-config.js";
 
 const exec = promisify(execFile);
 const label = "com.openapply.agent";
 const absolutePath = z.string().min(1).refine(isAbsolute, "Use an absolute path");
 export const scheduleConfigSchema = z.object({
   version: z.literal(1), repositoryPath: absolutePath,
-  discoveryInputPath: absolutePath, candidatePath: absolutePath,
-  preferencesPath: absolutePath, discoveryStatePath: absolutePath,
-  queuePath: absolutePath, queueConfigPath: absolutePath,
+  queueConfigPath: absolutePath,
   intervalMinutes: z.number().int().min(30).max(1440),
 });
 export type ScheduleConfig = z.infer<typeof scheduleConfigSchema>;
@@ -26,14 +25,7 @@ export function launchAgentPlist(config: ScheduleConfig, nodePath: string, logsD
   const parsed = scheduleConfigSchema.parse(config);
   if (!isAbsolute(nodePath) || !isAbsolute(logsDirectory)) throw new Error("Scheduler paths must be absolute");
   const script = join(parsed.repositoryPath, "dist", "application", "autopilot-cli.js");
-  const environment = {
-    OPENAPPLY_INPUT: parsed.discoveryInputPath,
-    OPENAPPLY_CANDIDATE: parsed.candidatePath,
-    OPENAPPLY_PREFERENCES: parsed.preferencesPath,
-    OPENAPPLY_STATE: parsed.discoveryStatePath,
-    OPENAPPLY_OUTPUT: parsed.queuePath,
-    OPENAPPLY_QUEUE_CONFIG: parsed.queueConfigPath,
-  };
+  const environment = { OPENAPPLY_QUEUE_CONFIG: parsed.queueConfigPath };
   const entries = Object.entries(environment)
     .map(([key, value]) => `      <key>${key}</key><string>${xml(value)}</string>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -63,8 +55,9 @@ export async function installLaunchAgent(config: ScheduleConfig, nodePath = proc
   const repository = await stat(parsed.repositoryPath);
   const script = await stat(join(parsed.repositoryPath, "dist", "application", "autopilot-cli.js"));
   if (!repository.isDirectory() || !script.isFile()) throw new Error("Build the project before installing the scheduler");
-  for (const path of [parsed.discoveryInputPath, parsed.candidatePath,
-    parsed.preferencesPath, parsed.queueConfigPath]) {
+  const queueConfig = queueRunnerConfigSchema.parse(JSON.parse(await readFile(parsed.queueConfigPath, "utf8")));
+  for (const path of [queueConfig.discoveryInputPath, queueConfig.candidatePath,
+    queueConfig.preferencesPath, parsed.queueConfigPath]) {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()
       || (process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0) {
@@ -93,10 +86,6 @@ export async function installLaunchAgent(config: ScheduleConfig, nodePath = proc
 export async function removeLaunchAgent(): Promise<void> {
   if (process.platform !== "darwin") throw new Error("The local scheduler currently supports macOS LaunchAgents");
   const path = agentPath();
-  try {
-    await exec("launchctl", ["bootout", `gui/${process.getuid!()}`, path]);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
-  }
+  await exec("launchctl", ["bootout", `gui/${process.getuid!()}`, path]);
   await unlink(path);
 }

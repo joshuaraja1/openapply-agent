@@ -29,9 +29,9 @@ OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json npm run queue:run
 ```
 
 Run these two commands from the repository root on a schedule using the local
-operating system scheduler. `npm run autopilot` runs both commands in order
-when all five `OPENAPPLY_*` paths shown above plus `OPENAPPLY_QUEUE_CONFIG` are
-set in the environment. BrowserOS neo and Overleaf must already be signed
+operating system scheduler. `OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json npm run autopilot`
+runs both commands in order, using the queue configuration as the only source
+for discovery and candidate paths. BrowserOS neo and Overleaf must already be signed
 in. The application browser uses a separate persistent Chromium profile; a
 site account must already be signed in there as well. If a form asks an unknown
 question, account creation, email code, CAPTCHA, or MFA, the application pauses
