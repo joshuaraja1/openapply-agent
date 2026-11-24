@@ -4,9 +4,10 @@ import { fetchSourceBatch } from "../src/sources/batch.js";
 import type { NormalizedJob } from "../src/types.js";
 
 const sources: JobSource[] = [
-  { provider: "greenhouse", company: "Working", boardToken: "working", enabled: true },
-  { provider: "ashby", company: "Broken", boardName: "broken", enabled: true },
-  { provider: "lever", company: "Disabled", site: "disabled", region: "global", enabled: false },
+  { provider: "greenhouse", company: "Working", boardToken: "working", enabled: true, allowedApplicationHosts: [] },
+  { provider: "ashby", company: "Broken", boardName: "broken", enabled: true, allowedApplicationHosts: [] },
+  { provider: "lever", company: "Disabled", site: "disabled", region: "global", enabled: false,
+    allowedApplicationHosts: [] },
 ];
 
 const job: NormalizedJob = {

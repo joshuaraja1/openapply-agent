@@ -26,6 +26,7 @@
     "provider": "greenhouse",
     "company": "Example Corp",
     "boardToken": "example",
+    "allowedApplicationHosts": ["boards.greenhouse.io"],
     "enabled": true
   },
   "candidate": {

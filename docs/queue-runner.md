@@ -13,6 +13,9 @@ and source before retrying manually.
    paths, local BrowserOS endpoint, and private Overleaf project URL.
 2. Put the completed candidate, preferences, and discovery JSON in private
    files. Configure official sources in discovery input and enable them.
+   Set `allowedApplicationHosts` on each source to exact employer application
+   hosts you trust. JSON-LD career pages may use their own HTTPS host by default;
+   a different ATS host still needs an explicit entry.
 3. Run discovery and the queue runner with the same output path:
 
 ```bash

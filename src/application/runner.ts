@@ -58,11 +58,16 @@ export async function runApplicationPackage(
   const job = pkg.job as DiscoveredJob;
   const destination = new URL(job.applicationUrl);
   const host = destination.hostname.toLowerCase();
+  const independentlyAllowed = pkg.source.allowedApplicationHosts
+    .some((allowed) => allowed.toLowerCase() === host)
+    || (pkg.source.provider === "jsonld" && new URL(pkg.source.url).protocol === "https:"
+      && new URL(pkg.source.url).hostname.toLowerCase() === host);
   if (destination.protocol !== "https:" || destination.username || destination.password
     || new URL(job.sourceUrl).protocol !== "https:"
     || pkg.source.provider !== job.provider || pkg.source.company !== job.company
     || pkg.handoff.jobId !== job.id
     || pkg.handoff.applicationUrl !== job.applicationUrl
+    || !independentlyAllowed
     || !pkg.handoff.allowedDomains.map((domain) => domain.toLowerCase()).includes(host)) {
     throw new Error("Application package does not match its approved employer destination");
   }
