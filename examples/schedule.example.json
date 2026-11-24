@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "repositoryPath": "/Users/you/openapply-agent",
+  "queueConfigPath": "/Users/you/.openapply-agent/queue-runner.json",
+  "intervalMinutes": 60
+}

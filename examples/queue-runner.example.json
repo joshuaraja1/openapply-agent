@@ -4,6 +4,7 @@
   "candidatePath": "/Users/you/.openapply-agent/candidate-profile.json",
   "preferencesPath": "/Users/you/.openapply-agent/search-preferences.json",
   "discoveryInputPath": "/Users/you/.openapply-agent/discovery-input.json",
+  "discoveryStatePath": "/Users/you/.openapply-agent/discovery-state.json",
   "browserEndpoint": "http://127.0.0.1:9210/mcp",
   "overleafProjectUrl": "https://www.overleaf.com/project/000000000000000000000000",
   "outputDirectory": "/Users/you/.openapply-agent/artifacts",
