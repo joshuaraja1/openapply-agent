@@ -52,19 +52,24 @@ describe("BrowserOS application adapter", () => {
     expect(fill.arguments.fields).toEqual([{ ref: "e1", value: "test@example.com" },
       { ref: "e2", value: "private-password" }, { ref: "e3", value: "private-password" }]);
 
+    let revealed = false;
     const unsafe: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
       if (name === "name_session") return result("renamed");
       if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
       if (name === "tabs" && args.action === "new") return result("opened page 7");
-      if (name === "snapshot") return result(registration().replace('- button "Create account"',
-        '- checkbox "Agree to terms" [required] [ref=e5]\n- button "Create account"'));
+      if (name === "snapshot") return result(revealed
+        ? registration().replace('- button "Create account"',
+          '- checkbox "Agree to terms" [required] [ref=e5]\n- button "Create account"')
+        : registration());
+      if (name === "act" && args.kind === "fill") { revealed = true; return result("filled"); }
       throw new Error(`Unexpected BrowserOS call ${name}`);
     }) };
     const blocked = new NeoApplicationBrowser(unsafe, new Set(["jobs.example.com"]), new Map());
     await blocked.navigate(url);
     await expect(blocked.register("test@example.com", "private-password"))
       .rejects.toThrow("human review");
-    expect(vi.mocked(unsafe.callTool).mock.calls.some(([call]) => call.name === "act")).toBe(false);
+    expect(vi.mocked(unsafe.callTool).mock.calls.some(([call]) => call.name === "act"
+      && call.arguments.kind === "click")).toBe(false);
   });
   it("fills an existing portal login from a supplied secret without saving it", async () => {
     let signedIn = false;

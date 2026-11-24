@@ -205,6 +205,8 @@ export async function runApplicationPackage(
   let recoveryResumeUploaded = current?.resumeUploaded === true;
   let loginRecoveryPending = resumingHuman
     && current?.blocker?.startsWith("Portal sign-in needs human completion") === true;
+  const registrationRecoveryPending = resumingHuman
+    && current?.blocker?.startsWith("Account registration may need human completion") === true;
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
@@ -222,6 +224,11 @@ export async function runApplicationPackage(
     if (loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
+    }
+    if (registrationRecoveryPending && !isRegistrationPage(snapshot)
+      && (!identifiesJob(snapshot, job)
+        || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job)))) {
+      loginBlocker = "Post-registration page cannot be bound to this requisition";
     }
     recoveryPageUrl = snapshot.url;
     const loginPage = snapshot.controls.some((control) =>
@@ -261,7 +268,9 @@ export async function runApplicationPackage(
       if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
         || !account.domains.some((domain) => domain.toLowerCase() === host)) {
         loginBlocker = "Account registration requires an enabled exact-domain account";
-      } else if (resumingHuman && current?.blocker?.startsWith("Account registration may need human completion")) {
+      } else if (account.email.toLowerCase() !== pkg.candidate.identity.email.toLowerCase()) {
+        loginBlocker = "Registration account email differs from the candidate email";
+      } else if (registrationRecoveryPending) {
         loginBlocker = "Account registration may need human completion";
       } else {
         const password = await dependencies.secretStore.get(account.passwordSecretRef);
@@ -291,7 +300,8 @@ export async function runApplicationPackage(
             recoveryPageUrl = snapshot.url;
             checkpoint = await workflow.advance(job.id, "applying");
             if (isRegistrationPage(snapshot)) loginBlocker = "Account registration may need human completion";
-            if (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job)) {
+            if (!identifiesJob(snapshot, job)
+              || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job))) {
               loginBlocker = "Post-registration page cannot be bound to this requisition";
             }
           }

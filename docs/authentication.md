@@ -61,13 +61,16 @@ before filling or submitting the form.
 
 The BrowserOS runner can create an account on a same-host registration form when
 `allowAccountCreation` is true, the domain exactly matches the selected account,
-and the configured password is present in Keychain. It accepts only one email,
+the account email matches the candidate email, and the configured password is
+present in Keychain. It accepts only one email,
 password, password-confirmation, and Create account control; unknown required
 fields, legal consent, CAPTCHA, or unsupported registration pages pause for human
 review. Before clicking Create account, it saves the exact BrowserOS tab as a
 recovery checkpoint. A crash cannot silently retry registration. The user must
 inspect and resume that tab if registration success is uncertain. Windows/Linux
 secret stores and a full first-run onboarding UI remain planned.
+After registration, the returned page must still identify the configured job
+and company before application fields can be filled.
 
 ## Email verification
 

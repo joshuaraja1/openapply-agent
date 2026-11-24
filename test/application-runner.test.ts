@@ -634,7 +634,8 @@ describe("application runner", () => {
       { ref: "register", tag: "button", role: "button", name: "Create account", type: "submit",
         value: null, required: false, options: [] },
     ] };
-    const application = { url: job.applicationUrl, title: "Apply", controls: [
+    const application = { url: job.applicationUrl, title: "Apply",
+      visibleText: "Example Co Software Engineer application", controls: [
       { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
         value: null, required: false, options: [] },
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
@@ -674,5 +675,27 @@ describe("application runner", () => {
     expect(failed.checkpoint.stage).toBe("waiting-human");
     await expect(runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", options))
       .rejects.toThrow("inspect or resume");
+    const resumedWrong = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
+      ...options, resumedJobId: job.id, browserFactory: async () => ({ browser: {
+        ...(await options.browserFactory()).browser,
+        attach: async () => ({ ...application, url: "https://jobs.example.com/other",
+          visibleText: "Unrelated account dashboard" }),
+      }, close: async () => {} }),
+    });
+    expect(resumedWrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    const mismatched = await runApplicationPackage(pkg,
+      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
+        ...options, account: { ...account, email: "different@example.com" },
+      });
+    expect(mismatched.checkpoint.blocker).toContain("differs from the candidate email");
+    expect(register).toHaveBeenCalledOnce();
+    const unrelated = await runApplicationPackage(pkg,
+      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
+        ...options, browserFactory: async () => ({ browser: {
+          ...(await options.browserFactory()).browser,
+          register: async () => ({ ...application, visibleText: "Account dashboard" }),
+        }, close: async () => {} }),
+      });
+    expect(unrelated.checkpoint.blocker).toContain("cannot be bound to this requisition");
   });
 });
