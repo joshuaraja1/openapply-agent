@@ -1,8 +1,14 @@
 import { z } from "zod";
+import { lstat, readFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 
 const secretReferenceSchema = z.string().regex(
   /^(keychain|credential-manager|secret-service):\/\/[A-Za-z0-9._/@:-]+$/,
   "Use an operating-system secret reference; never put a password in configuration",
+);
+const userSecretReferenceSchema = secretReferenceSchema.refine(
+  (reference) => !reference.startsWith("keychain://application-state/"),
+  "Application-state encryption keys cannot be used as account credentials",
 );
 
 const domainSchema = z.string().regex(
@@ -15,7 +21,7 @@ export const siteAccountSchema = z.strictObject({
   email: z.string().email(),
   username: z.string().min(1).optional(),
   domains: z.array(domainSchema).min(1),
-  passwordSecretRef: secretReferenceSchema,
+  passwordSecretRef: userSecretReferenceSchema,
   allowAccountCreation: z.boolean().default(false),
 });
 
@@ -35,7 +41,7 @@ export const authenticationPolicySchema = z.strictObject({
     enabled: z.boolean().default(false),
     provider: z.enum(["gmail", "microsoft"]).optional(),
     accountId: z.string().min(1).optional(),
-    oauthSecretRef: secretReferenceSchema.optional(),
+    oauthSecretRef: userSecretReferenceSchema.optional(),
     allowedSenderDomains: z.array(domainSchema).default([]),
     maximumMessageAgeSeconds: z.number().int().min(30).max(900).default(300),
     autoEnter: z.boolean().default(false),
@@ -81,6 +87,18 @@ export const authenticationPolicySchema = z.strictObject({
 
 export type AuthenticationPolicy = z.infer<typeof authenticationPolicySchema>;
 export type SiteAccount = z.infer<typeof siteAccountSchema>;
+
+export async function loadAuthenticationPolicy(path: string): Promise<AuthenticationPolicy> {
+  if (process.platform === "win32" || !isAbsolute(path)) {
+    throw new Error("Authentication policy requires an absolute private file path");
+  }
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())
+    || (info.mode & 0o077) !== 0) {
+    throw new Error("Authentication policy must be a private regular file");
+  }
+  return authenticationPolicySchema.parse(JSON.parse(await readFile(path, "utf8")));
+}
 
 export function accountForUrl(
   policy: AuthenticationPolicy,

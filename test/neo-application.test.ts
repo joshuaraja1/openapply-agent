@@ -25,11 +25,60 @@ const tree = (filled: boolean, submitted: boolean, origin = url) =>
   + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
 
 describe("BrowserOS application adapter", () => {
+  it("fills an existing portal login from a supplied secret without saving it", async () => {
+    let signedIn = false;
+    const login = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`
+      + '- textbox "Password" [required] [ref=e1]\n- button "Sign in" [ref=e2]\n'
+      + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(signedIn ? tree(false, false) : login);
+      if (name === "credentials" && args.action === "fill") return {
+        ...result("filled"), structuredContent: { source: "provided" },
+      };
+      if (name === "act" && args.kind === "click") { signedIn = true; return result("clicked"); }
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
+    await browser.navigate(url);
+    expect(await browser.authenticate("candidate@example.com", "private-password"))
+      .toMatchObject({ url });
+    expect(vi.mocked(client.callTool).mock.calls.some(([call]) => call.name === "credentials"
+      && call.arguments.action === "add")).toBe(false);
+    expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "credentials"))
+      .toHaveLength(1);
+  });
+
+  it("does not click sign-in when BrowserOS rejects credential fill", async () => {
+    const login = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`
+      + '- textbox "Password" [required] [ref=e1]\n- button "Sign in" [ref=e2]\n'
+      + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result("[7] https://jobs.example.com/apply [group AAAAAAAAAAAAAAAA]");
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(login);
+      if (name === "credentials") return { ...result("failed"), structuredContent: {
+        status: "error", error: { code: "NO_LOGIN_FORM", message: "No form" },
+      } };
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
+    await browser.navigate(url);
+    await expect(browser.authenticate("candidate@example.com", "private-password"))
+      .rejects.toThrow("did not confirm");
+    expect(vi.mocked(client.callTool).mock.calls.some(([call]) => call.name === "act")).toBe(false);
+  });
   it("parses visible required fields and the résumé control", () => {
     const snapshot = parseNeoSnapshot(tree(false, false));
     expect(snapshot.controls.map(({ name, type, required }) => [name, type, required]))
       .toEqual([["First name", null, true], ["Email", null, true],
         ["Resume", "file", false], ["Submit application", "submit", false]]);
+    const resumeApplication = parseNeoSnapshot(tree(false, false)
+      .replace('button "Resume"', 'button "Resume application"'));
+    expect(resumeApplication.controls[2]?.type).toBeNull();
     expect(() => parseNeoSnapshot(tree(false, false, "http://localhost/apply"))).toThrow("HTTPS");
     expect(planApplicationForm({ ...snapshot, visibleText: `${snapshot.visibleText}\nVerify you are human` },
       candidate, "/private/resume.pdf").blockers).toContain("Human verification is present on the application page");

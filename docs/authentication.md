@@ -32,20 +32,43 @@ application and opens the relevant login page.
 
 The private authentication policy maps domains to an account email and an
 operating-system secret reference. The macOS secret-store implementation uses
-the native Keychain API. Password values must be entered through a private
-onboarding flow; that UI and Windows/Linux backends are still planned. Never
+the native Keychain API. Store a password from a hidden terminal prompt with:
+
+```zsh
+read -rs 'OPENAPPLY_PASSWORD?Portal password: '
+printf '%s' "$OPENAPPLY_PASSWORD" | OPENAPPLY_SECRET_REF='keychain://openapply/job-search' npm run secret:put
+unset OPENAPPLY_PASSWORD
+```
+
+Use the same secret reference in the private authentication policy. The
+onboarding UI and Windows/Linux backends are still planned. Never
 put passwords in Markdown, JSON, logs, command arguments, environment
 variables, generated artifacts, or the repository.
+The `keychain://application-state/` namespace is reserved for OpenApply's
+encryption key and cannot be used for account credentials.
 
-When a portal requires a new account, OpenApply may create it only when the
-selected account has `allowAccountCreation: true`. It uses the configured email
-and the password retrieved from that account's secret reference. It must not
-invent security-question answers or weaken an existing password policy.
+Set `authenticationPolicyPath` in the private queue configuration to enable
+automatic sign-in when a supported same-host portal shows a login form. The
+policy file must be owned by the current user and readable only by that user.
+Automatic sign-in requires an exact host in the account's `domains` list and
+a password already stored under its Keychain reference. BrowserOS fills the
+credential without saving it in the browser profile. Ambiguous login controls,
+identity-provider redirects, and failed sign-ins pause for human handling.
+If sign-in lands on a different page, OpenApply continues only when the same
+requisition identifier remains in the same URL path prefix and the returned
+page visibly identifies the company and role. Otherwise it pauses
+before filling or submitting the form.
+
+New-account creation is still planned. The current runner pauses at registration
+forms, even when `allowAccountCreation` is true. A future implementation may
+create accounts only with that policy enabled, using the configured email and
+Keychain password; it must not invent security answers.
 
 ## Email verification
 
-With explicit OAuth consent, OpenApply can observe the selected Gmail or
-Microsoft mailbox during an active application. It considers only recent
+Email-code automation is still planned and currently pauses the application.
+With explicit OAuth consent, a future implementation can observe the selected
+Gmail or Microsoft mailbox during an active application. It would consider only recent
 messages associated with the active portal and expected email address. A single
 unambiguous email-address verification code may be entered automatically and is
 discarded immediately afterward.

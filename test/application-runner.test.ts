@@ -57,6 +57,206 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("signs into an exact-domain portal using an OS-stored password", async () => {
+    const boundJob = { ...job, id: "greenhouse:example:123456",
+      applicationUrl: "https://jobs.example.com/apply/123456" };
+    const login = { url: boundJob.applicationUrl, title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: "https://jobs.example.com/apply/123456/step-1", title: "Apply",
+      visibleText: "Example Co Software Engineer application", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const account = { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+      passwordSecretRef: "keychain://example", allowAccountCreation: false };
+    const get = vi.fn(async () => "private-password");
+    let currentUrl = boundJob.applicationUrl;
+    const authenticate = vi.fn(async () => { currentUrl = application.url; return application; });
+    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+      handoff: createApplicationHandoff(boundJob, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/login.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: boundJob.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true, account, secretStore: { get, put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser: { currentUrl: () => currentUrl,
+        navigate: async () => login, authenticate, act: async () => application,
+        fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(get).toHaveBeenCalledWith("keychain://example");
+    expect(authenticate).toHaveBeenCalledWith("candidate@example.com", "private-password");
+    const unmatched = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => result.artifact, validateOfficial: async () => true,
+        account: { ...account, domains: ["*.example.com"] },
+        secretStore: { get, put: async () => {}, delete: async () => {} },
+        browserFactory: async () => ({ browser: { currentUrl: () => currentUrl,
+          navigate: async () => login, authenticate, act: async () => application,
+          fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }),
+      });
+    expect(unmatched.checkpoint.stage).toBe("waiting-human");
+    expect(unmatched.checkpoint.blocker).toContain("exact account domain");
+    expect(get).toHaveBeenCalledOnce();
+    const wrongApplication = { ...application,
+      url: "https://jobs.example.com/apply/654321/step-1?source=123456" };
+    const wrongSubmit = vi.fn(async () => "Thank you for applying");
+    const wrong = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => result.artifact, validateOfficial: async () => true,
+        account, secretStore: { get, put: async () => {}, delete: async () => {} },
+        browserFactory: async () => ({ browser: { currentUrl: () => wrongApplication.url,
+          navigate: async () => login, authenticate: async () => wrongApplication,
+          act: async () => wrongApplication, fillBatch: async () => wrongApplication,
+          submit: wrongSubmit }, close: async () => {} }),
+      });
+    expect(wrong.checkpoint.stage).toBe("waiting-human");
+    expect(wrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    expect(wrongSubmit).not.toHaveBeenCalled();
+  });
+
+  it("resumes the same tab after a human completes external identity-provider sign-in", async () => {
+    const login = { url: job.applicationUrl, title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: "https://jobs.example.com/apply/step-1", title: "Apply",
+      visibleText: "Example Co Software Engineer application", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/identity-provider.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let currentUrl = job.applicationUrl;
+    const attach = vi.fn(async () => { currentUrl = application.url; return application; });
+    const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
+      pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
+      fillBatch: async () => application, submit: async () => "Thank you for applying",
+      authenticate: async () => { throw new Error("identity provider redirect"); } };
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      account: { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+        passwordSecretRef: "keychain://example", allowAccountCreation: false },
+      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser, close: async () => {} }) };
+    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", options))
+      .rejects.toThrow("identity provider redirect");
+    expect(await workflow.current(job.id)).toMatchObject({ stage: "waiting-human",
+      blocker: "Portal sign-in needs human completion", browserPageUrl: job.applicationUrl });
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: job.id });
+    expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
+    expect(resumed.checkpoint.stage).toBe("waiting-human");
+    expect(resumed.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    expect(resumed.checkpoint.blocker?.startsWith("Portal sign-in needs human completion")).toBe(true);
+    const stillWrong = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: job.id });
+    expect(stillWrong.checkpoint.stage).toBe("waiting-human");
+    expect(stillWrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
+  });
+
+  it("keeps a human login handoff resumable when credentials leave an MFA form", async () => {
+    const login = { url: job.applicationUrl, title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: "https://jobs.example.com/apply/step-1", title: "Apply",
+      visibleText: "Example Co Software Engineer application", controls: [
+        { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+          value: null, required: false, options: [] },
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/mfa.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let currentUrl = job.applicationUrl;
+    const attach = vi.fn(async () => { currentUrl = application.url; return application; });
+    const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
+      pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
+      fillBatch: async () => application, submit: async () => "Thank you for applying",
+      authenticate: async () => login };
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      account: { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+        passwordSecretRef: "keychain://example", allowAccountCreation: false },
+      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser, close: async () => {} }) };
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint.stage).toBe("waiting-human");
+    expect(pending.checkpoint.blocker).toContain("Portal sign-in needs human completion");
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: job.id });
+    expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
+    expect(resumed.checkpoint.stage).toBe("waiting-human");
+    expect(resumed.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    expect(resumed.checkpoint.blocker?.startsWith("Portal sign-in needs human completion")).toBe(true);
+  });
+  it("keeps login recovery after a résumé was uploaded on an earlier step", async () => {
+    const boundJob = { ...job, id: "greenhouse:example:123456",
+      applicationUrl: "https://jobs.example.com/apply/123456" };
+    const upload = { url: boundJob.applicationUrl, title: "Documents", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ] };
+    const login = { url: "https://jobs.example.com/apply/123456/sign-in", title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const finalPage = { url: "https://jobs.example.com/apply/123456/step-2", title: "Submit",
+      visibleText: "Example Co Software Engineer application", controls: [
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+      handoff: createApplicationHandoff(boundJob, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/upload-before-login.pdf", expectedConfirmation: "Thank you for applying",
+      browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let current = upload;
+    const attach = vi.fn(async () => { current = finalPage; return finalPage; });
+    const browser = { currentUrl: () => current.url, navigate: async () => upload, attach,
+      pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
+      act: async () => { current = login; return login; }, fillBatch: async () => current,
+      submit: async () => "Thank you for applying" };
+    const options = { verify: async () => ({ jobId: boundJob.id,
+      sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
+      path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true,
+      browserFactory: async () => ({ browser, close: async () => {} }) };
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint.stage).toBe("waiting-human");
+    expect(pending.checkpoint.resumeUploaded).toBe(true);
+    expect(pending.checkpoint.blocker?.startsWith("Portal sign-in needs human completion")).toBe(true);
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
+      { ...options, resumedJobId: boundJob.id });
+    expect(attach).toHaveBeenCalledWith(7, login.url, "AAAAAAAAAAAAAAAA", true);
+    expect(resumed.checkpoint.stage).toBe("submitted");
+  });
   it("continues a two-step form and uploads the verified résumé before submitting", async () => {
     const input = (ref: string, name: string, type: string | null = null) => ({
       ref, tag: "input", role: "textbox", name, type, value: null, required: true, options: [],
@@ -157,7 +357,7 @@ describe("application runner", () => {
       browserPageUrl: second.url, resumeUploaded: true });
     const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
       ...options, resumedJobId: job.id });
-    expect(attach).toHaveBeenCalledWith(7, second.url, "AAAAAAAAAAAAAAAA");
+    expect(attach).toHaveBeenCalledWith(7, second.url, "AAAAAAAAAAAAAAAA", false);
     expect(resumed.checkpoint.stage).toBe("submitted");
   });
 
@@ -360,7 +560,7 @@ describe("application runner", () => {
         humanAnswerApproval: { jobId: job.id, browserPageId: 7, approveFinalSubmission: true,
           answers: new Map([["Salary expectation", "Negotiable"]]) }, browserFactory,
       });
-      expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA");
+      expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", false);
       expect(resumed.checkpoint.stage).toBe("submitted");
     } finally {
       await rm(root, { recursive: true, force: true });

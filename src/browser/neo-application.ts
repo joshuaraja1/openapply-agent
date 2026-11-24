@@ -24,7 +24,8 @@ export function parseNeoSnapshot(message: string): BrowserSnapshot & { visibleTe
     const [, role, label, attributes, ref, value] = match;
     const name = label ?? "";
     const submit = role === "button" && /\b(submit|apply now|send application)\b/i.test(name!);
-    const resume = role === "button" && /\b(resume|résumé|cv)\b/i.test(name!);
+    const resume = role === "button" && /^(?:(?:upload|attach|add|choose|select)\s+)?(?:resume|résumé|cv)(?:\s+(?:file|document))?$/i
+      .test(name!.trim());
     controls.push({ ref: ref!, role: role!, name,
       required: attributes!.includes("[required]") || ["checkbox", "radio", "combobox"].includes(role!),
       tag: role === "link" ? "a" : role === "button" && !resume ? "button"
@@ -54,6 +55,30 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
   groupId(): string | undefined { return this.group; }
 
+  async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
+    if (this.page === undefined || !this.latest || !email || !password
+      || !this.latest.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))
+      || this.latest.controls.filter((control) => control.tag === "button"
+        && /^(sign in|log in|login)$/i.test(control.name.trim())).length !== 1) {
+      throw new Error("BrowserOS did not identify a portal login form");
+    }
+    const credentialResult = await this.client.callTool({ name: "credentials", arguments: {
+      action: "fill", page: this.page, username: email, password,
+    } });
+    if (credentialResult.isError
+      || (credentialResult.structuredContent as { source?: unknown } | undefined)?.source !== "provided") {
+      throw new Error("BrowserOS did not confirm portal credential fill");
+    }
+    const filled = await this.snapshot();
+    const signIn = filled.controls.filter((control) => control.tag === "button"
+      && /^(sign in|log in|login)$/i.test(control.name.trim()));
+    if (signIn.length !== 1) throw new Error("Portal sign-in control is ambiguous");
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "click", ref: signIn[0]!.ref, diff: "none",
+    } }), "sign-in");
+    return this.snapshot();
+  }
+
   private async listedGroup(pageId: number): Promise<string> {
     const listing = success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
     const rows = listing.split("\n").filter((entry) =>
@@ -64,9 +89,12 @@ export class NeoApplicationBrowser {
     return group;
   }
 
-  async attach(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot> {
+  async attach(pageId: number, expectedUrl: string, expectedGroupId: string,
+    allowChangedEmployerUrl = false): Promise<BrowserSnapshot> {
     const snapshot = await this.inspectHandoff(pageId, expectedGroupId);
-    if (snapshot.url !== expectedUrl) throw new Error("Handoff page moved; inspect it before resuming");
+    if (snapshot.url !== expectedUrl && !allowChangedEmployerUrl) {
+      throw new Error("Handoff page moved; inspect it before resuming");
+    }
     return snapshot;
   }
 
