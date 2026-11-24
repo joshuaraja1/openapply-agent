@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
 import { AgentBrowser, type BrowserSnapshot } from "../src/browser/actions.js";
 import { launchBrowser } from "../src/browser/runtime.js";
+import { chromium } from "playwright";
 import { fillApplicationForm, planApplicationForm } from "../src/application/form-mapper.js";
 
 const candidate = candidateProfileSchema.parse({
@@ -70,26 +73,39 @@ describe("deterministic application field mapping", () => {
     try {
       const resumePath = join(root, "resume.pdf");
       await writeFile(resumePath, "%PDF-1.4\n%%EOF\n");
-      const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true });
+      const keyPath = join(root, "key.pem");
+      const certPath = join(root, "cert.pem");
+      execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+        "-keyout", keyPath, "-out", certPath, "-subj", "/CN=127.0.0.1"], { stdio: "ignore" });
+      const server = createServer({ key: await readFile(keyPath), cert: await readFile(certPath) }, (_request, response) => {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end(`<form><label for="first">First name</label><input id="first" required>
+          <label for="email">Email</label><input id="email" type="email" required>
+          <label for="reason">Why this company?</label><textarea id="reason"></textarea>
+          <label for="resume">Resume</label><input id="resume" type="file" required></form>`);
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       try {
-        await runtime.context.route("https://jobs.example.com/apply", async (route) => {
-          await route.fulfill({ contentType: "text/html", body: `
-            <form><label for="first">First name</label><input id="first" required>
-            <label for="email">Email</label><input id="email" type="email" required>
-            <label for="reason">Why this company?</label><textarea id="reason"></textarea>
-            <label for="resume">Resume</label><input id="resume" type="file" required></form>` });
-        });
-        const browser = new AgentBrowser(runtime.context, new Set(["jobs.example.com"]), new Set([resumePath]));
-        const first = await browser.navigate("https://jobs.example.com/apply");
-        const result = await fillApplicationForm(browser, first, candidate, resumePath);
-        expect(result.blockers).toEqual([]);
-        const page = runtime.context.pages().at(-1)!;
-        expect(await page.locator("#first").inputValue()).toBe("Test");
-        expect(await page.locator("#email").inputValue()).toBe("test@example.com");
-        expect(await page.locator("#reason").inputValue()).toBe("");
-        expect(await page.locator("#resume").evaluate((element) => (element as HTMLInputElement).files?.[0]?.name)).toBe("resume.pdf");
+        const address = server.address();
+        if (!address || typeof address === "string") throw new Error("Test server did not bind");
+        const url = `https://127.0.0.1:${address.port}/apply`;
+        const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true,
+          launch: (path, options) => chromium.launchPersistentContext(path, { ...options, ignoreHTTPSErrors: true }) });
+        try {
+          const browser = new AgentBrowser(runtime.context, new Set(["127.0.0.1"]), new Set([resumePath]));
+          const first = await browser.navigate(url);
+          const result = await fillApplicationForm(browser, first, candidate, resumePath);
+          expect(result.blockers).toEqual([]);
+          const page = runtime.context.pages().at(-1)!;
+          expect(await page.locator("#first").inputValue()).toBe("Test");
+          expect(await page.locator("#email").inputValue()).toBe("test@example.com");
+          expect(await page.locator("#reason").inputValue()).toBe("");
+          expect(await page.locator("#resume").evaluate((element) => (element as HTMLInputElement).files?.[0]?.name)).toBe("resume.pdf");
+        } finally {
+          await runtime.close();
+        }
       } finally {
-        await runtime.close();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     } finally {
       await rm(root, { recursive: true, force: true });

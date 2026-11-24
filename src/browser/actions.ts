@@ -51,7 +51,7 @@ export class AgentBrowser {
             return;
           }
         }
-        await route.fallback();
+        await route.continue();
       });
       this.routingReady = true;
     }
