@@ -1,5 +1,7 @@
 import type { CandidateProfile } from "../candidate/schema.js";
 import type { AgentBrowser, BrowserControl, BrowserSnapshot } from "../browser/actions.js";
+import type { Provider } from "../types.js";
+import { providerIdentityValue } from "./provider-adapters.js";
 
 export interface FormAction {
   name: string;
@@ -24,7 +26,8 @@ export function isEmailCodeControl(control: BrowserControl): boolean {
       .test(control.name.trim());
 }
 
-function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePath: string): FormAction | undefined {
+function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePath: string,
+  provider?: Provider): FormAction | undefined {
   const label = control.name.trim().toLowerCase().replace(/[*:]+$/, "").trim();
   const type = control.type?.toLowerCase() ?? null;
   if (control.tag === "input" && type === "file" && /\b(resume|résumé|cv)\b/.test(label)) {
@@ -44,13 +47,15 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
     [/^(linkedin|linkedin url|linkedin profile)$/i, candidate.identity.linkedin],
   ];
   const match = fields.find(([pattern]) => pattern.test(label));
-  if (!match?.[1]) return undefined;
-  return { name: control.name, tag: control.tag, type: control.type, action: "fill", value: match[1] };
+  const value = match?.[1] ?? providerIdentityValue(provider, label, candidate);
+  if (!value) return undefined;
+  return { name: control.name, tag: control.tag, type: control.type, action: "fill", value };
 }
 
 /** Only maps exact common fields. Unknown required questions need a human or a provider adapter. */
 export function planApplicationForm(snapshot: BrowserSnapshot, candidate: CandidateProfile, resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {}): FormPlan {
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean;
+    provider?: Provider } = {}): FormPlan {
   const actions: FormAction[] = [];
   const blockers: string[] = [];
   if (/\b(captcha|verify you are human|security code|authenticator code)\b/i.test(snapshot.visibleText ?? "")) {
@@ -65,7 +70,7 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
       blockers.push(`Human verification needed: ${control.name}`);
       continue;
     }
-    const action = valueFor(control, candidate, resumePath);
+    const action = valueFor(control, candidate, resumePath, options.provider);
     if (action && counts.get(key(control)) === 1) actions.push(action);
     else if (control.required && !(control.value?.trim()
       && options.approvedHumanAnswers?.get(control.name) === control.value
@@ -86,7 +91,8 @@ export async function fillApplicationForm(
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
-  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean } = {},
+  options: { approvedHumanAnswers?: ReadonlyMap<string, string>; allowMissingResume?: boolean;
+    provider?: Provider } = {},
 ): Promise<{ snapshot: BrowserSnapshot; blockers: string[]; uploaded: boolean }> {
   const plan = planApplicationForm(snapshot, candidate, resumePath, options);
   if (plan.blockers.length) return { snapshot, blockers: plan.blockers, uploaded: false };

@@ -13,7 +13,9 @@ import { fillApplicationForm, planApplicationForm } from "../src/application/for
 
 const candidate = candidateProfileSchema.parse({
   version: 1,
-  identity: { fullName: "Test Candidate", location: "Dallas, TX", email: "test@example.com", phone: "555-0100" },
+  identity: { fullName: "Test Candidate", location: "Dallas, TX", email: "test@example.com", phone: "555-0100",
+    linkedin: "https://linkedin.com/in/test", github: "https://github.com/test",
+    portfolio: "https://example.com" },
   authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
   skills: {}, education: [], experience: [], projects: [],
 });
@@ -27,6 +29,33 @@ function snapshot(...controls: BrowserSnapshot["controls"]): BrowserSnapshot {
 }
 
 describe("deterministic application field mapping", () => {
+  it("maps exact Greenhouse and Ashby identity aliases only for their provider", () => {
+    const greenhouse = snapshot(field("1", "LinkedIn Profile URL"),
+      field("2", "GitHub Profile"), field("3", "Resume", "file"));
+    const plan = planApplicationForm(greenhouse, candidate, "/tmp/resume.pdf", { provider: "greenhouse" });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.actions.map(({ value }) => value)).toEqual([
+      "https://linkedin.com/in/test", "https://github.com/test", "/tmp/resume.pdf",
+    ]);
+    expect(planApplicationForm(greenhouse, candidate, "/tmp/resume.pdf", { provider: "lever" }).blockers)
+      .toContain("Required field needs an answer: LinkedIn Profile URL");
+
+    const ashby = snapshot(field("1", "Your name"), field("2", "Your phone number"),
+      field("3", "Personal website URL"), field("4", "Resume", "file"));
+    expect(planApplicationForm(ashby, candidate, "/tmp/resume.pdf", { provider: "ashby" }).actions
+      .map(({ value }) => value)).toEqual([
+        "Test Candidate", "555-0100", "https://example.com", "/tmp/resume.pdf",
+      ]);
+  });
+
+  it("does not answer sensitive or ambiguous provider questions", () => {
+    const plan = planApplicationForm(snapshot(field("1", "Visa sponsorship"),
+      field("2", "Your race"), field("3", "LinkedIn Profile"), field("4", "Resume", "file")),
+    candidate, "/tmp/resume.pdf", { provider: "greenhouse" });
+    expect(plan.blockers).toContain("Required field needs an answer: Visa sponsorship");
+    expect(plan.blockers).toContain("Required field needs an answer: Your race");
+    expect(plan.actions.map(({ name }) => name)).toEqual(["LinkedIn Profile", "Resume"]);
+  });
   it("maps only supported identity fields and a resume", () => {
     const plan = planApplicationForm(snapshot(
       field("1", "First name"), field("2", "Last name"), field("3", "Email"),
