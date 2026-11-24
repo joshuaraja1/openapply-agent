@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { authenticationPolicySchema } from "../src/auth/schema.js";
-import { getMailboxAccessToken } from "../src/auth/oauth-token.js";
+import { exchangeMailboxAuthorizationCode, getMailboxAccessToken } from "../src/auth/oauth-token.js";
 
 const now = Date.parse("2026-11-24T16:01:00Z");
 const policy = authenticationPolicySchema.parse({ version: 1,
@@ -19,6 +19,27 @@ const token = { version: 1, provider: "gmail", accountEmail: "candidate@example.
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
 
 describe("Keychain-backed mailbox OAuth token", () => {
+  it("stores a new PKCE grant only after read-only scope and mailbox identity checks", async () => {
+    const put = vi.fn(async (_reference: string, _value: string) => {});
+    const secrets = { get: async () => undefined, put, delete: async () => {} };
+    const fetcher = vi.fn(async (input: URL | RequestInfo, options: RequestInit = {}) => {
+      if (new URL(String(input)).hostname === "oauth2.googleapis.com") {
+        expect((options.body as URLSearchParams).get("code_verifier")).toBe("v".repeat(43));
+        return json({ access_token: "new-access", refresh_token: "new-refresh",
+          expires_in: 3600, token_type: "Bearer",
+          scope: "https://www.googleapis.com/auth/gmail.readonly" });
+      }
+      return json({ emailAddress: "candidate@example.com" });
+    }) as unknown as typeof fetch;
+    await exchangeMailboxAuthorizationCode(policy, secrets, "authorization-code", "v".repeat(43),
+      "http://127.0.0.1:43210/callback", fetcher, now);
+    expect(put).toHaveBeenCalledOnce();
+    expect(JSON.parse(put.mock.calls[0]![1])).toMatchObject({
+      accountEmail: "candidate@example.com", refreshToken: "new-refresh" });
+    await expect(exchangeMailboxAuthorizationCode(policy, secrets, "code", "v".repeat(43),
+      "https://attacker.example/callback", fetcher, now)).rejects.toThrow("callback is invalid");
+    expect(put).toHaveBeenCalledOnce();
+  });
   it("refreshes an expired Gmail token and verifies the exact mailbox account", async () => {
     const put = vi.fn(async (_reference: string, _value: string) => {});
     const secrets = { get: async () => JSON.stringify(token), put, delete: async () => {} };
