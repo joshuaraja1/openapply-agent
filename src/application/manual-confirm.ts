@@ -10,7 +10,7 @@ export async function confirmManualSubmission(
   verify: typeof verifyResumePdf = verifyResumePdf,
 ): Promise<void> {
   const pkg = applicationPackageSchema.parse(input);
-  approvedDestinationHost(pkg);
+  const approvedHost = approvedDestinationHost(pkg);
   const checkpoint = await workflow.current(pkg.job.id);
   if (!checkpoint || !["waiting-human", "applying", "submit-claimed", "submission-uncertain"].includes(checkpoint.stage)
     || checkpoint.officialUrl !== pkg.job.applicationUrl || !checkpoint.browserPageId
@@ -23,11 +23,14 @@ export async function confirmManualSubmission(
     throw new Error("Manual confirmation belongs to a different résumé artifact");
   }
   const page = await browser.inspectHandoff(checkpoint.browserPageId);
+  const pageUrl = new URL(page.url);
+  if (pageUrl.protocol !== "https:" || pageUrl.hostname.toLowerCase() !== approvedHost) {
+    throw new Error("Employer confirmation page left the approved destination");
+  }
   const expected = pkg.expectedConfirmation.trim();
   const confirmationInStatus = page.visibleText.split("\n").some((line) =>
     /^\s*- (heading|alert|status)\b/i.test(line) && line.includes(expected));
-  if (!page.visibleText.includes(expected)
-    || (page.url === pkg.job.applicationUrl && !confirmationInStatus)) {
+  if (!confirmationInStatus) {
     throw new Error("Employer confirmation is not visible in the saved application tab");
   }
   await workflow.advance(pkg.job.id, "submitted", { confirmation: expected });

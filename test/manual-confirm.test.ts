@@ -37,7 +37,7 @@ describe("manual submission reconciliation", () => {
     await workflow.advance(job.id, "waiting-human", { blocker: "CAPTCHA requires human action", browserPageId: 7 });
     const verify = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "b".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
-    const unconfirmed = { inspectHandoff: async () => ({ url: job.applicationUrl,
+    const unconfirmed = { inspectHandoff: async () => ({ url: "https://jobs.example.com/other",
       title: "Apply", controls: [], visibleText: '- paragraph "Thank you for applying"' }) };
     await expect(confirmManualSubmission(pkg, workflow, unconfirmed as never, verify))
       .rejects.toThrow("not visible");
