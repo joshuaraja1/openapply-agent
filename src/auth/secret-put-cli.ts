@@ -3,7 +3,7 @@ import { readSecretInput } from "./secret-input.js";
 
 const reference = process.env.OPENAPPLY_SECRET_REF;
 if (!reference) throw new Error("Set OPENAPPLY_SECRET_REF to an OS secret reference");
-if (/^(?:keychain|secret-service):\/\/application-state\//.test(reference)) {
+if (/^(?:keychain|credential-manager|secret-service):\/\/application-state\//.test(reference)) {
   throw new Error("Application-state encryption keys cannot be overwritten by secret:put");
 }
 if (process.stdin.isTTY) throw new Error("Pipe the password through stdin; never put it in command arguments");

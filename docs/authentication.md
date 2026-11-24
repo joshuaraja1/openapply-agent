@@ -32,7 +32,8 @@ application and opens the relevant login page.
 
 The private authentication policy maps domains to an account email and an
 operating-system secret reference. macOS uses Keychain (`keychain://`); Linux
-uses Secret Service (`secret-service://`). Linux requires an unlocked Secret
+uses Secret Service (`secret-service://`), and Windows uses Credential Manager
+(`credential-manager://`). Linux requires an unlocked Secret
 Service provider. The implementation fails if Secret Service is unavailable,
 without falling back to a nonpersistent kernel keyring. On macOS, store a
 password from a hidden terminal prompt with:
@@ -52,7 +53,9 @@ unset OPENAPPLY_PASSWORD
 ```
 
 Use the same secret reference in the private authentication policy. The
-onboarding UI and Windows backend are still planned. Never
+onboarding UI and Windows private-file ACL checks are still planned. The Windows
+secret backend can store credentials, but the full Windows runner remains blocked
+until private input and output files have reviewed ACL handling. Never
 put passwords in Markdown, JSON, logs, command arguments, environment
 variables, generated artifacts, or the repository.
 The `application-state/` namespace in each store is reserved for OpenApply's
@@ -78,8 +81,8 @@ password, password-confirmation, and Create account control; unknown required
 fields, legal consent, CAPTCHA, or unsupported registration pages pause for human
 review. Before clicking Create account, it saves the exact BrowserOS tab as a
 recovery checkpoint. A crash cannot silently retry registration. The user must
-inspect and resume that tab if registration success is uncertain. A Windows
-secret store and a full first-run onboarding UI remain planned.
+inspect and resume that tab if registration success is uncertain. Windows
+private-file handling and a full first-run onboarding UI remain planned.
 After registration, the returned page must still identify the configured job
 and company before application fields can be filled.
 
