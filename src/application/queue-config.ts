@@ -7,6 +7,7 @@ export const queueRunnerConfigSchema = z.object({
   version: z.literal(1), queuePath: absolutePath, candidatePath: absolutePath,
   preferencesPath: absolutePath, discoveryInputPath: absolutePath,
   discoveryStatePath: absolutePath, browserEndpoint: z.url(),
+  authenticationPolicyPath: absolutePath.optional(),
   overleafProjectUrl: z.url(), outputDirectory: absolutePath,
   expectedConfirmationByDomain: z.record(z.string(), z.string().min(1)).default({}),
 });

@@ -3,6 +3,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
+import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { loadApprovedHumanAnswers } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
@@ -29,7 +30,8 @@ const authorizedPackage = approvedJobId
 const home = join(userInfo().homedir, ".openapply-agent");
 const statePath = join(home, "applications.enc.json");
 const profileDirectory = join(home, "browser-profile");
-const key = await getOrCreateStateKey(new MacKeychainSecretStore(), "keychain://application-state/main");
+const secrets = new MacKeychainSecretStore();
+const key = await getOrCreateStateKey(secrets, "keychain://application-state/main");
 const store = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
 const workflow = new ApplicationWorkflow(store);
 const answerPath = process.env.OPENAPPLY_APPROVED_ANSWERS;
@@ -43,6 +45,9 @@ if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
   throw new Error("BrowserOS endpoint differs from the saved application package");
 }
 const runtimePackage = endpoint ? { ...authorizedPackage, browserEndpoint: endpoint } : authorizedPackage;
+const authPolicy = runtimePackage.authenticationPolicyPath
+  ? await loadAuthenticationPolicy(runtimePackage.authenticationPolicyPath) : undefined;
+const account = authPolicy ? accountForUrl(authPolicy, pkg.job.applicationUrl) : undefined;
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
@@ -57,6 +62,7 @@ try {
   } else {
   const result = await runApplicationPackage(runtimePackage, workflow, profileDirectory,
     { packagePath, ...(approvedJobId ? { approvedJobId } : {}), ...(resumedJobId ? { resumedJobId } : {}),
+      ...(account ? { account, secretStore: secrets } : {}),
       ...(humanAnswerApproval ? { humanAnswerApproval } : {}),
       ...(client ? { browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts), close: async () => {},

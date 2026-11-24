@@ -54,6 +54,26 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
   groupId(): string | undefined { return this.group; }
 
+  async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
+    if (this.page === undefined || !this.latest || !email || !password
+      || !this.latest.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))
+      || this.latest.controls.filter((control) => control.tag === "button"
+        && /^(sign in|log in|login)$/i.test(control.name.trim())).length !== 1) {
+      throw new Error("BrowserOS did not identify a portal login form");
+    }
+    success(await this.client.callTool({ name: "credentials", arguments: {
+      action: "fill", page: this.page, username: email, password,
+    } }), "credential fill");
+    const filled = await this.snapshot();
+    const signIn = filled.controls.filter((control) => control.tag === "button"
+      && /^(sign in|log in|login)$/i.test(control.name.trim()));
+    if (signIn.length !== 1) throw new Error("Portal sign-in control is ambiguous");
+    success(await this.client.callTool({ name: "act", arguments: {
+      page: this.page, kind: "click", ref: signIn[0]!.ref, diff: "none",
+    } }), "sign-in");
+    return this.snapshot();
+  }
+
   private async listedGroup(pageId: number): Promise<string> {
     const listing = success(await this.client.callTool({ name: "tabs", arguments: { action: "list" } }), "tab listing");
     const rows = listing.split("\n").filter((entry) =>

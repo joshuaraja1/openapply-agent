@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
+import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
@@ -27,6 +28,8 @@ const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
 const config = queueRunnerConfigSchema.parse(await json(configPath));
 assertLocalBrowserEndpoint(config.browserEndpoint);
+const authPolicy = config.authenticationPolicyPath
+  ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
 const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.queuePath).then((value) => queueSchema.parse(value)),
   json(config.candidatePath).then((value) => candidateProfileSchema.parse(value)),
@@ -34,7 +37,8 @@ const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
 const root = join(userInfo().homedir, ".openapply-agent");
-const key = await getOrCreateStateKey(new MacKeychainSecretStore(), "keychain://application-state/main");
+const secrets = new MacKeychainSecretStore();
+const key = await getOrCreateStateKey(secrets, "keychain://application-state/main");
 const workflow = new ApplicationWorkflow(new EncryptedApplicationStateStore<ApplicationCheckpoint>(
   join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord>(
@@ -73,13 +77,17 @@ try {
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
       resumeSource, resumePdfPath: artifact.path, browserEndpoint: config.browserEndpoint,
+      ...(config.authenticationPolicyPath
+        ? { authenticationPolicyPath: config.authenticationPolicyPath } : {}),
       ...(config.expectedConfirmationByDomain[host]
         ? { expectedConfirmation: config.expectedConfirmationByDomain[host] } : {}),
     });
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
     await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    const account = authPolicy ? accountForUrl(authPolicy, job.applicationUrl) : undefined;
     const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
       packagePath,
+      ...(account ? { account, secretStore: secrets } : {}),
       browserFactory: async (allowedHosts, approvedArtifacts) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
         close: async () => {},

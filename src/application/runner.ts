@@ -2,6 +2,8 @@ import { z } from "zod";
 import { AgentBrowser, type BrowserSnapshot } from "../browser/actions.js";
 import { launchBrowser, type BrowserRuntime } from "../browser/runtime.js";
 import { candidateProfileSchema } from "../candidate/schema.js";
+import type { SiteAccount } from "../auth/schema.js";
+import type { SecretStore } from "../storage/contracts.js";
 import { sourceSchema } from "../config.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "../resume/verify-pdf.js";
 import { fetchSourceBatch } from "../sources/batch.js";
@@ -33,6 +35,7 @@ export const applicationPackageSchema = z.object({
     renderToken: z.string().length(64), claimIds: z.array(z.string()).min(1) }),
   resumePdfPath: z.string().min(1),
   browserEndpoint: z.url().optional(),
+  authenticationPolicyPath: z.string().min(1).optional(),
   expectedConfirmation: z.string().min(1).optional(),
 });
 
@@ -49,6 +52,7 @@ export interface ApplicationBrowserSurface {
   pageId?(): number | undefined;
   groupId?(): string | undefined;
   attach?(pageId: number, expectedUrl: string, expectedGroupId: string): Promise<BrowserSnapshot>;
+  authenticate?(email: string, password: string): Promise<BrowserSnapshot>;
 }
 
 function stepSignature(page: BrowserSnapshot): string {
@@ -91,6 +95,7 @@ export async function runApplicationPackage(
     validateOfficial?: typeof validateOfficialPosting; approvedJobId?: string; resumedJobId?: string;
     packagePath?: string;
     humanAnswerApproval?: HumanAnswerApproval;
+    account?: SiteAccount; secretStore?: SecretStore;
     browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
       Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
 ): Promise<RunResult> {
@@ -170,7 +175,7 @@ export async function runApplicationPackage(
   try {
     const browser = runtime.browser;
     if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
-    const snapshot = resumingHuman
+    let snapshot = resumingHuman
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!)
       : await browser.navigate(job.applicationUrl);
     if (new URL(snapshot.url).protocol !== "https:"
@@ -178,6 +183,26 @@ export async function runApplicationPackage(
       throw new Error("Application handoff left the approved employer destination");
     }
     recoveryPageUrl = snapshot.url;
+    const loginPage = snapshot.controls.some((control) =>
+      /^(password|account password)$/i.test(control.name.trim()))
+      && snapshot.controls.some((control) => control.tag === "button"
+        && /^(sign in|log in|login)$/i.test(control.name.trim()));
+    let loginBlocker: string | undefined;
+    if (loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
+      const account = dependencies.account;
+      if (!account.domains.some((domain) => domain.toLowerCase() === host)) {
+        loginBlocker = "Automatic sign-in requires an exact account domain";
+      } else {
+        const password = await dependencies.secretStore.get(account.passwordSecretRef);
+        if (!password) loginBlocker = "Configured portal password is unavailable in the OS secret store";
+        else {
+          snapshot = await browser.authenticate(account.email, password);
+          recoveryPageUrl = snapshot.url;
+        }
+      }
+    } else if (loginPage) {
+      loginBlocker = "Portal sign-in requires a configured exact-domain account";
+    }
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
@@ -247,6 +272,7 @@ export async function runApplicationPackage(
     if (!filled.blockers.length && !resumeUploaded) {
       filled.blockers.push("Verified résumé was not uploaded on any application step");
     }
+    if (loginBlocker) filled.blockers.unshift(loginBlocker);
     if (filled.blockers.length) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: filled.blockers.join("; "), ...pageDetails,

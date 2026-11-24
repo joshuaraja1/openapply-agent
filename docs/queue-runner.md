@@ -10,7 +10,10 @@ Each job is quarantined after three failed runs; inspect its private checkpoint
 and source before retrying manually.
 
 1. Copy `examples/queue-runner.example.json` outside the repository and set its
-   paths, local BrowserOS endpoint, and private Overleaf project URL.
+   paths, local BrowserOS endpoint, and private Overleaf project URL. Set
+   `authenticationPolicyPath` only after creating a private policy and storing
+   its account passwords in the operating-system secret store; otherwise remove
+   that optional property.
 2. Put the completed candidate, preferences, and discovery JSON in private
    files. Configure official sources in discovery input and enable them.
    Set `allowedApplicationHosts` on each source to exact employer application

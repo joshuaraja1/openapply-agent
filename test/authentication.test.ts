@@ -1,7 +1,11 @@
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   accountForUrl,
   authenticationPolicySchema,
+  loadAuthenticationPolicy,
 } from "../src/auth/schema.js";
 
 const validPolicy = {
@@ -33,6 +37,16 @@ const validPolicy = {
 } as const;
 
 describe("authentication policy", () => {
+  it("loads only a private user-owned policy file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-auth-"));
+    try {
+      const path = join(root, "policy.json");
+      await writeFile(path, JSON.stringify(validPolicy), { mode: 0o600 });
+      expect((await loadAuthenticationPolicy(path)).accounts[0]?.id).toBe("jobs");
+      await chmod(path, 0o644);
+      await expect(loadAuthenticationPolicy(path)).rejects.toThrow("private regular file");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("maps subdomains to the configured account", () => {
     const policy = authenticationPolicySchema.parse(validPolicy);
     expect(accountForUrl(policy, "https://example.wd5.myworkdayjobs.com/job"))

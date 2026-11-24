@@ -57,6 +57,49 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("signs into an exact-domain portal using an OS-stored password", async () => {
+    const login = { url: job.applicationUrl, title: "Sign in", controls: [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const application = { url: job.applicationUrl, title: "Apply", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const account = { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+      passwordSecretRef: "keychain://example", allowAccountCreation: false };
+    const get = vi.fn(async () => "private-password");
+    const authenticate = vi.fn(async () => application);
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/login.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true, account, secretStore: { get, put: async () => {}, delete: async () => {} },
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => login, authenticate, act: async () => application,
+        fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(get).toHaveBeenCalledWith("keychain://example");
+    expect(authenticate).toHaveBeenCalledWith("candidate@example.com", "private-password");
+    const unmatched = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => result.artifact, validateOfficial: async () => true,
+        account: { ...account, domains: ["*.example.com"] },
+        secretStore: { get, put: async () => {}, delete: async () => {} },
+        browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+          navigate: async () => login, authenticate, act: async () => application,
+          fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }),
+      });
+    expect(unmatched.checkpoint.stage).toBe("waiting-human");
+    expect(unmatched.checkpoint.blocker).toContain("exact account domain");
+    expect(get).toHaveBeenCalledOnce();
+  });
   it("continues a two-step form and uploads the verified résumé before submitting", async () => {
     const input = (ref: string, name: string, type: string | null = null) => ({
       ref, tag: "input", role: "textbox", name, type, value: null, required: true, options: [],
