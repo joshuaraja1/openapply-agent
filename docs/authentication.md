@@ -27,10 +27,11 @@ application and opens the relevant login page.
 ## Credentials
 
 The private authentication policy maps domains to an account email and an
-operating-system secret reference. Password values are collected through the
-local onboarding UI and stored in macOS Keychain, Windows Credential Manager,
-or Linux Secret Service. They are never stored in Markdown, JSON, logs, command
-arguments, environment variables, generated artifacts, or the repository.
+operating-system secret reference. The macOS secret-store implementation uses
+the native Keychain API. Password values must be entered through a private
+onboarding flow; that UI and Windows/Linux backends are still planned. Never
+put passwords in Markdown, JSON, logs, command arguments, environment
+variables, generated artifacts, or the repository.
 
 When a portal requires a new account, OpenApply may create it only when the
 selected account has `allowAccountCreation: true`. It uses the configured email
@@ -54,6 +55,10 @@ secret store.
 
 The encrypted checkpoint store takes a 32-byte key from a trusted secret store.
 The key must stay outside the repository, configuration files, and process
-arguments. After a crash, inspect active OpenApply processes before calling
+arguments. `getOrCreateStateKey` creates and retrieves it from Keychain under
+a private filesystem lock. The lock path must be in a directory owned by the
+current user with mode `0700`. If initialization crashes, inspect active
+OpenApply processes before removing the empty lock directory. After a crash,
+inspect active OpenApply processes before calling
 `recoverLockAfterInspection(true)` on the checkpoint store. This explicit
 recovery preserves the single-writer guarantee.
