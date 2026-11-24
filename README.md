@@ -82,7 +82,8 @@ Then run the returned package:
 OPENAPPLY_PACKAGE=/private/application-package.json npm run application:run
 ```
 
-On macOS, the runner stores its encryption key in Keychain and checkpoints in
+On macOS or Linux, the runner stores its encryption key in Keychain or Secret
+Service respectively, and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
 stops on unknown required answers, submits only when the handoff mode
 authorizes it, and records submission only after a new employer confirmation

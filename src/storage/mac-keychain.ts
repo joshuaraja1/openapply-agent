@@ -46,7 +46,9 @@ export class MacKeychainSecretStore implements SecretStore {
 
 /** Lock key initialization under one canonical path per OS user and reference. */
 export async function getOrCreateStateKey(store: SecretStore, reference: string): Promise<Buffer> {
-  accountFromReference(reference);
+  if (!/^(keychain|secret-service):\/\/[A-Za-z0-9._/@:-]+$/.test(reference)) {
+    throw new Error("Expected an operating-system secret reference for the application key");
+  }
   const root = join(userInfo().homedir, ".openapply-agent");
   const parentPath = join(root, "key-init");
   const name = createHash("sha256").update(reference).digest("hex");

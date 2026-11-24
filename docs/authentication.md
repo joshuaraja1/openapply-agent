@@ -31,8 +31,11 @@ application and opens the relevant login page.
 ## Credentials
 
 The private authentication policy maps domains to an account email and an
-operating-system secret reference. The macOS secret-store implementation uses
-the native Keychain API. Store a password from a hidden terminal prompt with:
+operating-system secret reference. macOS uses Keychain (`keychain://`); Linux
+uses Secret Service (`secret-service://`). Linux requires an unlocked Secret
+Service provider. The implementation fails if Secret Service is unavailable,
+without falling back to a nonpersistent kernel keyring. On macOS, store a
+password from a hidden terminal prompt with:
 
 ```zsh
 read -rs 'OPENAPPLY_PASSWORD?Portal password: '
@@ -40,18 +43,26 @@ printf '%s' "$OPENAPPLY_PASSWORD" | OPENAPPLY_SECRET_REF='keychain://openapply/j
 unset OPENAPPLY_PASSWORD
 ```
 
+On Linux, use a hidden Bash prompt and a `secret-service://` reference:
+
+```bash
+read -rsp 'Portal password: ' OPENAPPLY_PASSWORD; printf '\n'
+printf '%s' "$OPENAPPLY_PASSWORD" | OPENAPPLY_SECRET_REF='secret-service://openapply/job-search' npm run secret:put
+unset OPENAPPLY_PASSWORD
+```
+
 Use the same secret reference in the private authentication policy. The
-onboarding UI and Windows/Linux backends are still planned. Never
+onboarding UI and Windows backend are still planned. Never
 put passwords in Markdown, JSON, logs, command arguments, environment
 variables, generated artifacts, or the repository.
-The `keychain://application-state/` namespace is reserved for OpenApply's
+The `application-state/` namespace in each store is reserved for OpenApply's
 encryption key and cannot be used for account credentials.
 
 Set `authenticationPolicyPath` in the private queue configuration to enable
 automatic sign-in when a supported same-host portal shows a login form. The
 policy file must be owned by the current user and readable only by that user.
 Automatic sign-in requires an exact host in the account's `domains` list and
-a password already stored under its Keychain reference. BrowserOS fills the
+a password already stored under its OS secret reference. BrowserOS fills the
 credential without saving it in the browser profile. Ambiguous login controls,
 identity-provider redirects, and failed sign-ins pause for human handling.
 If sign-in lands on a different page, OpenApply continues only when the same
@@ -62,20 +73,20 @@ before filling or submitting the form.
 The BrowserOS runner can create an account on a same-host registration form when
 `allowAccountCreation` is true, the domain exactly matches the selected account,
 the account email matches the candidate email, and the configured password is
-present in Keychain. It accepts only one email,
+present in the OS secret store. It accepts only one email,
 password, password-confirmation, and Create account control; unknown required
 fields, legal consent, CAPTCHA, or unsupported registration pages pause for human
 review. Before clicking Create account, it saves the exact BrowserOS tab as a
 recovery checkpoint. A crash cannot silently retry registration. The user must
-inspect and resume that tab if registration success is uncertain. Windows/Linux
-secret stores and a full first-run onboarding UI remain planned.
+inspect and resume that tab if registration success is uncertain. A Windows
+secret store and a full first-run onboarding UI remain planned.
 After registration, the returned page must still identify the configured job
 and company before application fields can be filled.
 
 ## Email verification
 
 `npm run oauth:connect` performs explicit one-time consent in BrowserOS neo and
-stores the token in macOS Keychain. See [email verification](email-verification.md)
+stores the token in macOS Keychain or Linux Secret Service. See [email verification](email-verification.md)
 for setup. With `autoEnter` enabled, the workflow can observe the selected
 Gmail or Microsoft mailbox during an active application. It considers only recent
 messages associated with the active portal and expected email address. A single
@@ -91,7 +102,7 @@ secret store.
 
 The encrypted checkpoint store takes a 32-byte key from a trusted secret store.
 The key must stay outside the repository, configuration files, and process
-arguments. `getOrCreateStateKey` creates and retrieves it from Keychain under
+arguments. `getOrCreateStateKey` creates and retrieves it from the OS store under
 a canonical private filesystem lock in `~/.openapply-agent/key-init/`. If
 initialization crashes, inspect active OpenApply processes before removing
 the empty lock directory. After a crash,

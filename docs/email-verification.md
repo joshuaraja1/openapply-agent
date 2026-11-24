@@ -10,7 +10,7 @@ verification code. Ambiguous or stale messages produce no automatic answer.
 The one-time OAuth setup now opens Gmail or Microsoft consent in the configured
 BrowserOS neo profile, receives a PKCE callback on a temporary loopback port,
 checks the mailbox identity and read-only scopes, and saves the refresh token
-in macOS Keychain. Configure `emailVerification` in a private authentication
+in macOS Keychain or Linux Secret Service. Configure `emailVerification` in a private authentication
 policy, then run `OPENAPPLY_AUTH_POLICY=/absolute/private/auth.json
 OPENAPPLY_BROWSER_ENDPOINT=http://127.0.0.1:... npm run oauth:connect` with
 the endpoint shown by BrowserOS neo. The provider's registered OAuth client
