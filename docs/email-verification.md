@@ -7,13 +7,13 @@ message bodies. The selector requires the configured recipient, approved sender
 domain, company or portal host, a fresh message, and exactly one six-digit
 verification code. Ambiguous or stale messages produce no automatic answer.
 
-The one-time OAuth setup now opens Gmail or Microsoft consent in the configured
-BrowserOS neo profile, receives a PKCE callback on a temporary loopback port,
+The one-time OAuth setup opens Gmail or Microsoft consent in the owned browser
+profile by default, receives a PKCE callback on a temporary loopback port,
 checks the mailbox identity and read-only scopes, and saves the refresh token
-in macOS Keychain or Linux Secret Service. Configure `emailVerification` in a private authentication
-policy, then run `OPENAPPLY_AUTH_POLICY=/absolute/private/auth.json
-OPENAPPLY_BROWSER_ENDPOINT=http://127.0.0.1:... npm run oauth:connect` with
-the endpoint shown by BrowserOS neo. The provider's registered OAuth client
+in the operating-system secret store. Configure `emailVerification` in a private authentication
+policy, then run `OPENAPPLY_AUTH_POLICY=/absolute/private/auth.json npm run oauth:connect`.
+To use the existing BrowserOS neo profile instead, also set
+`OPENAPPLY_BROWSER_ENDPOINT` to its local MCP endpoint. The provider's registered OAuth client
 must allow a loopback redirect for a desktop application. The callback page
 only confirms consent receipt; the command reports success after token storage.
 

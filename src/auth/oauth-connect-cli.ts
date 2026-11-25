@@ -3,16 +3,23 @@ import { connectMailboxOAuth } from "./oauth-connect.js";
 import { createNativeSecretStore } from "../storage/native-secret-store.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { connectBrowserOs } from "../browser/client.js";
+import { assertMailboxConsentUrl, openOwnedMailboxConsent } from "./owned-consent.js";
+import type { BrowserRuntime } from "../browser/runtime.js";
 
 const policyPath = process.env.OPENAPPLY_AUTH_POLICY;
 if (!policyPath) throw new Error("Set OPENAPPLY_AUTH_POLICY to a private authentication policy file");
 const policy = await loadAuthenticationPolicy(policyPath);
 const endpoint = process.env.OPENAPPLY_BROWSER_ENDPOINT;
-if (!endpoint) throw new Error("Set OPENAPPLY_BROWSER_ENDPOINT to the local BrowserOS neo MCP endpoint");
-assertLocalBrowserEndpoint(endpoint);
-const connection = await connectBrowserOs(endpoint);
+if (endpoint) assertLocalBrowserEndpoint(endpoint);
+const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
+let ownedRuntime: BrowserRuntime | undefined;
 try {
   await connectMailboxOAuth(policy, createNativeSecretStore(), async (url) => {
+    if (!connection) {
+      ownedRuntime = await openOwnedMailboxConsent(url, policy);
+      return;
+    }
+    assertMailboxConsentUrl(url, policy);
     const client = connection.client;
     await client.callTool({ name: "name_session", arguments: {
       name: "mailbox consent", category: "productivity",
@@ -23,6 +30,7 @@ try {
     if (opened.isError) throw new Error("BrowserOS could not open the mailbox consent page");
   });
 } finally {
-  await connection.close();
+  await ownedRuntime?.close();
+  await connection?.close();
 }
 console.log("Mailbox connected; token stored in the operating-system secret store");
