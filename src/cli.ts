@@ -92,7 +92,7 @@ const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failur
   new Set(newQueue.map((entry) => entry.job.id)))];
 reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
 markJobsReported(state, queue.map((entry) => entry.job.id), now);
-const queuedTier = selectFreshnessTier(queue.map((entry) => entry.job),
+const queuedTier = selectFreshnessTier(newQueue.map((entry) => entry.job),
   input.preferredFreshnessHours, input.maximumFreshnessHours, now);
 
 if (sqlite) await sqlite.writeDiscoveryOutput({ generatedAt: now.toISOString(), tier: queuedTier.tier, queue }, state);
