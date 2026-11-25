@@ -82,17 +82,26 @@ export class OwnedDiscoveryBrowserClient implements BrowserToolClient {
           : host.endsWith("joinhandshake.com") ? 'a[href*="/jobs/"]' : "a[href]";
       await page.locator(selector).first().waitFor({ state: "attached", timeout: 3_000 }).catch(() => {});
       const links = await page.locator("a[href]").evaluateAll((anchors) => anchors.slice(0, 1_500)
-        .map((anchor) => ({ href: (anchor as HTMLAnchorElement).href,
-          label: anchor.getAttribute("aria-label") ?? anchor.textContent ?? "Job listing" })));
-      const lines = links.flatMap(({ href, label }) => {
+        .flatMap((anchor) => {
+          const href = (anchor as HTMLAnchorElement).href;
+          if (href.length > 4_096) return [];
+          const label = (anchor.getAttribute("aria-label") ?? anchor.textContent ?? "Job listing").slice(0, 180);
+          return [{ href, label }];
+        }));
+      const lines: string[] = [];
+      let outputLength = 0;
+      for (const { href, label } of links) {
         try {
           const url = new URL(href);
-          if (!["http:", "https:"].includes(url.protocol)) return [];
+          if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) continue;
           const title = label.replace(/[\[\]\r\n]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180)
             || "Job listing";
-          return [`[${title}](${url.href.replaceAll(")", "%29")})`];
-        } catch { return []; }
-      });
+          const line = `[${title}](${url.href.replaceAll(")", "%29")})`;
+          if (outputLength + line.length > 500_000) break;
+          lines.push(line);
+          outputLength += line.length + 1;
+        } catch { continue; }
+      }
       return reply(lines.join("\n"));
     }
     throw new Error(`Unsupported owned browser tool: ${input.name}`);

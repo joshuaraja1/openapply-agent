@@ -215,9 +215,9 @@ npm run browser:install
 npm run browser:open
 ```
 
-Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and extracts links from the page; it does not export cookies, passwords, or page text to the lead file. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
+Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and exports listing link labels and URLs to the lead file; it does not export cookies, passwords, or full page text. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
 
-This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
+Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
 
 ## Supported discovery sources
 

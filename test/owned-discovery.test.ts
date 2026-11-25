@@ -11,10 +11,15 @@ function fixture() {
     close: vi.fn(async () => {}),
     isClosed: () => false,
     locator: vi.fn((selector: string) => ({
-      evaluateAll: vi.fn(async () => selector === "a[href]" ? [
-        { href: "https://jobs.example.test/jobs/123", label: "Software Engineer" },
-        { href: "javascript:alert(1)", label: "Bad link" },
-      ] : []),
+      evaluateAll: vi.fn(async (callback: (anchors: Array<{ href: string; textContent: string;
+        getAttribute(name: string): string | null }>) => unknown) => callback(selector === "a[href]" ? [
+        { href: "https://jobs.example.test/jobs/123", textContent: "Software Engineer", getAttribute: () => null },
+        { href: "javascript:alert(1)", textContent: "Bad link", getAttribute: () => null },
+        { href: `https://jobs.example.test/jobs/${"x".repeat(5_000)}`,
+          textContent: "Oversized", getAttribute: () => null },
+        { href: "https://user:secret@jobs.example.test/jobs/456",
+          textContent: "Credentialed", getAttribute: () => null },
+      ] : [])),
       first: () => ({ waitFor: vi.fn(async () => {}) }),
     })),
   } as unknown as Page;

@@ -7,13 +7,16 @@ const runtime = await launchBrowser({
   headless: false,
 });
 
-console.log("Owned browser opened. Sign in to job boards, then press Ctrl+C here to save and close the profile.");
-const page = runtime.context.pages()[0] ?? await runtime.context.newPage();
-await Promise.race([
-  new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  }),
-  page.waitForEvent("close", { timeout: 0 }),
-]);
-await runtime.close();
+try {
+  console.log("Owned browser opened. Sign in to job boards, then press Ctrl+C here to save and close the profile.");
+  if (runtime.context.pages().length === 0) await runtime.context.newPage();
+  await Promise.race([
+    new Promise<void>((resolve) => {
+      process.once("SIGINT", resolve);
+      process.once("SIGTERM", resolve);
+    }),
+    runtime.context.waitForEvent("close", { timeout: 0 }).then(() => {}),
+  ]);
+} finally {
+  await runtime.close();
+}

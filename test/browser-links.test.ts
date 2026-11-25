@@ -35,4 +35,17 @@ describe("browser lead extraction", () => {
     ].join("\n"), context("handshake"));
     expect(leads.map((lead) => lead.url)).toEqual(["https://app.joinhandshake.com/stu/jobs/456"]);
   });
+
+  it("keeps generic job paths on the configured origin and excludes private links", () => {
+    const leads = extractBrowserLeads([
+      "[Role](https://example.com/careers/engineering/123?jobId=123)",
+      "[Account](https://example.com/account/settings)",
+      "[Other site](https://other.example/jobs/789)",
+      "[Token](https://example.com/jobs/456?token=secret)",
+      "[Userinfo](https://user:secret@example.com/jobs/789)",
+    ].join("\n"), context("generic"));
+    expect(leads.map((lead) => lead.url)).toEqual([
+      "https://example.com/careers/engineering/123?jobId=123",
+    ]);
+  });
 });
