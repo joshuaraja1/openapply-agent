@@ -18,6 +18,7 @@
     "autopilot": "tsx src/application/autopilot-cli.ts",
     "profile:compile": "tsx src/candidate/markdown-cli.ts",
     "setup:init": "tsx src/setup/init-cli.ts",
+    "setup:ui": "tsx src/setup/ui-cli.ts",
     "secret:put": "tsx src/auth/secret-put-cli.ts",
     "oauth:connect": "tsx src/auth/oauth-connect-cli.ts",
     "schedule:install": "tsx src/scheduler/cli.ts install",
