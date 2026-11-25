@@ -20,6 +20,7 @@ if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Re
 $acl = $item.GetAccessControl()
 if ($env:OPENAPPLY_ACL_ACTION -eq 'secure') {
   $acl.SetAccessRuleProtection($true, $false)
+  $acl.SetOwner($identity)
   foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
     [void]$acl.RemoveAccessRuleAll($rule)
   }

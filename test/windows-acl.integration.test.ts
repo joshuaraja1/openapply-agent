@@ -17,6 +17,10 @@ describe.skipIf(process.platform !== "win32")("native Windows private-file ACL",
       await assertWindowsPrivatePath(file);
       execFileSync("icacls", [file, "/grant", "*S-1-1-0:(R)"], { stdio: "ignore" });
       await expect(assertWindowsPrivatePath(file)).rejects.toThrow("ACL is unsafe");
+      await secureWindowsPrivatePath(file);
+      const currentUser = execFileSync("whoami", [], { encoding: "utf8" }).trim();
+      execFileSync("icacls", [file, "/grant:r", `${currentUser}:(R)`], { stdio: "ignore" });
+      await expect(assertWindowsPrivatePath(file)).rejects.toThrow("ACL is unsafe");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
