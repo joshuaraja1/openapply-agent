@@ -23,7 +23,7 @@ import { runApplicationQueue } from "./queue-runner.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
-import { isEligibleQueuedJob } from "./queue-eligibility.js";
+import { scoreJob } from "../matching/score.js";
 
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
@@ -53,6 +53,7 @@ const emailCode = authPolicy?.emailVerification.autoEnter
     join(root, "email-code-claims.enc.json"), key)) : undefined;
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
+const needsReview: { jobId: string; reasons: string[] }[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
 for (const source of discovery.sources.filter((entry) => entry.enabled)) {
   const key = `${source.provider}:${source.company}`;
@@ -63,8 +64,13 @@ for (const entry of queue.queue) {
   const job = entry.job as DiscoveredJob;
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;
-  if (sources.has(`${job.provider}:${job.company}`)
-    && isEligibleQueuedJob(job, candidate, preferences)) eligible.push(job);
+  if (sources.has(`${job.provider}:${job.company}`)) {
+    const match = scoreJob(job, candidate, preferences);
+    if (match.eligible) eligible.push(job);
+    else if (match.reviewFlags.includes("Review mandatory qualifications before applying")) {
+      needsReview.push({ jobId: job.id, reasons: match.reasons });
+    }
+  }
 }
 const connection = await connectBrowserOs(config.browserEndpoint);
 const client: BrowserToolClient = { callTool: async (request) =>
@@ -105,7 +111,7 @@ try {
       await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
     }
   });
-  console.log(JSON.stringify({ date: date(), outcomes }));
+  console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
   await connection.close();
 }

@@ -1,5 +1,6 @@
 import type { CandidateProfile, SearchPreferences } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
+import { assessHardRequirements } from "./hard-requirements.js";
 
 export interface JobMatch {
   eligible: boolean;
@@ -76,6 +77,15 @@ export function scoreJob(
     matchedSkills: [],
     salaryTarget,
     reviewFlags: ["Review candidate evidence or this role manually"],
+  };
+  const hardRequirements = assessHardRequirements(job.descriptionText, candidate);
+  if (hardRequirements.blockers.length) return {
+    eligible: false,
+    score: 0,
+    reasons: hardRequirements.blockers,
+    matchedSkills: matchedSkills.sort(),
+    salaryTarget,
+    reviewFlags: ["Review mandatory qualifications before applying"],
   };
   const reasons = ["Target role family"];
   const reviewFlags: string[] = [];

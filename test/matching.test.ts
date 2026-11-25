@@ -77,4 +77,34 @@ describe("evidence-backed matching", () => {
   it("targets the configured point in a salary range", () => {
     expect(parseSalaryTarget("$100,000-$140,000", 0.75)).toBe(130_000);
   });
+
+  it("pauses on mandatory citizenship, degree, clearance, and experience without approved proof", () => {
+    for (const requirement of ["US citizenship required", "U.S. citizenship required", "Bachelor's degree required",
+      "Active Secret clearance required", "Must have 2+ years of software engineering experience"]) {
+      const result = scoreJob({ ...job, descriptionText: `TypeScript. ${requirement}.` },
+        candidate, preferences);
+      expect(result.eligible, requirement).toBe(false);
+      expect(result.reviewFlags).toContain("Review mandatory qualifications before applying");
+    }
+  });
+
+  it("accepts an explicit year claim but does not use unapproved claims", () => {
+    const yearClaim = { ...candidate.experience[0]!.claims[0]!,
+      claim: "3 years of software engineering experience with TypeScript" };
+    const posting = { ...job,
+      descriptionText: "TypeScript. Must have 2+ years of software engineering experience with TypeScript." };
+    const documented = candidateProfileSchema.parse({ ...candidate,
+      experience: [{ ...candidate.experience[0], claims: [yearClaim] }] });
+    expect(scoreJob(posting, documented, preferences).eligible).toBe(true);
+    const unapproved = candidateProfileSchema.parse({ ...documented,
+      experience: [{ ...candidate.experience[0], claims: [{ ...yearClaim, status: "needs-confirmation" }] }] });
+    expect(scoreJob(posting, unapproved, preferences).eligible).toBe(false);
+  });
+
+  it("does not classify a preferred or explicitly non-required qualification as mandatory", () => {
+    const result = scoreJob({ ...job,
+      descriptionText: "TypeScript. US citizenship not required. Bachelor's degree preferred." },
+      candidate, preferences);
+    expect(result.eligible).toBe(true);
+  });
 });
