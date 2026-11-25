@@ -22,6 +22,18 @@ The onboarding flow may offer a one-time browser-native import from Chrome,
 Edge, Brave, Firefox, or Safari. Import requires an explicit user action and any
 operating-system consent required to decrypt protected browser data. OpenApply
 does not read or copy raw cookie databases in the background.
+The private authentication policy now rejects `browserProfile.importPasswords:
+true` for the future OpenApply-owned browser. This flag has no runtime consumer
+yet, so it does not control BrowserOS neo's separate, user-driven import screen.
+For that browser, decline saved-password import in its own consent UI. Enter
+portal passwords through the OS secret store. A future opt-in migration needs
+separate review and deletion of any browser-vault copy.
+
+Existing private policy files containing `importPasswords: true` fail to load.
+Before rerunning OpenApply, change that field to `false` or remove it, and make
+sure each portal password is present under its configured OS secret reference.
+The old flag did not import passwords at runtime, so no automatic credential
+migration is performed.
 
 After import, the user verifies important sessions such as LinkedIn, Jobright,
 Handshake, Gmail or Microsoft, Overleaf, and commonly used ATS portals. A site

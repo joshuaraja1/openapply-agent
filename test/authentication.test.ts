@@ -14,7 +14,7 @@ const validPolicy = {
     strategy: "import-once",
     sourceBrowser: "chrome",
     importCookies: true,
-    importPasswords: true,
+    importPasswords: false,
     persistSessions: true,
     requireInteractiveConsent: true,
   },
@@ -38,6 +38,14 @@ const validPolicy = {
 } as const;
 
 describe("authentication policy", () => {
+  it("defaults password import off and rejects an unsupported browser-vault import", () => {
+    const profile = { ...validPolicy.browserProfile };
+    const { importPasswords: _unused, ...withoutPasswordImport } = profile;
+    expect(authenticationPolicySchema.parse({ ...validPolicy,
+      browserProfile: withoutPasswordImport }).browserProfile.importPasswords).toBe(false);
+    expect(authenticationPolicySchema.safeParse({ ...validPolicy,
+      browserProfile: { ...profile, importPasswords: true } }).success).toBe(false);
+  });
   it("loads only a private user-owned policy file", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-auth-"));
     try {
@@ -46,6 +54,17 @@ describe("authentication policy", () => {
       expect((await loadAuthenticationPolicy(path)).accounts[0]?.id).toBe("jobs");
       await chmod(path, 0o644);
       await expect(loadAuthenticationPolicy(path)).rejects.toThrow("private regular file");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("fails closed for an old password-import policy until its private file is updated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-auth-migration-"));
+    try {
+      const path = join(root, "policy.json");
+      await writeFile(path, JSON.stringify({ ...validPolicy,
+        browserProfile: { ...validPolicy.browserProfile, importPasswords: true } }), { mode: 0o600 });
+      await expect(loadAuthenticationPolicy(path)).rejects.toThrow();
+      await writeFile(path, JSON.stringify(validPolicy), { mode: 0o600 });
+      expect((await loadAuthenticationPolicy(path)).browserProfile.importPasswords).toBe(false);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("maps subdomains to the configured account", () => {
