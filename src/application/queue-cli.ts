@@ -24,6 +24,7 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { isEligibleQueuedJob } from "./queue-eligibility.js";
 
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
@@ -63,7 +64,8 @@ for (const entry of queue.queue) {
   const job = entry.job as DiscoveredJob;
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;
-  if (sources.has(`${job.provider}:${job.company}`)) eligible.push(job);
+  if (sources.has(`${job.provider}:${job.company}`)
+    && isEligibleQueuedJob(job, candidate, preferences)) eligible.push(job);
 }
 const connection = await connectBrowserOs(config.browserEndpoint);
 const client: BrowserToolClient = { callTool: async (request) =>
