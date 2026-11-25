@@ -40,6 +40,8 @@ const root = join(userInfo().homedir, ".openapply-agent");
 const secrets = createNativeSecretStore();
 const key = await getOrCreateStateKey(secrets, stateKeyReference());
 const sqlite = await openActiveSqliteRuntime(key);
+if (sqlite) sqlite.assertLegacyPaths({ encryptedDirectory: root,
+  discoveryStatePath: config.discoveryStatePath, queuePath: config.queuePath });
 const [queue, candidate, preferences, discovery] = await Promise.all([
   (sqlite ? sqlite.store("queue").read("current").then((row) => row?.state ?? { queue: [] })
     : json(config.queuePath)).then((value) => queueFileSchema.parse(value)),

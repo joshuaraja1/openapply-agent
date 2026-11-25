@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { userInfo } from "node:os";
+import { join } from "node:path";
 import { createApplicationHandoff } from "./application/handoff.js";
 import { mergePendingQueue } from "./application/queue-merge.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
@@ -30,6 +32,11 @@ const [input, candidate, preferences] = await Promise.all([
   json(preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
 ]);
 const sqlite = await openDefaultSqliteRuntimeIfPresent();
+if (sqlite) sqlite.assertLegacyPaths({
+  encryptedDirectory: join(userInfo().homedir, ".openapply-agent"),
+  discoveryStatePath: statePath,
+  queuePath: outputPath,
+});
 const state = sqlite ? (await sqlite.store<DiscoveryState>("discovery").read("current"))?.state
   ?? { jobs: {} } : await readPrivateFile(statePath).then((content) => JSON.parse(content))
   .catch((error: NodeJS.ErrnoException) => {
