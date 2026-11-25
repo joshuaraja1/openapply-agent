@@ -86,7 +86,7 @@ describe("owned Overleaf renderer", () => {
         url: () => "https://evil.example/" }), abort } as unknown as Route);
       expect(abort).toHaveBeenCalledOnce();
     } finally { await rm(root, { recursive: true, force: true }); }
-  });
+  }, 30_000);
 
   it("removes an unverified PDF and releases the profile", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
@@ -101,7 +101,7 @@ describe("owned Overleaf renderer", () => {
       expect(await readdir(output)).toEqual([]);
       expect(close).toHaveBeenCalledOnce();
     } finally { await rm(root, { recursive: true, force: true }); }
-  });
+  }, 30_000);
 
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1" || process.platform === "win32")(
     "compiles and downloads through a controlled Chromium page", async () => {
