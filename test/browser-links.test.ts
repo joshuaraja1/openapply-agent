@@ -38,14 +38,22 @@ describe("browser lead extraction", () => {
 
   it("keeps generic job paths on the configured origin and excludes private links", () => {
     const leads = extractBrowserLeads([
-      "[Role](https://example.com/careers/engineering/123?jobId=123)",
+      "[Role](https://example.com/careers/engineering/123?jobId=123&access_token=secret)",
       "[Account](https://example.com/account/settings)",
       "[Other site](https://other.example/jobs/789)",
       "[Token](https://example.com/jobs/456?token=secret)",
       "[Userinfo](https://user:secret@example.com/jobs/789)",
-    ].join("\n"), context("generic"));
+      "[API key](https://example.com/jobs/999?api_key=secret)",
+    ].join("\n"), { ...context("generic"), ownedGeneric: true });
     expect(leads.map((lead) => lead.url)).toEqual([
       "https://example.com/careers/engineering/123?jobId=123",
+      "https://example.com/jobs/456",
+      "https://example.com/jobs/999",
     ]);
+  });
+
+  it("keeps external employer links from existing BrowserOS generic searches", () => {
+    const leads = extractBrowserLeads("[Role](https://employer.example/careers/123)", context("generic"));
+    expect(leads.map((lead) => lead.url)).toEqual(["https://employer.example/careers/123"]);
   });
 });

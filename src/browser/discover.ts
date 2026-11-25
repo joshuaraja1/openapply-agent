@@ -31,6 +31,7 @@ export async function discoverBrowserLeads(
       platform: search.platform,
       sourceSearchUrl: search.url,
       observedAt,
+      ownedGeneric: input.runtime === "owned",
     }));
   }
   return [...new Map(leads.map((lead) => [lead.url, lead])).values()];
