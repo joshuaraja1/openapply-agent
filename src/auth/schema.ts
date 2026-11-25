@@ -1,7 +1,6 @@
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { assertPrivateFile } from "../storage/private-path.js";
+import { readPrivateFile } from "../storage/private-path.js";
 
 const secretReferenceSchema = z.string().regex(
   /^(keychain|credential-manager|secret-service):\/\/[A-Za-z0-9._/@:-]+$/,
@@ -106,8 +105,7 @@ export async function loadAuthenticationPolicy(path: string): Promise<Authentica
   if (!isAbsolute(path)) {
     throw new Error("Authentication policy requires an absolute private file path");
   }
-  await assertPrivateFile(path);
-  return authenticationPolicySchema.parse(JSON.parse(await readFile(path, "utf8")));
+  return authenticationPolicySchema.parse(JSON.parse(await readPrivateFile(path)));
 }
 
 export function accountForUrl(

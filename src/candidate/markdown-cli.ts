@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { compileCandidateMarkdown, compileSearchMarkdown } from "./markdown.js";
 import { createPrivateOutput } from "../storage/private-output.js";
-import { assertPrivateFile, ensurePrivateDirectory } from "../storage/private-path.js";
+import { ensurePrivateDirectory, readPrivateFile } from "../storage/private-path.js";
 
 const variables = ["OPENAPPLY_PROFILE_MD", "OPENAPPLY_WORK_MD", "OPENAPPLY_SEARCH_MD",
   "OPENAPPLY_PROFILE_OUTPUT", "OPENAPPLY_PREFERENCES_OUTPUT"] as const;
@@ -13,11 +12,8 @@ const paths = variables.map((name) => {
 });
 const [profileMd, workMd, searchMd, profileOutput, preferencesOutput] = paths as [string, string, string, string, string];
 if (resolve(profileOutput) === resolve(preferencesOutput)) throw new Error("Candidate and preference outputs need separate files");
-for (const input of [profileMd, workMd, searchMd]) {
-  await assertPrivateFile(input);
-}
 const [profile, work, search] = await Promise.all([
-  readFile(profileMd, "utf8"), readFile(workMd, "utf8"), readFile(searchMd, "utf8"),
+  readPrivateFile(profileMd), readPrivateFile(workMd), readPrivateFile(searchMd),
 ]);
 const candidate = compileCandidateMarkdown(profile, work);
 const preferences = compileSearchMarkdown(search);

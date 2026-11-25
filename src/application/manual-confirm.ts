@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import type { NeoApplicationBrowser } from "../browser/neo-application.js";
@@ -6,7 +5,7 @@ import { verifyResumePdf } from "../resume/verify-pdf.js";
 import type { DiscoveredJob } from "../types.js";
 import { ApplicationWorkflow } from "./state-machine.js";
 import { applicationPackageSchema, approvedDestinationHost, type ApplicationPackage } from "./runner.js";
-import { assertPrivateFile } from "../storage/private-path.js";
+import { readPrivateFile } from "../storage/private-path.js";
 
 const attestationSchema = z.object({ version: z.literal(1), jobId: z.string().min(1),
   browserPageId: z.number().int().positive(), confirmationUrl: z.url(),
@@ -15,8 +14,7 @@ export type ManualConfirmationAttestation = z.infer<typeof attestationSchema>;
 
 export async function loadManualAttestation(path: string): Promise<ManualConfirmationAttestation> {
   if (!isAbsolute(path)) throw new Error("Use an absolute private attestation path");
-  await assertPrivateFile(path);
-  return attestationSchema.parse(JSON.parse(await readFile(path, "utf8")));
+  return attestationSchema.parse(JSON.parse(await readPrivateFile(path)));
 }
 
 export async function confirmManualSubmission(

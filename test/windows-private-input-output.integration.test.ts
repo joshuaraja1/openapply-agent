@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertPrivateFile, ensurePrivateDirectory } from "../src/storage/private-path.js";
+import { assertPrivateFile, assertSameFileIdentity, ensurePrivateDirectory, readPrivateFile }
+  from "../src/storage/private-path.js";
 import { createPrivateOutput } from "../src/storage/private-output.js";
 import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
@@ -20,6 +21,7 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
       await writeFile(input, "candidate fixture");
       await secureWindowsPrivatePath(input);
       await assertPrivateFile(input);
+      expect(await readPrivateFile(input)).toBe("candidate fixture");
       await mkdir(shared);
       await secureWindowsPrivatePath(shared);
       await writeFile(sharedInput, "candidate fixture");
@@ -42,6 +44,38 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
       await secureWindowsPrivatePath(input).catch(() => {});
       await secureWindowsPrivatePath(shared).catch(() => {});
       await secureWindowsPrivatePath(output).catch(() => {});
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("detects a directory entry replaced under a shared grandparent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-grandparent-"));
+    const grandparent = join(root, "shared");
+    const privateParent = join(grandparent, "private");
+    const path = join(privateParent, "candidate.md");
+    try {
+      await secureWindowsPrivatePath(root);
+      await mkdir(grandparent);
+      await secureWindowsPrivatePath(grandparent);
+      await mkdir(privateParent);
+      await secureWindowsPrivatePath(privateParent);
+      await writeFile(path, "original");
+      await secureWindowsPrivatePath(path);
+      execFileSync("icacls", [grandparent, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
+      expect(await readPrivateFile(path)).toBe("original");
+      const pinned = await open(path, "r");
+      try {
+        const identity = await pinned.stat();
+        await rename(privateParent, join(grandparent, "moved"));
+        await mkdir(privateParent);
+        await secureWindowsPrivatePath(privateParent);
+        await writeFile(path, "replacement");
+        await secureWindowsPrivatePath(path);
+        const named = await lstat(path);
+        expect(() => assertSameFileIdentity(identity, named)).toThrow("changed");
+      } finally { await pinned.close(); }
+    } finally {
+      await secureWindowsPrivatePath(grandparent).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }
   }, 30_000);
