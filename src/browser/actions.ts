@@ -67,6 +67,8 @@ export class AgentBrowser {
   async snapshot(): Promise<BrowserSnapshot> {
     const page = this.requirePage();
     this.assertAllowedPage();
+    const visibleText = await page.evaluate(() => document.body?.innerText ?? "");
+    if (visibleText.length > 50_000) throw new Error("Application page text exceeds the safe snapshot limit");
     this.controls.clear();
     this.generation += 1;
     const handles = await page.locator("a, button, input, textarea, select, [role=button]").elementHandles();
@@ -96,7 +98,7 @@ export class AgentBrowser {
       controls.push({ ref, tag, role, name: name.trim(), type, value,
         required: metadata.required, options: metadata.options });
     }
-    return { url: page.url(), title: await page.title(), controls };
+    return { url: page.url(), title: await page.title(), controls, visibleText };
   }
 
   async act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot> {

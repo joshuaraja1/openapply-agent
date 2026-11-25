@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserContext } from "playwright";
 import { AgentBrowser } from "../src/browser/actions.js";
+import { planApplicationForm } from "../src/application/form-mapper.js";
+import type { CandidateProfile } from "../src/candidate/schema.js";
 
-function fixture(fieldName = "email", fieldType: string | null = null) {
+function fixture(fieldName = "email", fieldType: string | null = null, text = "") {
   let connected = true;
   let value = "";
   let confirmationVisible = false;
@@ -22,6 +24,7 @@ function fixture(fieldName = "email", fieldType: string | null = null) {
     url: () => "https://jobs.example.com/apply",
     title: async () => "Apply",
     goto: vi.fn(async () => {}),
+    evaluate: vi.fn(async () => text),
     locator: () => ({ elementHandles: async () => [handle] }),
     getByText: () => ({
       count: async () => confirmationVisible ? 1 : 0,
@@ -70,6 +73,19 @@ describe("agent browser controls", () => {
     const first = await browser.navigate("https://jobs.example.com/apply");
     const next = await browser.act(first.controls[0]?.ref ?? "", "fill", "123456");
     expect(next.controls[0]?.value).toBeNull();
+  });
+
+  it("includes visible challenge text so form planning pauses", async () => {
+    const { browser } = fixture("email", "text", "Please verify you are human");
+    const snapshot = await browser.navigate("https://jobs.example.com/apply");
+    expect(planApplicationForm(snapshot, { identity: { fullName: "Test Candidate" } } as CandidateProfile,
+      "/private/resume.pdf").blockers)
+      .toContain("Human verification is present on the application page");
+  });
+
+  it("fails closed when visible page text exceeds the snapshot limit", async () => {
+    const { browser } = fixture("email", "text", "a".repeat(50_001));
+    await expect(browser.navigate("https://jobs.example.com/apply")).rejects.toThrow("safe snapshot limit");
   });
 
   it("blocks generic submit clicks and unapproved uploads", async () => {
