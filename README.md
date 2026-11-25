@@ -45,7 +45,7 @@ npm run browser:doctor
 
 ## Quick start
 
-1. Copy `templates/user/` to a private directory and complete the Markdown files, including the structured JSON blocks in files 01–03. Run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON.
+1. Run `npm run setup:init` to create private user templates, then complete the Markdown files, including the structured JSON blocks in files 01–03. Run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON. See [self-hosting](docs/self-hosting.md) for your own accounts and optional OAuth client ID.
 2. Copy the remaining JSON files in `examples/` and replace the examples with private, verified data.
 3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
@@ -151,7 +151,7 @@ or sign in manually to each required service inside BrowserOS neo. At minimum,
 verify the relevant job boards and Overleaf. Employer portals may still require
 their own account, MFA, or one-time code. Configure which email each site should
 use and whether account creation is allowed in the private authentication policy.
-Enter actual passwords only through the local onboarding UI so they are stored in
+Enter actual passwords through `npm run secret:put` using stdin so they are stored in
 the operating-system secret store. Never place account passwords,
 session cookies, MFA secrets, or recovery codes in this repository or its JSON
 configuration files.
