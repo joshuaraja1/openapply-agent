@@ -27,7 +27,12 @@ OPENAPPLY_PREFERENCES=/private/search-preferences.json \
 npm start
 ```
 
-The queue prioritizes the configured freshness window and falls back only when it is empty. Persistent first-seen state prevents old Greenhouse roles from being misrepresented as newly published.
+The queue puts roles with a verified posting time within the preferred window
+first. Newly observed roles without a posting date follow, then older active
+roles backfill the remaining capacity. The example has no age cutoff; set
+`maximumFreshnessHours` to a number if the candidate wants one. First-seen
+time is never described as a verified posting time. The daily cap and
+deduplication still apply.
 
 ## 4. Tailor and verify
 

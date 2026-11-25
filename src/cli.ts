@@ -3,7 +3,7 @@ import { createApplicationHandoff } from "./application/handoff.js";
 import { mergePendingQueue } from "./application/queue-merge.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
-import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.js";
+import { evaluateJob, freshnessPriority, markJobsReported, selectFreshnessTier } from "./discovery.js";
 import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
@@ -41,13 +41,15 @@ const evaluated = fetched.flatMap((job) => {
     lastSeenAt: now.toISOString(),
     ...(previous?.reportedAt ? { reportedAt: previous.reportedAt } : {}),
   };
-  return result && result.isFresh && !previous?.reportedAt ? [result] : [];
+  return result && !previous?.reportedAt ? [result] : [];
 });
 const tier = selectFreshnessTier(evaluated, input.preferredFreshnessHours, input.maximumFreshnessHours, now);
 const newQueue = tier.jobs
   .map((job) => ({ job, match: scoreJob(job, candidate, preferences) }))
   .filter((entry) => entry.match.eligible)
-  .sort((a, b) => b.match.score - a.match.score)
+  .sort((a, b) => freshnessPriority(a.job, input.preferredFreshnessHours, now)
+    - freshnessPriority(b.job, input.preferredFreshnessHours, now)
+    || b.match.score - a.match.score)
   .slice(0, preferences.applicationPolicy.dailyHardCap)
   .map(({ job, match }) => ({
     job,
