@@ -50,8 +50,9 @@ after all of these have recorded evidence:
 | External release inputs | Product OAuth registrations where offered, signing credentials, independent assessment, privacy and site-terms review, and beta candidate consent | Open: requires owner and third-party participation |
 
 The requested first public release covers macOS, Windows, and Linux. Apple
-code-signing credentials are available; Windows signing, beta participation,
-and an independent reviewer are not yet confirmed. The repository owner cannot
+code-signing credentials are available. Windows signing is not yet arranged;
+2–3 possible beta candidates have been identified but have not yet consented;
+and no independent reviewer is available. The repository owner cannot
 independently review their own PRs.
 
 The release decision must state exactly which operating systems, providers,
