@@ -266,7 +266,8 @@ describe("application runner", () => {
       { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
         value: null, required: false, options: [] },
     ] };
-    const second = { url: "https://jobs.example.com/apply/step-2", title: "Documents", controls: [
+    const second = { url: "https://jobs.example.com/apply/step-2", title: "Documents",
+      visibleText: "Example Co Software Engineer application", controls: [
       input("resume", "Resume", "file"),
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
         value: null, required: false, options: [] },
@@ -292,6 +293,40 @@ describe("application runner", () => {
       browserFactory: async () => ({ browser, close: async () => {} }) });
     expect(result.checkpoint.stage).toBe("submitted");
     expect(steps).toEqual(["fill", "continue", "upload", "submit"]);
+  });
+
+  it("pauses before filling or submitting a different requisition after Continue", async () => {
+    const boundJob = { ...job, id: "greenhouse:example:123456",
+      applicationUrl: "https://jobs.example.com/apply/123456" };
+    const first = { url: boundJob.applicationUrl, title: "Documents", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
+        value: null, required: false, options: [] },
+    ] };
+    const wrong = { url: "https://jobs.example.com/apply/654321/step-2", title: "Submit",
+      visibleText: "Example Co Software Engineer application", controls: [
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const submit = vi.fn(async () => "Thank you for applying");
+    let current: typeof first | typeof wrong = first;
+    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+      handoff: createApplicationHandoff(boundJob, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/wrong-job.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: boundJob.id,
+        sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
+        path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true, browserFactory: async () => ({ browser: {
+        currentUrl: () => current.url, navigate: async () => first,
+        fillBatch: async () => current,
+        act: async () => { current = wrong; return wrong; }, submit,
+      }, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("original requisition");
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("halts before submission when no application step offers a résumé upload", async () => {
@@ -325,7 +360,8 @@ describe("application runner", () => {
       { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
         value: null, required: false, options: [] },
     ] };
-    const second = { url: "https://jobs.example.com/apply/step-2", title: "Step two", controls: [
+    const second = { url: "https://jobs.example.com/apply/step-2", title: "Step two",
+      visibleText: "Example Co Software Engineer application", controls: [
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
         value: null, required: false, options: [] },
     ] };
