@@ -10,6 +10,27 @@ submitted from a click alone.
 
 ## Product requirements
 
+### Continuous discovery and application order
+
+Each scheduled run should gather relevant active roles from configured employer
+sources and signed-in job-board leads. Board leads resolve to the employer's
+active posting before tailoring or submission. Deduplicate by employer and
+requisition across sources and runs. Apply within the candidate's daily cap in
+this order: dated roles posted within the preferred 24–48-hour window, newly
+observed roles with an unknown posting date, then older active roles by fit and
+age. If recent matches use less than the daily capacity, backfill with roles
+from several days or weeks ago. No age cutoff applies unless the candidate
+chooses one. A first-seen time must never be reported as a verified posting
+time. A role is skipped for unsupported hard requirements or an explicit
+candidate exclusion, not solely because it is older.
+
+Exit tests: a mixed batch fills remaining capacity with older roles; the same
+requisition from multiple boards is submitted at most once; an undated lead is
+never labeled newly posted; a closed employer posting is never submitted; and
+crash/restart preserves the priority queue and daily cap. Source coverage and
+search cadence require monitored beta measurements, not a claim to cover every
+job on the internet.
+
 1. **Owned browser:** one dedicated, persistent local Chromium profile serves
    signed-in discovery, Overleaf, and applications. A user explicitly signs in
    or approves a browser-native profile import. Password import is disabled by

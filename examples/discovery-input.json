@@ -8,7 +8,7 @@
     { "provider": "workday", "company": "Example Enterprise", "host": "example.wd1.myworkdayjobs.com", "tenant": "example", "site": "Careers", "searchText": "software", "enabled": false }
   ],
   "preferredFreshnessHours": 48,
-  "maximumFreshnessHours": 168,
+  "maximumFreshnessHours": null,
   "includeKeywords": ["software engineer", "product engineer", "data engineer", "machine learning"],
   "excludeKeywords": ["staff", "principal", "director"],
   "maxJobsPerSource": 1000

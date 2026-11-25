@@ -34,11 +34,13 @@ export const sourceSchema = z.discriminatedUnion("provider", [
 export const discoveryInputSchema = z.object({
   sources: z.array(sourceSchema).min(1),
   preferredFreshnessHours: z.number().int().min(1).max(168).default(48),
-  maximumFreshnessHours: z.number().int().min(1).max(168).default(168),
+  // null keeps older active postings available for backfill after recent roles.
+  maximumFreshnessHours: z.number().int().min(1).max(8_760).nullable().default(null),
   includeKeywords: z.array(z.string()).default([]),
   excludeKeywords: z.array(z.string()).default([]),
   maxJobsPerSource: z.number().int().min(1).max(5_000).default(1_000),
-}).refine((value) => value.preferredFreshnessHours <= value.maximumFreshnessHours, {
+}).refine((value) => value.maximumFreshnessHours === null
+  || value.preferredFreshnessHours <= value.maximumFreshnessHours, {
   message: "preferredFreshnessHours must not exceed maximumFreshnessHours",
   path: ["preferredFreshnessHours"],
 });
