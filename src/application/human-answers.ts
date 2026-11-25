@@ -3,7 +3,7 @@ import { z } from "zod";
 import { readPrivateFile } from "../storage/private-path.js";
 
 const answerApprovalSchema = z.object({
-  version: z.literal(1), jobId: z.string().min(1), browserPageId: z.number().int().positive(),
+  version: z.literal(1), jobId: z.string().min(1), browserPageId: z.number().int().nonnegative(),
   approveFinalSubmission: z.literal(true),
   answers: z.array(z.object({ field: z.string().min(1), value: z.string().min(1) })),
 });

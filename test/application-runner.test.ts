@@ -58,6 +58,45 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("resumes an owned-browser handoff on the verified requisition with a job-bound approved answer", async () => {
+    const salary = { ref: "salary", tag: "input", role: "textbox", name: "Salary expectation",
+      type: "text", value: "", required: true, options: [] };
+    const resume = { ref: "resume", tag: "input", role: "button", name: "Resume",
+      type: "file", value: null, required: true, options: [] };
+    const submitControl = { ref: "submit", tag: "button", role: "button", name: "Submit application",
+      type: "submit", value: null, required: false, options: [] };
+    const page = { url: job.applicationUrl, title: "Apply", controls: [salary, resume, submitControl] };
+    const filled = { ...page, controls: [{ ...salary, value: "125000" }, resume, submitControl] };
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/owned-resume.pdf", expectedConfirmation: "Thank you for applying" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const navigate = vi.fn(async () => page);
+    const submit = vi.fn(async () => "Thank you for applying");
+    const fillBatch = vi.fn(async () => filled);
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate, fillBatch, act: async () => filled, submit }, close: async () => {} }) };
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint).toMatchObject({ stage: "waiting-human", browserPageUrl: job.applicationUrl });
+    expect(submit).not.toHaveBeenCalled();
+    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      ...options, resumedJobId: "another-job" })).rejects.toThrow("matching pending browser handoff");
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      ...options, resumedJobId: job.id,
+      humanAnswerApproval: { jobId: job.id, browserPageId: 0, approveFinalSubmission: true,
+        answers: new Map([["Salary expectation", "125000"]]) },
+    });
+    expect(resumed.checkpoint.stage).toBe("submitted");
+    expect(navigate).toHaveBeenCalledTimes(2);
+    expect(fillBatch).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: "Salary expectation", value: "125000" })]));
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("signs into an exact-domain portal using an OS-stored password", async () => {
     const boundJob = { ...job, id: "greenhouse:example:123456",
       applicationUrl: "https://jobs.example.com/apply/123456" };

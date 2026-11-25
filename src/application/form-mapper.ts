@@ -70,7 +70,14 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
       blockers.push(`Human verification needed: ${control.name}`);
       continue;
     }
-    const action = valueFor(control, candidate, resumePath, options.provider);
+    const approved = options.approvedHumanAnswers?.get(control.name);
+    const safeApprovedAnswer = approved && ["input", "textarea"].includes(control.tag)
+      && [null, "text", "tel", "number", "email", "url"].includes(control.type)
+      && !/\b(attest|certify|criminal|disability|ethnicity|race|gender|veteran|clearance|export|sanction|consent|agree)\b/i
+        .test(control.name);
+    const action = valueFor(control, candidate, resumePath, options.provider)
+      ?? (safeApprovedAnswer ? { name: control.name, tag: control.tag, type: control.type,
+        action: "fill" as const, value: approved } : undefined);
     if (action && counts.get(key(control)) === 1) actions.push(action);
     else if (control.required && !(control.value?.trim()
       && options.approvedHumanAnswers?.get(control.name) === control.value

@@ -151,11 +151,16 @@ export async function runApplicationPackage(
     && current.blocker === "Final submission approval required"
     && dependencies.approvedJobId === job.id && pkg.handoff.mode === "submit-after-approval"
     && !pkg.handoff.stopConditions.includes("final-submit");
-  const resumingHuman = (current?.stage === "waiting-human"
+  const resumingBrowserOs = (current?.stage === "waiting-human"
     && current.blocker !== "Final submission approval required" || current?.stage === "applying")
     && dependencies.resumedJobId === job.id && current.browserPageId !== undefined
     && Boolean(dependencies.browserFactory);
-  if (resumingHuman && (!current?.browserGroupId || !current.browserEndpoint || !current.browserPageUrl
+  const resumingOwned = current?.stage === "waiting-human"
+    && current.blocker !== "Final submission approval required"
+    && dependencies.resumedJobId === job.id && pkg.browserRuntime === "owned"
+    && current.browserPageId === undefined && Boolean(current.browserPageUrl);
+  const resumingHuman = resumingBrowserOs || resumingOwned;
+  if (resumingBrowserOs && (!current?.browserGroupId || !current.browserEndpoint || !current.browserPageUrl
     || current.browserEndpoint !== pkg.browserEndpoint)) {
     throw new Error("BrowserOS handoff requires the saved tab group and endpoint");
   }
@@ -163,13 +168,13 @@ export async function runApplicationPackage(
     throw new Error("Approval requires a matching pending final-approval checkpoint");
   }
   if (dependencies.resumedJobId && !resumingHuman) {
-    throw new Error("Human resume requires a matching pending BrowserOS handoff");
+    throw new Error("Human resume requires a matching pending browser handoff");
   }
   if (dependencies.humanAnswerApproval
     && (!resumingHuman || dependencies.humanAnswerApproval.jobId !== job.id
-      || dependencies.humanAnswerApproval.browserPageId !== current?.browserPageId
+      || dependencies.humanAnswerApproval.browserPageId !== (current?.browserPageId ?? 0)
       || dependencies.humanAnswerApproval.approveFinalSubmission !== true)) {
-    throw new Error("Human answer approval does not match this BrowserOS handoff");
+    throw new Error("Human answer approval does not match this browser handoff");
   }
   const handoff = resumingHuman && dependencies.humanAnswerApproval
     ? { ...pkg.handoff, mode: "submit-after-approval" as const,
@@ -221,9 +226,9 @@ export async function runApplicationPackage(
     && current?.blocker?.startsWith("Account registration may need human completion") === true;
   try {
     const browser = runtime.browser;
-    if (resumingHuman && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
+    if (resumingBrowserOs && !browser.attach) throw new Error("BrowserOS handoff cannot be attached");
     let emailChallengeStartedAt = new Date().toISOString();
-    let snapshot = resumingHuman
+    let snapshot = resumingBrowserOs
       ? await browser.attach!(current!.browserPageId!, current!.browserPageUrl!, current!.browserGroupId!,
         current!.blocker?.startsWith("Portal sign-in needs human completion") === true
           || current!.blocker?.startsWith("Account registration may need human completion") === true)
@@ -326,7 +331,7 @@ export async function runApplicationPackage(
     const formOptions = { allowMissingResume: true, provider: job.provider,
       ...(resumingHuman && dependencies.humanAnswerApproval
         ? { approvedHumanAnswers: dependencies.humanAnswerApproval.answers } : {}) };
-    let resumeUploaded = resumingHuman && current?.resumeUploaded === true;
+    let resumeUploaded = resumingBrowserOs && current?.resumeUploaded === true;
     let continued = false;
     let page = snapshot;
     let filled = { snapshot, blockers: [] as string[], uploaded: false };
@@ -433,7 +438,7 @@ export async function runApplicationPackage(
       throw new Error("BrowserOS application needs a stable tab group and endpoint for recovery");
     }
     const pageDetails = { ...(pageId ? { browserPageId: pageId } : {}),
-      ...(pageId ? { browserPageUrl: filled.snapshot.url } : {}),
+      browserPageUrl: filled.snapshot.url,
       ...(groupId ? { browserGroupId: groupId } : {}),
       ...(pageId && pkg.browserEndpoint ? { browserEndpoint: pkg.browserEndpoint } : {}),
       resumeUploaded,
