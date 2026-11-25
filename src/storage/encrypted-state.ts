@@ -45,6 +45,25 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
     });
   }
 
+  /** Restore exact generations during an offline SQLite rollback, including tombstones. */
+  async replaceFromSnapshot(
+    snapshot: Array<{ id: string; version: number; state?: State }>, confirmedInactive: true,
+  ): Promise<void> {
+    if (confirmedInactive !== true) throw new Error("Snapshot restore requires inactive-run confirmation");
+    await this.withLock(async () => {
+      const records: Record<string, StoredRecord<State>> = Object.create(null);
+      for (const record of snapshot) {
+        if (!record.id || Object.hasOwn(records, record.id)
+          || !Number.isSafeInteger(record.version) || record.version < 1) {
+          throw new Error("SQLite rollback contains an invalid record");
+        }
+        records[record.id] = record.state === undefined ? { version: record.version }
+          : { version: record.version, state: record.state };
+      }
+      await this.save(records);
+    });
+  }
+
   async compareAndSwap(
     applicationId: string,
     expectedVersion: number | undefined,
