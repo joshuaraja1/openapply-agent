@@ -11,8 +11,10 @@ encrypted local state with macOS Keychain or Linux Secret Service keys, a Window
 Credential Manager backend for secrets, a persistent BrowserOS neo adapter,
 guarded form filling and submission confirmation, scoped mailbox OAuth and
 email-code entry, exact-domain login and account creation, and same-tab human
-recovery. These paths have automated tests and the merged changes passed Bugbot,
-security review, CI, and CodeQL.
+recovery. These paths have automated tests and recorded reviews. Main branch
+protection requires Node 22/24 verification, owned-browser and Windows smoke
+tests, secret scanning, dependency audit, and CodeQL. A draft PR stays open
+while independent review or controlled end-to-end evidence is incomplete.
 
 The product promise below is **not yet a release claim**. The scheduled queue
 still requires separately installed BrowserOS neo; the single-job path can
@@ -24,7 +26,11 @@ beyond text geometry checks, remaining Windows BrowserOS artifact, application
 package, and state-key gates,
 first-run user UI,
 signed installer/updater, and live provider beta validation remain open. The
-general-availability gates in this document have not been met.
+general-availability gates in this document have not been met. The linked
+[release requirements](autonomy-release-requirements.md) and issues #52–#60
+track the remaining browser, recovery, ATS, PDF, onboarding, distribution,
+and beta work. PR #69 starts the page-image PDF gate; it does not
+complete visual QA.
 
 ## Product promise
 
