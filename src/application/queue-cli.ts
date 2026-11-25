@@ -11,6 +11,7 @@ import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/sc
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
+import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
@@ -31,7 +32,7 @@ const json = async (path: string): Promise<unknown> => JSON.parse(await readFile
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
 const config = queueRunnerConfigSchema.parse(await json(configPath));
-assertLocalBrowserEndpoint(config.browserEndpoint);
+if (config.browserEndpoint) assertLocalBrowserEndpoint(config.browserEndpoint);
 const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
 const [queue, candidate, preferences, discovery] = await Promise.all([
@@ -67,8 +68,9 @@ for (const entry of queue.queue) {
   if (sources.has(`${job.provider}:${job.company}`)
     && isEligibleQueuedJob(job, candidate, preferences)) eligible.push(job);
 }
-const connection = await connectBrowserOs(config.browserEndpoint);
-const client: BrowserToolClient = { callTool: async (request) =>
+const connection = config.browserRuntime === "browseros"
+  ? await connectBrowserOs(config.browserEndpoint!) : undefined;
+const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
   await connection.client.callTool(request) as BrowserToolResult };
 try {
   const date = () => {
@@ -79,12 +81,16 @@ try {
   const outcomes = await runApplicationQueue(eligible, quota, retries, date, cap, async (job) => {
     const source = sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
-    const artifact = await renderOverleafResume(client, config.overleafProjectUrl, job, candidate,
-      resumeSource, config.outputDirectory);
+    const artifact = config.browserRuntime === "owned"
+      ? await renderOwnedOverleafResume(config.overleafProjectUrl, job, candidate,
+        resumeSource, config.outputDirectory, { profileDirectory: join(root, "browser-profile") })
+      : await renderOverleafResume(client!, config.overleafProjectUrl, job, candidate,
+        resumeSource, config.outputDirectory);
     const host = new URL(job.applicationUrl).hostname;
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
-      resumeSource, resumePdfPath: artifact.path, browserEndpoint: config.browserEndpoint,
+      resumeSource, resumePdfPath: artifact.path, browserRuntime: config.browserRuntime,
+      ...(config.browserEndpoint ? { browserEndpoint: config.browserEndpoint } : {}),
       ...(config.authenticationPolicyPath
         ? { authenticationPolicyPath: config.authenticationPolicyPath } : {}),
       ...(config.expectedConfirmationByDomain[host]
@@ -97,10 +103,11 @@ try {
       packagePath,
       ...(account ? { account, secretStore: secrets } : {}),
       ...(emailCode ? { emailCode } : {}),
-      browserFactory: async (allowedHosts, approvedArtifacts) => ({
+      ...(client ? { browserFactory: async (allowedHosts: ReadonlySet<string>,
+        approvedArtifacts: ReadonlyMap<string, string>) => ({
         browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
         close: async () => {},
-      }),
+      }) } : {}),
     });
     if (result.checkpoint.stage === "waiting-human") {
       await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
@@ -108,5 +115,5 @@ try {
   });
   console.log(JSON.stringify({ date: date(), outcomes }));
 } finally {
-  await connection.close();
+  await connection?.close();
 }
