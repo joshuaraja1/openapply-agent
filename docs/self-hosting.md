@@ -12,8 +12,10 @@ to the operating-system secret store, never to this repository or JSON files.
 
 1. Install Node 22.13+ and run `npm ci`, `npm run browser:install`, and
    `npm run browser:doctor` from the repository root.
-2. Run `npm run setup:init`. It creates private copies of templates 01–08 in
-   `~/.openapply-agent/onboarding`. Repeating it preserves completed answers.
+2. Run `npm run setup:ui` and open the local URL it prints. The editor creates
+   private copies of templates 01–08 in `~/.openapply-agent/onboarding`, saves
+   with conflict detection, and preserves completed answers. `npm run setup:init`
+   remains available for users who prefer editing the files directly.
 3. Complete the structured blocks in templates 01–03, then run
    [`profile:compile`](../templates/user/README.md) with paths to those private
    files. Each usable matching skill needs an approved work-history claim.
@@ -31,8 +33,9 @@ to the operating-system secret store, never to this repository or JSON files.
 
 The scheduled queue's established path uses BrowserOS neo. An owned-browser
 queue preview is tracked in the release PR stack; recovery from human handoffs
-still needs validation. `setup:init` is a private template
-scaffold, not the finished first-run UI or installer. OpenApply cannot promise
+still needs validation. The local setup editor covers private templates; account
+consent, source configuration, dry-run preview, and installation are still CLI
+steps. OpenApply cannot promise
 every job on the internet or bypass CAPTCHA, MFA, legal questions, or site
 access controls. See the [release requirements](autonomy-release-requirements.md)
 for the remaining public-product gates.
