@@ -107,4 +107,14 @@ describe("evidence-backed matching", () => {
       candidate, preferences);
     expect(result.eligible).toBe(true);
   });
+
+  it("checks bullets under a requirements heading and leaves preferred bullets alone", () => {
+    const posting = { ...job, descriptionText: ["TypeScript", "Minimum qualifications:",
+      "- 2 years of software engineering experience", "Preferred qualifications:",
+      "- Active Secret clearance"].join("\n") };
+    const result = scoreJob(posting, candidate, preferences);
+    expect(result.eligible).toBe(false);
+    expect(result.reasons).toContain("2 years of software engineering experience needs an approved matching claim");
+    expect(result.reasons).not.toContain("Security clearance requirement needs an approved matching claim");
+  });
 });
