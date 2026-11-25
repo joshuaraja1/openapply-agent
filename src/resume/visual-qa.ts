@@ -24,8 +24,19 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
   // PDF.js declares DOM canvas types; its Node renderer accepts this native canvas.
-  await page.render({ canvas: canvas as unknown as HTMLCanvasElement,
-    canvasContext: context as unknown as CanvasRenderingContext2D, viewport }).promise;
+  const render = page.render({ canvas: canvas as unknown as HTMLCanvasElement,
+    canvasContext: context as unknown as CanvasRenderingContext2D, viewport });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([render.promise, new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        render.cancel();
+        reject(new Error("Résumé page image rendering timed out"));
+      }, 10_000);
+    })]);
+  } finally {
+    clearTimeout(timeout);
+  }
   const pixels = context.getImageData(0, 0, width, height).data;
   let inkPixels = 0;
   let minX = width;
