@@ -68,10 +68,11 @@ printf '%s' "$OPENAPPLY_PASSWORD" | OPENAPPLY_SECRET_REF='secret-service://opena
 unset OPENAPPLY_PASSWORD
 ```
 
-Use the same secret reference in the private authentication policy. The
-onboarding UI and Windows private-file ACL checks are still planned. The Windows
-secret backend can store credentials, but the full Windows runner remains blocked
-until private input and output files have reviewed ACL handling. Never
+Use the same secret reference in the private authentication policy. Windows
+uses `credential-manager://application-state/main` for the local encryption
+key; that namespace is never valid for portal passwords. Private-file gates,
+onboarding, and installer validation are still required before the full
+Windows runner is a consumer release. Never
 put passwords in Markdown, JSON, logs, command arguments, environment
 variables, generated artifacts, or the repository.
 The `application-state/` namespace in each store is reserved for OpenApply's

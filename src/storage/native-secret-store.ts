@@ -82,5 +82,6 @@ export function createNativeSecretStore(platform = process.platform): SecretStor
 export function stateKeyReference(platform = process.platform): string {
   if (platform === "darwin") return "keychain://application-state/main";
   if (platform === "linux") return "secret-service://application-state/main";
+  if (platform === "win32") return "credential-manager://application-state/main";
   throw new Error("This platform does not yet have an OpenApply OS secret store");
 }
