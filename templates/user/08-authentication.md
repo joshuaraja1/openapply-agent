@@ -8,12 +8,12 @@ MFA secrets, or recovery codes in this file.
 - Source browser: `{{CHROME / EDGE / BRAVE / FIREFOX / SAFARI / NONE}}`
 - Source profile name: `{{EXAMPLE: DEFAULT}}`
 - Import cookies and signed-in sessions: `{{YES/NO}}`
-- Import saved passwords through the browser's consent screen: `{{YES/NO}}`
+- Import saved passwords: `NO` (unsupported until OS-store migration is reviewed)
 - Keep a dedicated persistent OpenApply profile: `{{YES}}`
 
 Profile import must be initiated by the user and approved through the browser or
 operating-system consent prompt. OpenApply must not silently copy another
-browser's encrypted profile files.
+browser's encrypted profile files or retain a second browser password vault.
 
 ## Application accounts
 
