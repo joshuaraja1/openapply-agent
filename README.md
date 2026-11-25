@@ -224,6 +224,8 @@ npm start
 
 OpenApply checks each direct ATS URL against the provider's live postings. A missing or incomplete posting does not enter the queue. LinkedIn, Jobright, and Handshake listing pages remain leads until a direct official posting URL is resolved; this command does not infer an employer posting from the board's title or date.
 
+For each enabled board search, discovery also reads up to 20 listing detail pages and collects direct Greenhouse, Ashby, or Lever links exposed there. Set `maxBoardDetails` in the private browser-search file to change that bound (0–100). Detail pages without a visible direct ATS link remain unverified leads. This scan visits the signed-in board pages, so its speed depends on those sites.
+
 ### Preview: owned browser for signed-in discovery
 
 The local Chromium profile can collect job links without a separate BrowserOS neo installation. Install its browser binary, then open the profile and sign in manually to the job boards you use:

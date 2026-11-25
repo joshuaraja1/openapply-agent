@@ -5,6 +5,7 @@ export const browserPlatformSchema = z.enum(["linkedin", "jobright", "handshake"
 export const browserSearchInputSchema = z.object({
   runtime: z.enum(["browseros", "owned"]).default("browseros"),
   endpoint: z.string().url().default("http://127.0.0.1:9010/mcp"),
+  maxBoardDetails: z.number().int().min(0).max(100).optional(),
   searches: z.array(z.object({
     label: z.string().min(1),
     platform: browserPlatformSchema,
