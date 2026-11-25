@@ -157,6 +157,9 @@ export class AgentBrowser {
       : /^(password|account password)$/i);
     const confirmation = kind === "registration"
       ? one(/^(confirm password|password confirmation|re-enter password)$/i) : undefined;
+    if (password.type !== "password" || (confirmation && confirmation.type !== "password")) {
+      throw new Error("Portal password fields are not protected inputs");
+    }
     const submit = controls.filter((control) => control.tag === "button"
       && (kind === "registration" ? /^(create account|sign up|register)$/i
         : /^(sign in|log in|login)$/i).test(control.name.trim()));

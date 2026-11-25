@@ -138,6 +138,8 @@ describe("agent browser controls", () => {
             + '<button>Sign in</button><p>Verify you are human</p></form>'
             : path === "/unsafe-get" ? '<form action="/home" method="get"><label>Email<input name="email"></label>'
             + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
+            : path === "/plain-password" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="text"></label><button>Sign in</button></form>'
             : "<h1>Account ready</h1>";
           await route.fulfill({ contentType: "text/html", body });
         });
@@ -154,6 +156,9 @@ describe("agent browser controls", () => {
         await browser.navigate("https://jobs.example.com/unsafe-get");
         await expect(browser.authenticate("candidate@example.com", "private-password"))
           .rejects.toThrow("unsafe submission destination");
+        await browser.navigate("https://jobs.example.com/plain-password");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("not protected inputs");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
     }, 30_000,
   );
