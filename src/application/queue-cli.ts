@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
@@ -20,11 +19,11 @@ import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
 import { notifyHumanHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
+import { rankedQueueSchema, runnableJobs } from "./queue-reconcile.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
-import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
+import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 
-const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
@@ -33,7 +32,7 @@ assertLocalBrowserEndpoint(config.browserEndpoint);
 const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
 const [queue, candidate, preferences, discovery] = await Promise.all([
-  json(config.queuePath).then((value) => queueSchema.parse(value)),
+  json(config.queuePath).then((value) => rankedQueueSchema.parse(value)),
   json(config.candidatePath).then((value) => candidateProfileSchema.parse(value)),
   json(config.preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
@@ -58,8 +57,7 @@ for (const source of discovery.sources.filter((entry) => entry.enabled)) {
   if (sources.has(key)) throw new Error(`Ambiguous configured source for ${key}`);
   sources.set(key, source);
 }
-for (const entry of queue.queue) {
-  const job = entry.job as DiscoveredJob;
+for (const job of runnableJobs(queue.queue)) {
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;
   if (sources.has(`${job.provider}:${job.company}`)) eligible.push(job);

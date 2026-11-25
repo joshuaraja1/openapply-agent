@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createApplicationHandoff } from "./application/handoff.js";
-import { reconcileReportedQueue } from "./application/queue-reconcile.js";
+import { rankedQueueSchema, reconcileReportedQueue, retainUnavailableJobs, type QueuedJob } from "./application/queue-reconcile.js";
 import { selectRankedJobs } from "./application/ranked-queue.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
@@ -27,13 +27,10 @@ const [input, candidate, preferences] = await Promise.all([
 ]);
 const state = await json(statePath).catch(() => ({ jobs: {} })) as DiscoveryState;
 const now = new Date();
-let previousQueue: { job: { id: string } }[] = [];
+let previousQueue: QueuedJob[] = [];
 try {
-  const previous = JSON.parse(await readFile(outputPath, "utf8")) as { queue?: unknown };
-  if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is { job: { id: string } } =>
-    typeof entry === "object" && entry !== null && "job" in entry
-    && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
-    && typeof entry.job.id === "string");
+  const previous = rankedQueueSchema.parse(JSON.parse(await readFile(outputPath, "utf8")));
+  previousQueue = previous.queue;
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
@@ -58,11 +55,12 @@ const newQueue = selectRankedJobs(evaluated, state, previouslyQueued, candidate,
   input.preferredFreshnessHours, input.maximumFreshnessHours, now)
   .map(({ job, match }) => ({
     job,
+    sourceVerification: "verified" as const,
     match,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-const queue = newQueue;
+const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failures)];
 reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
 markJobsReported(state, queue.map((entry) => entry.job.id), now);
 const queuedTier = selectFreshnessTier(queue.map((entry) => entry.job),

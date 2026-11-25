@@ -36,9 +36,10 @@ deduplication still apply.
 
 Each scheduled discovery refreshes pending jobs against the current official
 source response and ranks the whole queue again. A job that disappeared from
-the official response is removed from that run's queue; a source outage likewise
-pauses its pending jobs until the source responds. A dropped queue entry remains
-eligible for rediscovery if it reappears. The encrypted application checkpoint
+a successfully refreshed official source is removed from that run's queue. A
+source outage retains its pending jobs with `sourceVerification: unavailable`;
+the runner skips them until a later successful fetch verifies them again. A
+dropped queue entry remains eligible for rediscovery if it reappears. The encrypted application checkpoint
 still prevents a confirmed submission from being repeated. Discovery keeps all
 eligible active jobs in the ranked queue; the application runner enforces the
 daily cap after skipping jobs with terminal or waiting checkpoints, so those
