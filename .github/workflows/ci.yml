@@ -35,7 +35,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- --run test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts
+      # Each file launches OS ACL checks; serial files avoid competing PowerShell processes.
+      - run: npm test -- --no-file-parallelism test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts
 
   verify:
     name: verify (Node ${{ matrix.node }})
