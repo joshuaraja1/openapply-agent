@@ -14,20 +14,34 @@ const handoff: ApplicationHandoff = {
   stopConditions: ["captcha"],
 };
 
-async function ready() {
+async function ready(jobId = "job", applicationUrl = "https://jobs.example.com/job") {
   const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();
   const workflow = new ApplicationWorkflow(store);
-  await workflow.create("job", "https://jobs.example.com/job");
-  await workflow.advance("job", "validated");
-  await workflow.advance("job", "matched");
-  await workflow.advance("job", "tailored");
-  await workflow.advance("job", "rendered", { artifactPath: "/private/job.pdf",
+  await workflow.create(jobId, applicationUrl);
+  await workflow.advance(jobId, "validated");
+  await workflow.advance(jobId, "matched");
+  await workflow.advance(jobId, "tailored");
+  await workflow.advance(jobId, "rendered", { artifactPath: "/private/job.pdf",
     artifactSha256: "a".repeat(64), sourceFingerprint: "b".repeat(64) });
-  await workflow.advance("job", "applying");
+  await workflow.advance(jobId, "applying");
   return { store, workflow };
 }
 
 describe("submission verification", () => {
+  it("marks a generic thank-you receipt uncertain when it redirects to another requisition", async () => {
+    const jobId = "greenhouse:example:123456";
+    const applicationUrl = "https://jobs.example.com/apply/123456";
+    const { workflow } = await ready(jobId, applicationUrl);
+    const boundHandoff = { ...handoff, jobId, applicationUrl };
+    let currentUrl = applicationUrl;
+    const browser = { currentUrl: () => currentUrl,
+      submit: vi.fn(async () => { currentUrl = "https://jobs.example.com/apply/654321/thank-you";
+        return "Thank you for applying"; }) };
+    await expect(submitApplication(workflow, browser, jobId, "1:0",
+      "Thank you for applying", boundHandoff)).rejects.toThrow("not bound to the original requisition");
+    expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
+    expect(browser.submit).toHaveBeenCalledOnce();
+  });
   it("records submitted only after an employer receipt", async () => {
     const { store, workflow } = await ready();
     const browser = { currentUrl: () => handoff.applicationUrl, submit: vi.fn(async () => "Thank you for applying") };

@@ -77,6 +77,11 @@ missing confirmation configuration, ambiguous submit controls, or final
 approval required by policy. Guarded exact-domain account creation and scoped
 email-code entry are available when configured. It supports up to five guarded
 form steps; arbitrary portal questions still need a human or a provider adapter.
+Before login or form filling, the runner requires the original requisition ID
+in a stable application path. It pauses generic-URL flows until a
+provider adapter can prove job identity. A receipt that leaves the original
+job path becomes uncertain. Provider-specific receipt binding remains a
+release gate for portals that use generic application URLs.
 If final approval is required, set `OPENAPPLY_APPROVE_JOB_ID` to the exact job
 ID on the next run. Other human handoffs use the saved same-tab resume path. The
 official posting, PDF hash, source fingerprint, and page state are rechecked

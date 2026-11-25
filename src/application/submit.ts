@@ -1,5 +1,6 @@
 import type { ApplicationWorkflow } from "./state-machine.js";
 import type { ApplicationHandoff } from "./handoff.js";
+import { hasUnboundReceiptUrl } from "./requisition.js";
 
 export interface SubmissionBrowser {
   currentUrl(): string;
@@ -25,7 +26,8 @@ export async function submitApplication(
     || handoff.jobId !== jobId
     || current?.officialUrl !== handoff.applicationUrl || !current.artifactSha256
     || !current.sourceFingerprint || !handoff.allowedDomains.includes(host)
-    || page.protocol !== "https:" || page.hostname !== host || page.username || page.password
+    || page.protocol !== "https:" || page.hostname !== host
+    || page.origin !== new URL(handoff.applicationUrl).origin || page.username || page.password
     || page.href !== new URL(approvedFinalUrl ?? handoff.applicationUrl).href) {
     throw new Error("Application submission is not authorized for this job and destination");
   }
@@ -39,6 +41,9 @@ export async function submitApplication(
     browserGroupId: groupId!, browserEndpoint: endpoint! } : {});
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
+    if (hasUnboundReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {
+      throw new Error("Employer receipt is not bound to the original requisition");
+    }
     await workflow.advance(jobId, "submitted", { confirmation });
   } catch (error) {
     await workflow.advance(jobId, "submission-uncertain", {

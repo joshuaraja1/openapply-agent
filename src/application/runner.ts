@@ -14,6 +14,7 @@ import { fillApplicationForm, isEmailCodeControl } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
+import { hasStableRequisitionPath, isOriginalRequisition } from "./requisition.js";
 
 export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
@@ -220,12 +221,15 @@ export async function runApplicationPackage(
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
     }
-    let loginBlocker: string | undefined;
-    if (loginRecoveryPending && snapshot.url !== job.applicationUrl
+    let loginBlocker: string | undefined = !hasStableRequisitionPath(job)
+      ? "Application URL has no stable requisition reference"
+      : !isOriginalRequisition(snapshot, job)
+        ? "Opened application page cannot be bound to this requisition" : undefined;
+    if (!loginBlocker && loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
     }
-    if (registrationRecoveryPending && !isRegistrationPage(snapshot)
+    if (!loginBlocker && registrationRecoveryPending && !isRegistrationPage(snapshot)
       && (!identifiesJob(snapshot, job)
         || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job)))) {
       loginBlocker = "Post-registration page cannot be bound to this requisition";
@@ -236,7 +240,7 @@ export async function runApplicationPackage(
       && snapshot.controls.some((control) => control.tag === "button"
         && /^(sign in|log in|login)$/i.test(control.name.trim()));
     let authenticatedRedirect = false;
-    if (loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
+    if (!loginBlocker && loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
       const account = dependencies.account;
       if (!account.domains.some((domain) => domain.toLowerCase() === host)) {
         loginBlocker = "Automatic sign-in requires an exact account domain";
@@ -257,13 +261,13 @@ export async function runApplicationPackage(
           recoveryPageUrl = snapshot.url;
         }
       }
-    } else if (loginPage) {
+    } else if (!loginBlocker && loginPage) {
       loginBlocker = "Portal sign-in requires a configured exact-domain account";
     }
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
-    if (isRegistrationPage(snapshot)) {
+    if (!loginBlocker && isRegistrationPage(snapshot)) {
       const account = dependencies.account;
       if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
         || !account.domains.some((domain) => domain.toLowerCase() === host)) {
@@ -358,7 +362,16 @@ export async function runApplicationPackage(
         }
         recoveryPageUrl = page.url;
       }
+      if (!isOriginalRequisition(page, job) || (continued && !hasStableRequisitionPath(job))) {
+        filled = { snapshot: page, blockers: ["Application step cannot be bound to the original requisition"],
+          uploaded: false };
+        break;
+      }
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
+      if (!isOriginalRequisition(filled.snapshot, job) || (continued && !hasStableRequisitionPath(job))) {
+        filled.blockers.push("Application step changed to another requisition during form filling");
+        break;
+      }
       resumeUploaded ||= filled.uploaded;
       if (filled.uploaded) loginRecoveryPending = false;
       recoveryResumeUploaded = resumeUploaded;
@@ -433,6 +446,10 @@ export async function runApplicationPackage(
     } else if (!pkg.expectedConfirmation) {
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: "Expected employer confirmation text is not configured", ...pageDetails,
+      });
+    } else if (!hasStableRequisitionPath(job)) {
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Final submission needs a job-bound requisition reference or provider receipt", ...pageDetails,
       });
     } else {
       const submitControls = filled.snapshot.controls.filter((control) => control.type === "submit"
