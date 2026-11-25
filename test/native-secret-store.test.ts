@@ -29,7 +29,7 @@ describe("native secret-store selection", () => {
     expect(stateKeyReference("darwin")).toBe("keychain://application-state/main");
     expect(stateKeyReference("linux")).toBe("secret-service://application-state/main");
     expect(createNativeSecretStore("linux")).toBeInstanceOf(LinuxSecretServiceStore);
-    expect(stateKeyReference("win32")).toBe("credential-manager://application-state/main");
+    expect(() => stateKeyReference("win32")).toThrow("does not yet have");
     expect(createNativeSecretStore("win32")).toBeInstanceOf(WindowsCredentialManagerStore);
     expect(() => stateKeyReference("freebsd")).toThrow("does not yet have");
     expect(() => createNativeSecretStore("freebsd")).toThrow("does not yet have");
