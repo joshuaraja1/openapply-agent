@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { persistDiscoveryOutput } from "../src/storage/discovery-output.js";
+import { ensurePrivateDirectory } from "../src/storage/private-path.js";
 import { secureWindowsPrivatePath, assertWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
 describe("discovery persistence order", () => {
@@ -11,8 +12,10 @@ describe("discovery persistence order", () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-persist-"));
     try {
       if (process.platform === "win32") await secureWindowsPrivatePath(root);
-      const outputPath = join(root, "queue.json");
-      const invalidStatePath = root;
+      const directory = join(root, "private");
+      await ensurePrivateDirectory(directory);
+      const outputPath = join(directory, "queue.json");
+      const invalidStatePath = directory;
       await expect(persistDiscoveryOutput(outputPath, { queue: [{ job: { id: "one" } }] },
         invalidStatePath, { jobs: {} })).rejects.toThrow();
       expect(JSON.parse(await readFile(outputPath, "utf8")).queue[0].job.id).toBe("one");
@@ -24,10 +27,12 @@ describe("discovery persistence order", () => {
 
   it("rejects shared queue/state files instead of silently replacing them", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-persist-"));
-    const outputPath = join(root, "queue.json");
-    const statePath = join(root, "state.json");
+    const directory = join(root, "private");
+    const outputPath = join(directory, "queue.json");
+    const statePath = join(directory, "state.json");
     try {
       if (process.platform === "win32") await secureWindowsPrivatePath(root);
+      await ensurePrivateDirectory(directory);
       await persistDiscoveryOutput(outputPath, { queue: [1] }, statePath, { jobs: {} });
       if (process.platform === "win32") {
         await assertWindowsPrivatePath(outputPath);
