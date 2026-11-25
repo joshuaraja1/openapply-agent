@@ -8,6 +8,7 @@ import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
 import { persistDiscoveryOutput } from "./storage/discovery-output.js";
+import { readPrivateFile } from "./storage/private-path.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -25,7 +26,11 @@ const [input, candidate, preferences] = await Promise.all([
   json(candidatePath).then((value) => candidateProfileSchema.parse(value)),
   json(preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
 ]);
-const state = await json(statePath).catch(() => ({ jobs: {} })) as DiscoveryState;
+const state = await readPrivateFile(statePath).then((content) => JSON.parse(content))
+  .catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return { jobs: {} };
+    throw error;
+  }) as DiscoveryState;
 const now = new Date();
 const batch = await fetchSourceBatch(input.sources, input.maxJobsPerSource, now);
 const fetched = batch.jobs;
@@ -58,7 +63,7 @@ const newQueue = tier.jobs
 markJobsReported(state, newQueue.map((entry) => entry.job.id), now);
 let previousQueue: typeof newQueue = [];
 try {
-  const previous = JSON.parse(await readFile(outputPath, "utf8")) as { queue?: unknown };
+  const previous = JSON.parse(await readPrivateFile(outputPath)) as { queue?: unknown };
   if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is (typeof newQueue)[number] =>
     typeof entry === "object" && entry !== null && "job" in entry
     && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
