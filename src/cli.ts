@@ -2,11 +2,12 @@ import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { createApplicationHandoff } from "./application/handoff.js";
-import { mergePendingQueue } from "./application/queue-merge.js";
+import { reconcileReportedQueue, retainUnavailableJobs, type QueuedJob } from "./application/queue-reconcile.js";
+import { queueFileSchema } from "./application/queue-schema.js";
+import { selectRankedJobs } from "./application/ranked-queue.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
-import { evaluateJob, freshnessPriority, markJobsReported, selectFreshnessTier } from "./discovery.js";
-import { scoreJob } from "./matching/score.js";
+import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
 import { browserLeadsFileSchema, verifyOfficialBrowserLeads } from "./browser/verify-official.js";
@@ -46,6 +47,16 @@ const state = sqlite ? (await sqlite.store<DiscoveryState>("discovery").read("cu
     throw error;
   }) as DiscoveryState;
 const now = new Date();
+let previousQueue: QueuedJob[] = [];
+try {
+  const previousValue = sqlite ? (await sqlite.store("queue").read("current"))?.state ?? { queue: [] }
+    : JSON.parse(await readPrivateFile(outputPath));
+  const previous = queueFileSchema.parse(previousValue);
+  previousQueue = previous.queue;
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+const previouslyQueued = new Set(previousQueue.map((entry) => entry.job.id));
 const batch = await fetchSourceBatch(input.sources, input.maxJobsPerSource, now);
 const verified = browserLeadsPath
   ? await json(browserLeadsPath).then((value) => browserLeadsFileSchema.parse(value))
@@ -65,38 +76,25 @@ const evaluated = fetched.flatMap((job) => {
     lastSeenAt: now.toISOString(),
     ...(previous?.reportedAt ? { reportedAt: previous.reportedAt } : {}),
   };
-  return result && !previous?.reportedAt ? [result] : [];
+  return result ? [result] : [];
 });
-const tier = selectFreshnessTier(evaluated, input.preferredFreshnessHours, input.maximumFreshnessHours, now);
-const newQueue = tier.jobs
-  .map((job) => ({ job, match: scoreJob(job, candidate, preferences) }))
-  .filter((entry) => entry.match.eligible)
-  .sort((a, b) => freshnessPriority(a.job, input.preferredFreshnessHours, now)
-    - freshnessPriority(b.job, input.preferredFreshnessHours, now)
-    || b.match.score - a.match.score)
-  .slice(0, preferences.applicationPolicy.dailyHardCap)
+const newQueue = selectRankedJobs(evaluated, candidate, preferences,
+  input.preferredFreshnessHours, input.maximumFreshnessHours, now)
   .map(({ job, match }) => ({
     job,
     ...(verifiedSources.has(job.id) ? { source: verifiedSources.get(job.id)! } : {}),
+    sourceVerification: "verified" as const,
     match,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-markJobsReported(state, newQueue.map((entry) => entry.job.id), now);
-let previousQueue: typeof newQueue = [];
-try {
-const previous = sqlite ? (await sqlite.store<{ queue?: unknown }>("queue").read("current"))?.state
-  ?? { queue: [] } : JSON.parse(await readPrivateFile(outputPath)) as { queue?: unknown };
-  if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is (typeof newQueue)[number] =>
-    typeof entry === "object" && entry !== null && "job" in entry
-    && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
-    && typeof entry.job.id === "string");
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-}
-const queue = mergePendingQueue(previousQueue, newQueue);
+const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failures)];
+reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
+markJobsReported(state, queue.map((entry) => entry.job.id), now);
+const queuedTier = selectFreshnessTier(queue.map((entry) => entry.job),
+  input.preferredFreshnessHours, input.maximumFreshnessHours, now);
 
-if (sqlite) await sqlite.writeDiscoveryOutput({ generatedAt: now.toISOString(), tier: tier.tier, queue }, state);
-else await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
+if (sqlite) await sqlite.writeDiscoveryOutput({ generatedAt: now.toISOString(), tier: queuedTier.tier, queue }, state);
+else await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: queuedTier.tier, queue }, statePath, state);
 sqlite?.close();
 console.log(`Prepared ${queue.length} application handoff(s) in ${outputPath}`);

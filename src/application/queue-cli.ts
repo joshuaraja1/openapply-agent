@@ -73,7 +73,8 @@ for (const source of discovery.sources.filter((entry) => entry.enabled)) {
   sources.set(key, source);
 }
 for (const entry of queue.queue) {
-  const job = entry.job as DiscoveredJob;
+  if (entry.sourceVerification !== "verified") continue;
+  const job = entry.job;
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;
   if (entry.source && entry.source.provider === job.provider
