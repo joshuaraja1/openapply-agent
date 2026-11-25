@@ -30,9 +30,15 @@ and exact U.S. authorization selects in the owned browser
 [#96](https://github.com/joshuaraja1/openapply-agent/pull/96), local setup match
 preview [#97](https://github.com/joshuaraja1/openapply-agent/pull/97), and
 recoverable owned-browser account forms
-[#98](https://github.com/joshuaraja1/openapply-agent/pull/98) are also drafts.
+[#98](https://github.com/joshuaraja1/openapply-agent/pull/98), controlled
+Chromium portal tests [#99](https://github.com/joshuaraja1/openapply-agent/pull/99)
+and [#101](https://github.com/joshuaraja1/openapply-agent/pull/101), browser
+latency measurement [#100](https://github.com/joshuaraja1/openapply-agent/pull/100),
+the monitored beta protocol [#102](https://github.com/joshuaraja1/openapply-agent/pull/102),
+and 1,000-case duplicate-click stress test
+[#103](https://github.com/joshuaraja1/openapply-agent/pull/103) are also drafts.
 These changes are **drafts, not merged into `main`**. Their combined local tree
-passes typecheck, build, 200 tests (15 skipped), and targeted Chromium tests,
+passes typecheck, build, 203 tests (30 skipped), and 26 targeted Chromium tests,
 but independent reviews and live beta validation are pending.
 
 ## Public release decision
@@ -43,10 +49,10 @@ after all of these have recorded evidence:
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
 | Reviewed code | Merge the draft PR stack after independent bug and security reviews; keep required CI green on the combined branch | Open: drafts are unmerged and independent reviews are pending |
-| Supported sites | Provider-specific multi-step fixtures, conditional-field handoffs, and a low-volume consented real-site smoke for each advertised provider | Open: form coverage and live validation are incomplete |
-| Candidate setup | Complete private first-run setup, dry-run preview, account and mailbox consent, and safe handoff/resume UI | Open: editor and compilation exist only in drafts |
+| Supported sites | Provider-specific multi-step fixtures, conditional-field handoffs, and a low-volume consented real-site smoke for each advertised provider | Open: one common synthetic multi-step flow covers five provider configurations in drafts; live provider markup and site checks remain incomplete |
+| Candidate setup | Complete private first-run setup, dry-run preview, account and mailbox consent, and safe handoff/resume UI | Open: editor, compilation, and local match preview exist in drafts; full setup and handoff remain incomplete |
 | Distribution | Signed installers, verified browser installation, upgrade/rollback, export/delete, and clean uninstall on advertised OSes | Open: no consumer installer or updater |
-| Reliability and speed | The stage latency, crash/retry, job-bound confirmation, privacy, and two-week beta targets in [release requirements](autonomy-release-requirements.md) | Open: no completed release evidence set |
+| Reliability and speed | The stage latency, crash/retry, job-bound confirmation, privacy, and two-week beta targets in [release requirements](autonomy-release-requirements.md) | Open: local browser baseline and 1,000 controlled uncertain-click checks exist in drafts; cross-OS, recovery, and beta evidence remain incomplete |
 | External release inputs | Product OAuth registrations where offered, signing credentials, independent assessment, privacy and site-terms review, and beta candidate consent | Open: requires owner and third-party participation |
 
 The requested first public release covers macOS, Windows, and Linux. Apple
