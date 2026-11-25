@@ -101,6 +101,11 @@ describe("authentication policy", () => {
       emailVerification: { ...validPolicy.emailVerification,
         oauthSecretRef: "secret-service://application-state/main" },
     }).success).toBe(false);
+    expect(authenticationPolicySchema.safeParse({
+      ...validPolicy,
+      accounts: [{ ...validPolicy.accounts[0],
+        passwordSecretRef: "credential-manager://application-state/main" }],
+    }).success).toBe(false);
   });
 
   it("requires OAuth details before enabling email-code automation", () => {
