@@ -7,6 +7,7 @@ import { EmailCodeEntry } from "../auth/email-entry.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { loadApprovedHumanAnswers } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
+import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { approvedDestinationHost, runApplicationPackage } from "./runner.js";
@@ -35,7 +36,9 @@ const statePath = join(home, "applications.enc.json");
 const profileDirectory = join(home, "browser-profile");
 const secrets = createNativeSecretStore();
 const key = await getOrCreateStateKey(secrets, stateKeyReference());
-const store = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
+const sqlite = await openActiveSqliteRuntime(key);
+const store = sqlite?.store<ApplicationCheckpoint>("applications")
+  ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
 const workflow = new ApplicationWorkflow(store);
 const answerPath = process.env.OPENAPPLY_APPROVED_ANSWERS;
 if (answerPath && !resumedJobId) throw new Error("Approved answers require an explicit human resume");
@@ -52,8 +55,8 @@ const authPolicy = runtimePackage.authenticationPolicyPath
   ? await loadAuthenticationPolicy(runtimePackage.authenticationPolicyPath) : undefined;
 const account = authPolicy ? accountForUrl(authPolicy, pkg.job.applicationUrl) : undefined;
 const emailCode = authPolicy?.emailVerification.autoEnter
-  ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
-    join(home, "email-code-claims.enc.json"), key)) : undefined;
+  ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
+    ?? new EncryptedApplicationStateStore(join(home, "email-code-claims.enc.json"), key)) : undefined;
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
@@ -80,4 +83,5 @@ try {
   }
 } finally {
   await connection?.close();
+  sqlite?.close();
 }

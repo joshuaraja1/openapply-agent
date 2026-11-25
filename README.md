@@ -77,6 +77,14 @@ To process that queue sequentially with a restart-safe daily cap, use
 role-specific PDF in Overleaf, creates a private application package, fills
 supported fields, and records the resulting checkpoint.
 
+Existing private discovery, queue, and application state can be moved to one
+local encrypted SQLite file without a hosted database. Stop the scheduled
+workers, set `OPENAPPLY_QUEUE_CONFIG`, then run
+`npm run state:cutover -- --confirm-inactive`. The command preserves the old
+files. To export current state back before disabling SQLite, stop the workers
+and run `npm run state:cutover -- --rollback --confirm-inactive`. See the
+[migration and recovery guide](docs/sqlite-state.md) before using either command.
+
 For a single application, create private render input containing the selected
 `job`, its configured official `source`, `candidate`, browser settings,
 Overleaf project URL, and a private output directory. Generate the tailored

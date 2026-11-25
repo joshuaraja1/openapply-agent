@@ -10,6 +10,7 @@ import { fetchSourceBatch } from "./sources/batch.js";
 import { browserLeadsFileSchema, verifyOfficialBrowserLeads } from "./browser/verify-official.js";
 import { persistDiscoveryOutput } from "./storage/discovery-output.js";
 import { readPrivateFile } from "./storage/private-path.js";
+import { openDefaultSqliteRuntimeIfPresent } from "./storage/sqlite-runtime.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -28,7 +29,9 @@ const [input, candidate, preferences] = await Promise.all([
   json(candidatePath).then((value) => candidateProfileSchema.parse(value)),
   json(preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
 ]);
-const state = await readPrivateFile(statePath).then((content) => JSON.parse(content))
+const sqlite = await openDefaultSqliteRuntimeIfPresent();
+const state = sqlite ? (await sqlite.store<DiscoveryState>("discovery").read("current"))?.state
+  ?? { jobs: {} } : await readPrivateFile(statePath).then((content) => JSON.parse(content))
   .catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return { jobs: {} };
     throw error;
@@ -73,7 +76,8 @@ const newQueue = tier.jobs
 markJobsReported(state, newQueue.map((entry) => entry.job.id), now);
 let previousQueue: typeof newQueue = [];
 try {
-  const previous = JSON.parse(await readPrivateFile(outputPath)) as { queue?: unknown };
+const previous = sqlite ? (await sqlite.store<{ queue?: unknown }>("queue").read("current"))?.state
+  ?? { queue: [] } : JSON.parse(await readPrivateFile(outputPath)) as { queue?: unknown };
   if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is (typeof newQueue)[number] =>
     typeof entry === "object" && entry !== null && "job" in entry
     && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
@@ -83,5 +87,7 @@ try {
 }
 const queue = mergePendingQueue(previousQueue, newQueue);
 
-await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
+if (sqlite) await sqlite.writeDiscoveryOutput({ generatedAt: now.toISOString(), tier: tier.tier, queue }, state);
+else await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
+sqlite?.close();
 console.log(`Prepared ${queue.length} application handoff(s) in ${outputPath}`);

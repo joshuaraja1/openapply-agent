@@ -16,6 +16,7 @@
     "browser:doctor": "tsx src/browser/doctor-cli.ts",
     "application:run": "tsx src/application/cli.ts",
     "application:status": "tsx src/application/status-cli.ts",
+    "state:cutover": "tsx src/storage/sqlite-cutover-cli.ts",
     "queue:run": "tsx src/application/queue-cli.ts",
     "autopilot": "tsx src/application/autopilot-cli.ts",
     "profile:compile": "tsx src/candidate/markdown-cli.ts",

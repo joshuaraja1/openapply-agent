@@ -12,6 +12,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "browser:discover": () => import("./browser/cli.js"),
   autopilot: () => import("./application/autopilot-cli.js"),
   "application:status": () => import("./application/status-cli.js"),
+  "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
 };
 
 const command = process.argv[2];

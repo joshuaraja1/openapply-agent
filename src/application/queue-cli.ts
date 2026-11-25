@@ -2,20 +2,19 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
-import { sourceSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
+import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
@@ -23,14 +22,13 @@ import { createApplicationHandoff } from "./handoff.js";
 import { notifyHumanHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
-import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
+import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
+import { queueFileSchema } from "./queue-schema.js";
 import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 
-const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema,
-  source: sourceSchema.optional() })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
@@ -38,26 +36,28 @@ const config = queueRunnerConfigSchema.parse(await json(configPath));
 if (config.browserEndpoint) assertLocalBrowserEndpoint(config.browserEndpoint);
 const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
+const root = join(userInfo().homedir, ".openapply-agent");
+const secrets = createNativeSecretStore();
+const key = await getOrCreateStateKey(secrets, stateKeyReference());
+const sqlite = await openActiveSqliteRuntime(key);
 const [queue, candidate, preferences, discovery] = await Promise.all([
-  json(config.queuePath).then((value) => queueSchema.parse(value)),
+  (sqlite ? sqlite.store("queue").read("current").then((row) => row?.state ?? { queue: [] })
+    : json(config.queuePath)).then((value) => queueFileSchema.parse(value)),
   json(config.candidatePath).then((value) => candidateProfileSchema.parse(value)),
   json(config.preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
-const root = join(userInfo().homedir, ".openapply-agent");
-const secrets = createNativeSecretStore();
-const key = await getOrCreateStateKey(secrets, stateKeyReference());
-const workflow = new ApplicationWorkflow(new EncryptedApplicationStateStore<ApplicationCheckpoint>(
-  join(root, "applications.enc.json"), key));
-const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord>(
-  join(root, "daily-quota.enc.json"), key));
-const retries = new RetryLedger(new EncryptedApplicationStateStore<RetryRecord>(
-  join(root, "retry-ledger.enc.json"), key));
-const postingClaims = new PostingClaimLedger(new EncryptedApplicationStateStore<PostingClaim>(
-  join(root, "posting-claims.enc.json"), key));
+const workflow = new ApplicationWorkflow(sqlite?.store<ApplicationCheckpoint>("applications")
+  ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(join(root, "applications.enc.json"), key));
+const quota = new DailyQuota(sqlite?.store<DailyQuotaRecord>("quota")
+  ?? new EncryptedApplicationStateStore<DailyQuotaRecord>(join(root, "daily-quota.enc.json"), key));
+const retries = new RetryLedger(sqlite?.store<RetryRecord>("retries")
+  ?? new EncryptedApplicationStateStore<RetryRecord>(join(root, "retry-ledger.enc.json"), key));
+const postingClaims = new PostingClaimLedger(sqlite?.store<PostingClaim>("postingClaims")
+  ?? new EncryptedApplicationStateStore<PostingClaim>(join(root, "posting-claims.enc.json"), key));
 const emailCode = authPolicy?.emailVerification.autoEnter
-  ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
-    join(root, "email-code-claims.enc.json"), key)) : undefined;
+  ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
+    ?? new EncryptedApplicationStateStore(join(root, "email-code-claims.enc.json"), key)) : undefined;
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
 const needsReview: { jobId: string; reasons: string[] }[] = [];
@@ -132,4 +132,5 @@ try {
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
   await connection?.close();
+  sqlite?.close();
 }
