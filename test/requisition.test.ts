@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasConflictingReceiptUrl, isOriginalRequisition } from "../src/application/requisition.js";
+import { hasUnboundReceiptUrl, isOriginalRequisition } from "../src/application/requisition.js";
 import type { DiscoveredJob } from "../src/types.js";
 
 const job = { id: "greenhouse:example:123456", title: "Software Engineer",
@@ -24,20 +24,26 @@ describe("requisition binding", () => {
     expect(isOriginalRequisition(page("https://jobs.example.com:8443/apply/step-2"), generic)).toBe(false);
   });
 
-  it("rejects another requisition-shaped receipt URL but permits a generic thank-you path", () => {
-    expect(hasConflictingReceiptUrl(job.id, job.applicationUrl,
+  it("requires the original job path in a receipt until a provider can prove another format", () => {
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
       "https://jobs.example.com/apply/654321/thank-you")).toBe(true);
-    expect(hasConflictingReceiptUrl(job.id, job.applicationUrl,
-      "https://jobs.example.com/thank-you")).toBe(false);
-    expect(hasConflictingReceiptUrl("test:runner:1", "https://jobs.example.com/apply",
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
+      "https://jobs.example.com/thank-you")).toBe(true);
+    expect(hasUnboundReceiptUrl("test:runner:1", "https://jobs.example.com/apply",
       "https://other.example/thank-you")).toBe(true);
-    expect(hasConflictingReceiptUrl("greenhouse:example:ABC12345",
+    expect(hasUnboundReceiptUrl("greenhouse:example:ABC12345",
       "https://jobs.example.com/apply/ABC12345",
       "https://jobs.example.com/apply/XYZ67890/thank-you")).toBe(true);
-    expect(hasConflictingReceiptUrl(job.id, job.applicationUrl,
-      "https://jobs.example.com/apply/thank-you")).toBe(false);
-    expect(hasConflictingReceiptUrl(job.id, job.applicationUrl,
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
+      "https://jobs.example.com/apply/thank-you")).toBe(true);
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
       "https://jobs.example.com:8443/apply/123456/thank-you")).toBe(true);
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
+      "https://jobs.example.com/job/654321/thank-you")).toBe(true);
+    expect(hasUnboundReceiptUrl("test:runner:1", "https://jobs.example.com/apply",
+      "https://jobs.example.com/job/654321/thank-you")).toBe(true);
+    expect(hasUnboundReceiptUrl(job.id, job.applicationUrl,
+      "https://jobs.example.com/apply/123456/thank-you")).toBe(false);
     expect(isOriginalRequisition(page("https://jobs.example.com/apply/123456/step%ZZ"), job)).toBe(false);
   });
 });

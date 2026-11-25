@@ -1,6 +1,6 @@
 import type { ApplicationWorkflow } from "./state-machine.js";
 import type { ApplicationHandoff } from "./handoff.js";
-import { hasConflictingReceiptUrl } from "./requisition.js";
+import { hasUnboundReceiptUrl } from "./requisition.js";
 
 export interface SubmissionBrowser {
   currentUrl(): string;
@@ -41,8 +41,8 @@ export async function submitApplication(
     browserGroupId: groupId!, browserEndpoint: endpoint! } : {});
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
-    if (hasConflictingReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {
-      throw new Error("Employer receipt belongs to a different requisition");
+    if (hasUnboundReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {
+      throw new Error("Employer receipt is not bound to the original requisition");
     }
     await workflow.advance(jobId, "submitted", { confirmation });
   } catch (error) {

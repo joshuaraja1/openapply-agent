@@ -444,6 +444,10 @@ export async function runApplicationPackage(
       checkpoint = await workflow.advance(job.id, "waiting-human", {
         blocker: "Expected employer confirmation text is not configured", ...pageDetails,
       });
+    } else if (!hasStableRequisitionPath(job)) {
+      checkpoint = await workflow.advance(job.id, "waiting-human", {
+        blocker: "Final submission needs a job-bound requisition reference or provider receipt", ...pageDetails,
+      });
     } else {
       const submitControls = filled.snapshot.controls.filter((control) => control.type === "submit"
         || /\b(submit|apply now|send application)\b/i.test(control.name));

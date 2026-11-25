@@ -12,9 +12,9 @@ import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import type { DiscoveredJob } from "../src/types.js";
 
 const job: DiscoveredJob = {
-  id: "test:runner:1", provider: "greenhouse", company: "Example Co", title: "Software Engineer",
+  id: "greenhouse:example:123456", provider: "greenhouse", company: "Example Co", title: "Software Engineer",
   location: "Remote", department: null, employmentType: null, workplaceType: null, compensation: null,
-  descriptionText: "Python", applicationUrl: "https://jobs.example.com/apply",
+  descriptionText: "Python", applicationUrl: "https://jobs.example.com/apply/123456",
   sourceUrl: "https://jobs.example.com/job", sourcePublishedAt: null, sourceUpdatedAt: null,
   firstSeenAt: "2026-11-24T00:00:00Z", discoveredAt: "2026-11-24T00:00:00Z",
   isNew: true, isFresh: true, freshnessBasis: "first-seen", matchedKeywords: [],
@@ -332,25 +332,26 @@ describe("application runner", () => {
   });
 
   it("pauses a generic same-URL SPA after Continue even when it mentions the original role", async () => {
-    const first = { url: job.applicationUrl, title: "Profile", controls: [
+    const genericJob = { ...job, id: "test:runner:1", applicationUrl: "https://jobs.example.com/apply" };
+    const first = { url: genericJob.applicationUrl, title: "Profile", controls: [
       { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
         value: null, required: false, options: [] },
       { ref: "next", tag: "button", role: "button", name: "Continue", type: "button",
         value: null, required: false, options: [] },
     ] };
-    const wrong = { url: job.applicationUrl, title: "Different job",
+    const wrong = { url: genericJob.applicationUrl, title: "Different job",
       visibleText: "Apply to Data Engineer at Example Co. Related jobs: Software Engineer", controls: [
         { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
           value: null, required: false, options: [] },
       ] };
     let current: typeof first | typeof wrong = first;
     const submit = vi.fn(async () => "Thank you for applying");
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
-      handoff: createApplicationHandoff(job, false),
+    const pkg = applicationPackageSchema.parse({ version: 1, job: genericJob, source, candidate,
+      handoff: createApplicationHandoff(genericJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/spa-job.pdf", expectedConfirmation: "Thank you for applying" });
     const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
-      "/tmp/profile", { verify: async () => ({ jobId: job.id,
+      "/tmp/profile", { verify: async () => ({ jobId: genericJob.id,
         sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
         path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
       validateOfficial: async () => true, browserFactory: async () => ({ browser: {
@@ -360,6 +361,32 @@ describe("application runner", () => {
       }, close: async () => {} }) });
     expect(result.checkpoint.stage).toBe("waiting-human");
     expect(result.checkpoint.blocker).toContain("original requisition");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("does not automatically submit a generic one-page application without a job reference", async () => {
+    const genericJob = { ...job, id: "test:runner:1", applicationUrl: "https://jobs.example.com/apply" };
+    const page = { url: genericJob.applicationUrl, title: "Apply", controls: [
+      { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+        value: null, required: false, options: [] },
+      { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+        value: null, required: false, options: [] },
+    ] };
+    const submit = vi.fn(async () => "Thank you for applying");
+    const pkg = applicationPackageSchema.parse({ version: 1, job: genericJob, source, candidate,
+      handoff: createApplicationHandoff(genericJob, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/generic.pdf", expectedConfirmation: "Thank you for applying" });
+    const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+      "/tmp/profile", { verify: async () => ({ jobId: genericJob.id,
+        sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
+        path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+      validateOfficial: async () => true, browserFactory: async () => ({ browser: {
+        currentUrl: () => page.url, navigate: async () => page,
+        fillBatch: async () => page, act: async () => page, submit,
+      }, close: async () => {} }) });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("job-bound requisition reference");
     expect(submit).not.toHaveBeenCalled();
   });
 

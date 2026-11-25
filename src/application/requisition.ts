@@ -37,19 +37,14 @@ export function isOriginalRequisition(page: BrowserSnapshot, job: DiscoveredJob)
   return page.url === job.applicationUrl;
 }
 
-/** A same-host receipt must not be for a different requisition-shaped URL. */
-export function hasConflictingReceiptUrl(jobId: string, applicationUrl: string, receiptUrl: string): boolean {
+/** A receipt must remain on the original job path until a provider can prove another receipt format. */
+export function hasUnboundReceiptUrl(jobId: string, applicationUrl: string, receiptUrl: string): boolean {
   const receipt = new URL(receiptUrl);
   const original = new URL(applicationUrl);
   if (receipt.protocol !== "https:" || receipt.origin !== original.origin) return true;
   const bound = stablePath({ id: jobId, applicationUrl });
-  if (!bound) return false;
+  if (!bound) return receipt.href !== original.href;
   const parts = segments(receiptUrl);
   if (!parts) return true;
-  if (!bound.parts.slice(0, bound.index).every((part, index) => parts[index] === part)) return false;
-  const candidate = parts[bound.index];
-  const expected = bound.parts[bound.index]!;
-  if (!candidate || candidate === expected) return false;
-  return !new Set(["thank-you", "thankyou", "thanks", "confirmation", "success", "complete", "submitted"])
-    .has(candidate);
+  return !bound.parts.slice(0, bound.index + 1).every((part, index) => parts[index] === part);
 }

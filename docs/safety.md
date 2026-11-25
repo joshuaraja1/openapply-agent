@@ -14,8 +14,8 @@ OpenApply prepares, explains, and audits. It does not assume that every visible 
 - A privacy, AI-use, conflict-of-interest, export-control, or criminal-history attestation that has not been reviewed.
 - Final submission when the user's policy requires approval.
 - A later form step that cannot be tied to the original requisition. A receipt
-  that redirects to another requisition remains `submission-uncertain` and must
-  be inspected before any retry.
+  that leaves the original job path remains `submission-uncertain` and must be
+  inspected before any retry.
 
 ## Responsible use
 

@@ -38,7 +38,7 @@ describe("submission verification", () => {
       submit: vi.fn(async () => { currentUrl = "https://jobs.example.com/apply/654321/thank-you";
         return "Thank you for applying"; }) };
     await expect(submitApplication(workflow, browser, jobId, "1:0",
-      "Thank you for applying", boundHandoff)).rejects.toThrow("different requisition");
+      "Thank you for applying", boundHandoff)).rejects.toThrow("not bound to the original requisition");
     expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
     expect(browser.submit).toHaveBeenCalledOnce();
   });
