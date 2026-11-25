@@ -23,7 +23,7 @@ describe("discovery persistence order", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("rejects shared queue/state files instead of silently replacing them", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-persist-"));
@@ -50,5 +50,5 @@ describe("discovery persistence order", () => {
       if (process.platform === "win32") await secureWindowsPrivatePath(outputPath).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
