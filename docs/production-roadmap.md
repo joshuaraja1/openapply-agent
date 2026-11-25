@@ -21,8 +21,35 @@ verified ATS board leads [#84](https://github.com/joshuaraja1/openapply-agent/pu
 [#85](https://github.com/joshuaraja1/openapply-agent/pull/85), and a private
 first-run editor [#89](https://github.com/joshuaraja1/openapply-agent/pull/89)
 with profile compilation [#91](https://github.com/joshuaraja1/openapply-agent/pull/91).
+Additional drafts add SmartRecruiters lead verification
+[#92](https://github.com/joshuaraja1/openapply-agent/pull/92), canonical posting
+deduplication [#93](https://github.com/joshuaraja1/openapply-agent/pull/93),
+Windows ACL smoke serialization [#94](https://github.com/joshuaraja1/openapply-agent/pull/94),
+and exact U.S. authorization selects in the owned browser
+[#95](https://github.com/joshuaraja1/openapply-agent/pull/95).
 These changes are **drafts, not merged into `main`**. Their combined local tree
 passes tests, but independent reviews and live beta validation are pending.
+
+## Public release decision
+
+The release owner should mark OpenApply ready for unattended public use only
+after all of these have recorded evidence:
+
+| Gate | Required evidence | Current state |
+| --- | --- | --- |
+| Reviewed code | Merge the draft PR stack after independent bug and security reviews; keep required CI green on the combined branch | Open: drafts are unmerged and independent reviews are pending |
+| Supported sites | Provider-specific multi-step fixtures, conditional-field handoffs, and a low-volume consented real-site smoke for each advertised provider | Open: form coverage and live validation are incomplete |
+| Candidate setup | Complete private first-run setup, dry-run preview, account and mailbox consent, and safe handoff/resume UI | Open: editor and compilation exist only in drafts |
+| Distribution | Signed installers, verified browser installation, upgrade/rollback, export/delete, and clean uninstall on advertised OSes | Open: no consumer installer or updater |
+| Reliability and speed | The stage latency, crash/retry, job-bound confirmation, privacy, and two-week beta targets in [release requirements](autonomy-release-requirements.md) | Open: no completed release evidence set |
+| External release inputs | Product OAuth registrations where offered, signing credentials, independent assessment, privacy and site-terms review, and beta candidate consent | Open: requires owner and third-party participation |
+
+The release decision must state exactly which operating systems, providers,
+and form types passed. Unsupported sites and questions continue to hand off;
+"any job site" cannot be a universal coverage claim. Discovery should search
+recent jobs first and backfill older active jobs when the fresh tier is exhausted.
+It must validate each lead against the employer posting before applying and
+respect the candidate's daily cap.
 
 The product promise below is **not yet a release claim**. Complete provider
 adapters, a full first-run setup and handoff UI, signed installer and updater,
