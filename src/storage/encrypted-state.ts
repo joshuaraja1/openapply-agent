@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { userInfo } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type { ApplicationStateStore } from "./contracts.js";
 import { assertWindowsPrivatePath, ensureWindowsPrivateDirectory, secureWindowsPrivatePath }
   from "./windows-acl.js";
@@ -68,7 +69,21 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
 
   private async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
     const directory = dirname(this.path);
-    if (process.platform === "win32") await ensureWindowsPrivateDirectory(directory);
+    if (process.platform === "win32") {
+      try {
+        if (directory === resolve(join(userInfo().homedir, ".openapply-agent"))) {
+          await ensureWindowsPrivateDirectory(directory);
+        } else {
+          await assertWindowsPrivatePath(directory);
+        }
+      }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new Error("Windows custom state directory must exist with a private ACL");
+        }
+        throw error;
+      }
+    }
     else await mkdir(directory, { recursive: true, mode: 0o700 });
     const metadata = await stat(directory);
     if (process.getuid && metadata.uid !== process.getuid()) throw new Error("State directory has another owner");

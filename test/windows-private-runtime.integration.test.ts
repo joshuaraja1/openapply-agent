@@ -16,6 +16,8 @@ describe.skipIf(process.platform !== "win32")("Windows private runtime paths", (
       const close = vi.fn(async () => {});
       const launch = vi.fn(async () => ({ close })) as unknown as
         NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
+      await expect(launchBrowser({ profileDirectory: join(root, "missing", "profile"), launch }))
+        .rejects.toThrow("profile parent must exist");
       const browser = await launchBrowser({ profileDirectory, launch });
       try {
         await assertWindowsPrivatePath(profileDirectory);
@@ -33,6 +35,10 @@ describe.skipIf(process.platform !== "win32")("Windows private runtime paths", (
     try {
       await secureWindowsPrivatePath(root);
       const store = new EncryptedApplicationStateStore<{ stage: string }>(statePath, Buffer.alloc(32, 7));
+      const nested = new EncryptedApplicationStateStore(join(root, "missing", "state.enc.json"),
+        Buffer.alloc(32, 7));
+      await expect(nested.compareAndSwap("job-1", undefined, { stage: "ready" }))
+        .rejects.toThrow("state directory must exist");
       expect(await store.compareAndSwap("job-1", undefined, { stage: "ready" })).toBe(1);
       await assertWindowsPrivatePath(statePath);
       expect(await readFile(statePath, "utf8")).not.toContain("ready");

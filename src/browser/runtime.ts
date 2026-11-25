@@ -1,5 +1,6 @@
 import { lstat, mkdir, rmdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { userInfo } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { chromium, type BrowserContext } from "playwright";
 import { assertWindowsPrivatePath, ensureWindowsPrivateDirectory, secureWindowsPrivatePath }
   from "../storage/windows-acl.js";
@@ -18,7 +19,19 @@ export interface BrowserLaunchOptions {
 export async function launchBrowser(options: BrowserLaunchOptions): Promise<BrowserRuntime> {
   const profileDirectory = resolve(options.profileDirectory);
   if (process.platform === "win32") {
-    await ensureWindowsPrivateDirectory(dirname(profileDirectory));
+    const parentDirectory = dirname(profileDirectory);
+    try {
+      if (parentDirectory === resolve(join(userInfo().homedir, ".openapply-agent"))) {
+        await ensureWindowsPrivateDirectory(parentDirectory);
+      } else {
+        await assertWindowsPrivatePath(parentDirectory);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("Windows custom browser profile parent must exist with a private ACL");
+      }
+      throw error;
+    }
     await ensureWindowsPrivateDirectory(profileDirectory);
   } else {
     await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
