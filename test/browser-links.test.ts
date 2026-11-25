@@ -53,7 +53,8 @@ describe("browser lead extraction", () => {
   });
 
   it("keeps external employer links from existing BrowserOS generic searches", () => {
-    const leads = extractBrowserLeads("[Role](https://employer.example/careers/123)", context("generic"));
-    expect(leads.map((lead) => lead.url)).toEqual(["https://employer.example/careers/123"]);
+    const leads = extractBrowserLeads(
+      "[Role](https://employer.example/careers/123?jobId=123&access_token=secret)", context("generic"));
+    expect(leads.map((lead) => lead.url)).toEqual(["https://employer.example/careers/123?jobId=123"]);
   });
 });
