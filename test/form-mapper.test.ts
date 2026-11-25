@@ -56,6 +56,15 @@ describe("deterministic application field mapping", () => {
     expect(plan.blockers).toContain("Required field needs an answer: Your race");
     expect(plan.actions.map(({ name }) => name)).toEqual(["LinkedIn Profile", "Resume"]);
   });
+  it("fills only an exact approved plain-text answer after a handoff", () => {
+    const plan = planApplicationForm(snapshot(field("1", "Salary expectation"),
+      field("2", "Your race")), candidate, "/tmp/resume.pdf", {
+      approvedHumanAnswers: new Map([["Salary expectation", "125000"], ["Your race", "Prefer not to say"]]),
+      allowMissingResume: true,
+    });
+    expect(plan.actions).toContainEqual(expect.objectContaining({ name: "Salary expectation", value: "125000" }));
+    expect(plan.blockers).toContain("Required field needs an answer: Your race");
+  });
   it("maps only supported identity fields and a resume", () => {
     const plan = planApplicationForm(snapshot(
       field("1", "First name"), field("2", "Last name"), field("3", "Email"),

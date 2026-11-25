@@ -20,4 +20,18 @@ describe("exact human answer approval", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  it("accepts page ID zero only when the expected owned-browser handoff is job-bound", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-owned-answers-"));
+    try {
+      const path = join(root, "answers.json");
+      await writeFile(path, JSON.stringify({ version: 1, jobId: "job-2", browserPageId: 0,
+        approveFinalSubmission: true, answers: [{ field: "Salary expectation", value: "125000" }] }),
+      { mode: 0o600 });
+      expect((await loadApprovedHumanAnswers(path, "job-2", 0)).answers.get("Salary expectation"))
+        .toBe("125000");
+      await expect(loadApprovedHumanAnswers(path, "job-3", 0)).rejects.toThrow("another application tab");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

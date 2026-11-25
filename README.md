@@ -117,6 +117,11 @@ after fixing the blocker. For an unknown required answer, provide a private
 [`OPENAPPLY_APPROVED_ANSWERS` file](examples/human-answer-approval.example.json)
 that names the exact job, tab, field, and value. The runner attaches to the
 saved tab and rechecks the official posting and résumé before continuing.
+For the owned runtime, `OPENAPPLY_RESUME_JOB_ID` reopens the original requisition
+in the same private browser profile and refills the verified résumé. An approved
+answers file uses `browserPageId: 0`; its job ID and exact field labels still
+have to match. A challenge that does not preserve its completion in the browser
+profile can pause again and needs manual handling.
 If you manually finish a CAPTCHA or MFA and submit in that tab, use
 `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> OPENAPPLY_CONFIRMATION_ATTESTATION=<private-attestation-file> npm run application:run`.
 It records submission only when the configured employer confirmation is visible

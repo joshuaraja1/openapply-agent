@@ -64,6 +64,12 @@ to verify the employer confirmation in that same tab before recording success.
 The attestation follows `examples/manual-confirmation-attestation.example.json`
 and is your explicit statement that the confirmation belongs to this job.
 
+For an owned-browser handoff, set `browserPageId` to `0` in the approved answers
+file. Resume with the same `OPENAPPLY_RESUME_JOB_ID` command. OpenApply reopens
+the verified requisition in its private profile and refills the résumé and
+approved plain-text answers. It cannot restore unsaved in-page challenge state;
+if CAPTCHA or MFA completion was not saved to that profile, the run pauses again.
+
 On macOS, build the project, copy `examples/schedule.example.json` to a private
 path, set its paths and interval, then install a LaunchAgent. It runs at login
 and each interval while the user session is active. The installer writes a
