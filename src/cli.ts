@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { createApplicationHandoff } from "./application/handoff.js";
-import { mergePendingQueue } from "./application/queue-merge.js";
+import { reconcileReportedQueue } from "./application/queue-reconcile.js";
+import { selectRankedJobs } from "./application/ranked-queue.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "./candidate/schema.js";
 import { discoveryInputSchema } from "./config.js";
-import { evaluateJob, freshnessPriority, markJobsReported, selectFreshnessTier } from "./discovery.js";
-import { scoreJob } from "./matching/score.js";
+import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
 import { persistDiscoveryOutput } from "./storage/discovery-output.js";
@@ -27,6 +27,17 @@ const [input, candidate, preferences] = await Promise.all([
 ]);
 const state = await json(statePath).catch(() => ({ jobs: {} })) as DiscoveryState;
 const now = new Date();
+let previousQueue: { job: { id: string } }[] = [];
+try {
+  const previous = JSON.parse(await readFile(outputPath, "utf8")) as { queue?: unknown };
+  if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is { job: { id: string } } =>
+    typeof entry === "object" && entry !== null && "job" in entry
+    && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
+    && typeof entry.job.id === "string");
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+const previouslyQueued = new Set(previousQueue.map((entry) => entry.job.id));
 const batch = await fetchSourceBatch(input.sources, input.maxJobsPerSource, now);
 const fetched = batch.jobs;
 for (const failure of batch.failures) {
@@ -41,34 +52,21 @@ const evaluated = fetched.flatMap((job) => {
     lastSeenAt: now.toISOString(),
     ...(previous?.reportedAt ? { reportedAt: previous.reportedAt } : {}),
   };
-  return result && !previous?.reportedAt ? [result] : [];
+  return result ? [result] : [];
 });
-const tier = selectFreshnessTier(evaluated, input.preferredFreshnessHours, input.maximumFreshnessHours, now);
-const newQueue = tier.jobs
-  .map((job) => ({ job, match: scoreJob(job, candidate, preferences) }))
-  .filter((entry) => entry.match.eligible)
-  .sort((a, b) => freshnessPriority(a.job, input.preferredFreshnessHours, now)
-    - freshnessPriority(b.job, input.preferredFreshnessHours, now)
-    || b.match.score - a.match.score)
-  .slice(0, preferences.applicationPolicy.dailyHardCap)
+const newQueue = selectRankedJobs(evaluated, state, previouslyQueued, candidate, preferences,
+  input.preferredFreshnessHours, input.maximumFreshnessHours, now)
   .map(({ job, match }) => ({
     job,
     match,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-markJobsReported(state, newQueue.map((entry) => entry.job.id), now);
-let previousQueue: typeof newQueue = [];
-try {
-  const previous = JSON.parse(await readFile(outputPath, "utf8")) as { queue?: unknown };
-  if (Array.isArray(previous.queue)) previousQueue = previous.queue.filter((entry): entry is (typeof newQueue)[number] =>
-    typeof entry === "object" && entry !== null && "job" in entry
-    && typeof entry.job === "object" && entry.job !== null && "id" in entry.job
-    && typeof entry.job.id === "string");
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-}
-const queue = mergePendingQueue(previousQueue, newQueue);
+const queue = newQueue;
+reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
+markJobsReported(state, queue.map((entry) => entry.job.id), now);
+const queuedTier = selectFreshnessTier(queue.map((entry) => entry.job),
+  input.preferredFreshnessHours, input.maximumFreshnessHours, now);
 
-await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: tier.tier, queue }, statePath, state);
+await persistDiscoveryOutput(outputPath, { generatedAt: now.toISOString(), tier: queuedTier.tier, queue }, statePath, state);
 console.log(`Prepared ${queue.length} application handoff(s) in ${outputPath}`);

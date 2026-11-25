@@ -34,6 +34,16 @@ roles backfill the remaining capacity. The example has no age cutoff; set
 time is never described as a verified posting time. The daily cap and
 deduplication still apply.
 
+Each scheduled discovery refreshes pending jobs against the current official
+source response and ranks the whole queue again. A job that disappeared from
+the official response is removed from that run's queue; a source outage likewise
+pauses its pending jobs until the source responds. A dropped queue entry remains
+eligible for rediscovery if it reappears. The encrypted application checkpoint
+still prevents a confirmed submission from being repeated. Discovery keeps all
+eligible active jobs in the ranked queue; the application runner enforces the
+daily cap after skipping jobs with terminal or waiting checkpoints, so those
+jobs cannot consume every queue slot ahead of usable backfill.
+
 ## 4. Tailor and verify
 
 For each queue item:
