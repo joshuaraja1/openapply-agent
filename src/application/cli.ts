@@ -41,7 +41,14 @@ if (answerPath && !resumedJobId) throw new Error("Approved answers require an ex
 const pending = resumedJobId ? await workflow.current(resumedJobId) : undefined;
 const humanAnswerApproval = answerPath
   ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
-const endpoint = process.env.OPENAPPLY_BROWSER_ENDPOINT ?? pkg.browserEndpoint;
+if (pkg.browserRuntime === "owned" && (pkg.browserEndpoint || process.env.OPENAPPLY_BROWSER_ENDPOINT)) {
+  throw new Error("Owned application package cannot use a BrowserOS endpoint");
+}
+const endpoint = pkg.browserRuntime === "owned" ? undefined
+  : process.env.OPENAPPLY_BROWSER_ENDPOINT ?? pkg.browserEndpoint;
+if (pkg.browserRuntime === "browseros" && !endpoint) {
+  throw new Error("BrowserOS application package requires its saved endpoint");
+}
 if (endpoint) assertLocalBrowserEndpoint(endpoint);
 if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
   throw new Error("BrowserOS endpoint differs from the saved application package");

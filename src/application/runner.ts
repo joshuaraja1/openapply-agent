@@ -36,9 +36,17 @@ export const applicationPackageSchema = z.object({
   resumeSource: z.object({ latex: z.string().min(1), fingerprint: z.string().length(64),
     renderToken: z.string().length(64), claimIds: z.array(z.string()).min(1) }),
   resumePdfPath: z.string().min(1),
+  browserRuntime: z.enum(["browseros", "owned"]).optional(),
   browserEndpoint: z.url().optional(),
   authenticationPolicyPath: z.string().min(1).optional(),
   expectedConfirmation: z.string().min(1).optional(),
+}).superRefine((pkg, context) => {
+  if (pkg.browserRuntime === "owned" && pkg.browserEndpoint) {
+    context.addIssue({ code: "custom", message: "Owned application package cannot have a BrowserOS endpoint" });
+  }
+  if (pkg.browserRuntime === "browseros" && !pkg.browserEndpoint) {
+    context.addIssue({ code: "custom", message: "BrowserOS application package requires an endpoint" });
+  }
 });
 
 export type ApplicationPackage = z.infer<typeof applicationPackageSchema>;

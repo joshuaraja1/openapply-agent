@@ -65,7 +65,7 @@ role-specific PDF in Overleaf, creates a private application package, fills
 supported fields, and records the resulting checkpoint.
 
 For a single application, create private render input containing the selected
-`job`, its configured official `source`, `candidate`, BrowserOS endpoint,
+`job`, its configured official `source`, `candidate`, browser settings,
 Overleaf project URL, and a private output directory. Generate the tailored
 PDF and application package with:
 
@@ -73,6 +73,12 @@ Use [the synthetic render-input example](examples/render-input.example.json)
 for the field structure. Copy a real `job` from the discovery queue, its exact
 configured `source`, and your private candidate profile. Use the BrowserOS
 endpoint shown by your installation and a dedicated private Overleaf project.
+To render with OpenApply's owned Chromium profile, set `"browserRuntime": "owned"`
+and remove `browserEndpoint` from the private input. Sign in to Overleaf in that
+profile using `npm run browser:open` first. The generated package stays bound
+to the owned runtime; `application:run` uses the same profile and rejects a
+BrowserOS endpoint for that package. The scheduled queue still uses BrowserOS
+until owned application recovery and handoffs pass their release gates.
 `expectedConfirmation` must match an employer confirmation after submission;
 without it, the runner pauses for a human instead of reporting success.
 
