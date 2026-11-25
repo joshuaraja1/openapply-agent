@@ -65,32 +65,28 @@ describe("daily ranked queue", () => {
       older: { firstSeenAt: now.toISOString(), lastSeenAt: now.toISOString(), reportedAt: now.toISOString() },
     } };
     const selected = selectRankedJobs([job("older", 336), job("recent", 3), job("week", 168)],
-      state, new Set(["older"]), candidate, preferences, 48, null, now);
+      candidate, preferences, 48, null, now);
     expect(selected.map(({ job: item }) => item.id)).toEqual(["recent", "week", "older"]);
     expect(selected.length).toBeGreaterThan(preferences.applicationPolicy.dailyHardCap);
     reconcileReportedQueue(state, new Set(["older"]), new Set(selected.map(({ job: item }) => item.id)));
     expect(state.jobs.older?.reportedAt).toBeDefined();
 
     const backfill = selectRankedJobs([job("older", 336), job("week", 168)],
-      state, new Set(["older"]), candidate, preferences, 48, null, now);
+      candidate, preferences, 48, null, now);
     expect(backfill.map(({ job: item }) => item.id)).toEqual(["week", "older"]);
   });
 
-  it("excludes already reported jobs outside the pending queue and applies the age limit", () => {
-    const state: DiscoveryState = { jobs: {
-      submitted: { firstSeenAt: now.toISOString(), lastSeenAt: now.toISOString(), reportedAt: now.toISOString() },
-    } };
+  it("recovers reported jobs after queue loss and still applies the age limit", () => {
     const selected = selectRankedJobs([job("submitted", 2), job("week", 168), job("recent", 4)],
-      state, new Set(), candidate, preferences, 48, 120, now);
-    expect(selected.map(({ job: item }) => item.id)).toEqual(["recent"]);
+      candidate, preferences, 48, 120, now);
+    expect(selected.map(({ job: item }) => item.id)).toEqual(["submitted", "recent"]);
   });
 
   it("does not keep a previous job that vanished from the official source", () => {
     const state: DiscoveryState = { jobs: {
       closed: { firstSeenAt: now.toISOString(), lastSeenAt: now.toISOString(), reportedAt: now.toISOString() },
     } };
-    const selected = selectRankedJobs([job("recent", 4)], state, new Set(["closed"]),
-      candidate, preferences, 48, null, now);
+    const selected = selectRankedJobs([job("recent", 4)], candidate, preferences, 48, null, now);
     expect(selected.map(({ job: item }) => item.id)).toEqual(["recent"]);
     reconcileReportedQueue(state, new Set(["closed"]), new Set(["recent"]));
     expect(state.jobs.closed?.reportedAt).toBeUndefined();

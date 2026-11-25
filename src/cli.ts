@@ -51,7 +51,7 @@ const evaluated = fetched.flatMap((job) => {
   };
   return result ? [result] : [];
 });
-const newQueue = selectRankedJobs(evaluated, state, previouslyQueued, candidate, preferences,
+const newQueue = selectRankedJobs(evaluated, candidate, preferences,
   input.preferredFreshnessHours, input.maximumFreshnessHours, now)
   .map(({ job, match }) => ({
     job,

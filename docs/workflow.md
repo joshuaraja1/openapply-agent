@@ -44,6 +44,9 @@ still prevents a confirmed submission from being repeated. Discovery keeps all
 eligible active jobs in the ranked queue; the application runner enforces the
 daily cap after skipping jobs with terminal or waiting checkpoints, so those
 jobs cannot consume every queue slot ahead of usable backfill.
+If the queue file is lost, discovery can reconstruct it from current official
+postings: `reportedAt` means queued, while encrypted application checkpoints
+prevent a completed or uncertain submission from being repeated.
 
 ## 4. Tailor and verify
 

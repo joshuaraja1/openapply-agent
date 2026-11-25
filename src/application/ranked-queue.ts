@@ -1,19 +1,18 @@
 import type { CandidateProfile, SearchPreferences } from "../candidate/schema.js";
 import { freshnessPriority, selectFreshnessTier } from "../discovery.js";
 import { scoreJob, type JobMatch } from "../matching/score.js";
-import type { DiscoveredJob, DiscoveryState } from "../types.js";
+import type { DiscoveredJob } from "../types.js";
 
 export interface RankedJob { job: DiscoveredJob; match: JobMatch }
 
 /** Refresh pending entries from this run's official postings before ranking. */
 export function selectRankedJobs(
-  activeJobs: DiscoveredJob[], state: DiscoveryState, previouslyQueued: ReadonlySet<string>,
-  candidate: CandidateProfile, preferences: SearchPreferences,
+  activeJobs: DiscoveredJob[], candidate: CandidateProfile, preferences: SearchPreferences,
   preferredHours: number, maximumHours: number | null, now: Date,
 ): RankedJob[] {
-  const candidates = activeJobs.filter((job) =>
-    !state.jobs[job.id]?.reportedAt || previouslyQueued.has(job.id));
-  const { jobs } = selectFreshnessTier(candidates, preferredHours, maximumHours, now);
+  // reportedAt only means queued. The encrypted application checkpoint decides
+  // whether a job was submitted, including after the queue file is lost.
+  const { jobs } = selectFreshnessTier(activeJobs, preferredHours, maximumHours, now);
   const ranked = jobs.map((job) => ({ job, match: scoreJob(job, candidate, preferences) }))
     .filter((entry) => entry.match.eligible)
     .sort((a, b) => freshnessPriority(a.job, preferredHours, now)
