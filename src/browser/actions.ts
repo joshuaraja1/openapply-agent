@@ -181,6 +181,18 @@ export class AgentBrowser {
     if (!handle || !(await handle.evaluate((element) => element.isConnected))) {
       throw new Error("Portal credential submit control changed");
     }
+    const formTarget = await handle.evaluate((element) => {
+      const form = (element as HTMLButtonElement).form;
+      return form ? { method: form.method.toLowerCase(), action: form.action } : null;
+    });
+    if (formTarget) {
+      const destination = new URL(formTarget.action);
+      if (formTarget.method !== "post" || destination.protocol !== "https:"
+        || destination.username || destination.password
+        || destination.hostname.toLowerCase() !== new URL(this.currentUrl()).hostname.toLowerCase()) {
+        throw new Error("Portal credential form has an unsafe submission destination");
+      }
+    }
     this.controls.clear();
     this.generation += 1;
     await handle.click();

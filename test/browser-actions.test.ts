@@ -136,6 +136,8 @@ describe("agent browser controls", () => {
             : path === "/challenge" ? '<form><label>Email<input name="email"></label>'
             + '<label>Password<input name="password" type="password"></label>'
             + '<button>Sign in</button><p>Verify you are human</p></form>'
+            : path === "/unsafe-get" ? '<form action="/home" method="get"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
             : "<h1>Account ready</h1>";
           await route.fulfill({ contentType: "text/html", body });
         });
@@ -149,6 +151,9 @@ describe("agent browser controls", () => {
         await browser.navigate("https://jobs.example.com/challenge");
         await expect(browser.authenticate("candidate@example.com", "private-password"))
           .rejects.toThrow("human review");
+        await browser.navigate("https://jobs.example.com/unsafe-get");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("unsafe submission destination");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
     }, 30_000,
   );
