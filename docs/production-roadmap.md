@@ -5,26 +5,31 @@ The remaining implementation sequence and measurable release gates are in
 
 ## Current implementation status
 
-The repository has a scheduled discovery-to-application CLI, official-source
-validation, evidence-backed Jake résumé generation, Overleaf PDF compilation,
-encrypted local state with macOS Keychain or Linux Secret Service keys, a Windows
-Credential Manager backend for secrets, a persistent BrowserOS neo adapter,
-guarded form filling and submission confirmation, scoped mailbox OAuth and
-email-code entry, exact-domain login and account creation, and same-tab human
-recovery. These paths have automated tests and the merged changes passed Bugbot,
-security review, CI, and CodeQL.
+The merged CLI supports scheduled discovery and guarded applications, official
+source validation, evidence-backed Jake résumés, Overleaf compilation, encrypted
+state, scoped mailbox OAuth, exact-domain account policy, and BrowserOS handoffs.
+Its owned browser supports individual applications and PDF rendering. Main
+branch protection requires Node 22/24 verification, browser and Windows smoke
+tests, secret scanning, dependency audit, and CodeQL.
 
-The product promise below is **not yet a release claim**. The scheduled queue
-still requires separately installed BrowserOS neo; the single-job path can
-select an owned browser for Overleaf and simple application forms. The browser
-is not bundled into an app, and owned human handoff recovery is incomplete.
-Greenhouse and Ashby have a small set of exact identity-field aliases;
-complete provider-specific application adapters, automated visual PDF inspection
-beyond text geometry checks, remaining Windows BrowserOS artifact, application
-package, and state-key gates,
-first-run user UI,
-signed installer/updater, and live provider beta validation remain open. The
-general-availability gates in this document have not been met.
+As of November 24, 2026, the draft PR stack adds owned-browser scheduled runs
+[#81](https://github.com/joshuaraja1/openapply-agent/pull/81), limited owned
+handoff recovery [#87](https://github.com/joshuaraja1/openapply-agent/pull/87),
+dead-process profile-lock recovery [#88](https://github.com/joshuaraja1/openapply-agent/pull/88),
+hard-requirement matching [#86](https://github.com/joshuaraja1/openapply-agent/pull/86),
+verified ATS board leads [#84](https://github.com/joshuaraja1/openapply-agent/pull/84)
+[#85](https://github.com/joshuaraja1/openapply-agent/pull/85), and a private
+first-run editor [#89](https://github.com/joshuaraja1/openapply-agent/pull/89)
+with profile compilation [#91](https://github.com/joshuaraja1/openapply-agent/pull/91).
+These changes are **drafts, not merged into `main`**. Their combined local tree
+passes tests, but independent reviews and live beta validation are pending.
+
+The product promise below is **not yet a release claim**. Complete provider
+adapters, a full first-run setup and handoff UI, signed installer and updater,
+broader deduplication, live site coverage measurements, and the beta gates in
+the [release requirements](autonomy-release-requirements.md) remain open. The
+browser is not bundled into a consumer app. BrowserOS neo remains optional only
+after the owned queue stack merges and its beta gates pass.
 
 ## Product promise
 
@@ -60,12 +65,15 @@ The application state machine is durable and idempotent:
 
 ```text
 discovered -> validated -> matched -> tailored -> rendered -> applying
-  -> waiting-email-code | waiting-human
-  -> submitted | blocked | skipped | failed-retryable
+  -> waiting-human | submit-claimed | blocked
+submit-claimed -> submitted | submission-uncertain
+waiting-human -> applying | submitted | blocked
 ```
 
-Every transition records its input fingerprint and outcome so a crash or restart
-does not duplicate an application or repeat a submission.
+The rendered checkpoint stores the résumé and source fingerprints. The submit
+claim is stored before the click; an uncertain click is never retried
+automatically. Complete crash/restart and cross-source deduplication tests are
+still release gates.
 
 ## Pull-request plan
 
