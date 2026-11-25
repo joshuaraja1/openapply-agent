@@ -33,7 +33,7 @@ const source: ResumeSource = { latex, renderToken, fingerprint: createHash("sha2
 
 async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean;
   overlap?: boolean; link?: boolean; subject?: string;
-  extraLink?: string } = {}): Promise<void> {
+  extraLink?: string; edgeGraphic?: boolean; darkBackground?: boolean } = {}): Promise<void> {
   const pdf = await PDFDocument.create();
   pdf.setSubject(options.subject ?? `OpenApply:${renderToken}`);
   const page = pdf.addPage([612, 792]);
@@ -41,6 +41,8 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
   page.drawText(options.title ?? "Backend Engineer", { x: 40, y: 720 });
   page.drawText("Example Co", { x: 40, y: 700 });
   page.drawText(options.claim ?? "Built Python services", { x: options.offPage ? 800 : 40, y: 680 });
+  if (options.edgeGraphic) page.drawRectangle({ x: 0, y: 350, width: 2, height: 50 });
+  if (options.darkBackground) page.drawRectangle({ x: 0, y: 0, width: 612, height: 792 });
   if (options.overlap) page.drawText("Overlapping sentence", { x: 40, y: 680 });
   if (options.link !== false) {
     const annotation = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 730, 150, 745],
@@ -99,6 +101,19 @@ describe("job-bound PDF verification", () => {
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("unapproved link");
       await writeFile(path, "Not a PDF".repeat(20));
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("not a PDF");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("renders the page image and catches graphical clipping invisible to text geometry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
+    try {
+      const path = join(root, "resume.pdf");
+      await fixture(path, { edgeGraphic: true });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("ink too close");
+      await fixture(path, { darkBackground: true });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("excessive ink");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
