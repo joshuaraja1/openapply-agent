@@ -1,21 +1,31 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { open, rename, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { assertPrivateFile, ensurePrivateDirectory } from "./private-path.js";
+import { secureWindowsPrivatePath } from "./windows-acl.js";
 
 async function atomicJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${randomUUID()}.tmp`;
+  const destination = resolve(path);
+  await ensurePrivateDirectory(dirname(destination));
+  try {
+    await assertPrivateFile(destination);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const temporary = `${destination}.${randomUUID()}.tmp`;
   try {
     const file = await open(temporary, "wx", 0o600);
     try {
+      if (process.platform === "win32") await secureWindowsPrivatePath(temporary);
       await file.writeFile(`${JSON.stringify(value, null, 2)}\n`);
       await file.sync();
     } finally {
       await file.close();
     }
-    await rename(temporary, path);
+    await rename(temporary, destination);
+    await assertPrivateFile(destination);
     if (process.platform !== "win32") {
-      const directory = await open(dirname(path), "r");
+      const directory = await open(dirname(destination), "r");
       try {
         await directory.sync();
       } finally {

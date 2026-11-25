@@ -27,6 +27,11 @@ and source before retrying manually.
    a different ATS host still needs an explicit entry.
 3. Run discovery and the queue runner with the same output path:
 
+   Queue and discovery-state files contain job and candidate-derived data.
+   Their parent directories and existing files must be owner-only on every OS.
+   Move older shared files into a private directory before running; the writer
+   rejects them rather than silently changing permissions.
+
 ```bash
 OPENAPPLY_INPUT=/private/discovery-input.json \
 OPENAPPLY_CANDIDATE=/private/candidate-profile.json \
