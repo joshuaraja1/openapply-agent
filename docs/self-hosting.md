@@ -16,9 +16,11 @@ to the operating-system secret store, never to this repository or JSON files.
    private copies of templates 01–08 in `~/.openapply-agent/onboarding`, saves
    with conflict detection, and preserves completed answers. `npm run setup:init`
    remains available for users who prefer editing the files directly.
-3. Complete the structured blocks in templates 01–03, then run
-   [`profile:compile`](../templates/user/README.md) with paths to those private
-   files. Each usable matching skill needs an approved work-history claim.
+3. Complete the structured blocks in templates 01–03, then click **Compile
+   profile** in the local editor or run [`profile:compile`](../templates/user/README.md)
+   with paths to those private files. Each usable matching skill needs an
+   approved work-history claim. Changed source facts require moving the old
+   compiled outputs before compiling again.
 4. Configure your own target roles, official source list, daily cap, Overleaf
    project, and browser-search URLs. Sign in through your dedicated local
    browser profile. A company portal may require its own account.

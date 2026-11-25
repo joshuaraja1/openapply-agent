@@ -45,7 +45,7 @@ npm run browser:doctor
 
 ## Quick start
 
-1. Run `npm run setup:ui` to edit private user templates in a local browser, or use `npm run setup:init` and edit the Markdown files directly. Complete the structured JSON blocks in files 01–03, then run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON. See [self-hosting](docs/self-hosting.md) for your own accounts and optional OAuth client ID.
+1. Run `npm run setup:ui` to edit private user templates in a local browser, or use `npm run setup:init` and edit the Markdown files directly. Complete the structured JSON blocks in files 01–03, then click **Compile profile** or run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON. See [self-hosting](docs/self-hosting.md) for your own accounts and optional OAuth client ID.
 2. Copy the remaining JSON files in `examples/` and replace the examples with private, verified data.
 3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
