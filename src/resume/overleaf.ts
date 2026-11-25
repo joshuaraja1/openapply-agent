@@ -60,6 +60,9 @@ export async function renderOverleafResume(
   options: { downloadsDirectory?: string; verify?: typeof verifyResumePdf } = {},
 ): Promise<VerifiedResumeArtifact> {
   assertOverleafProjectUrl(projectUrl);
+  if (process.platform === "win32") {
+    throw new Error("BrowserOS Overleaf downloads require Windows private artifact support");
+  }
   const downloadsDirectory = options.downloadsDirectory ?? join(userInfo().homedir, "Downloads");
   requireSuccess(await client.callTool({ name: "name_session", arguments: {
     name: "resume rendering", category: "dev-tools", summary: "Compile a private role-specific résumé in Overleaf",
@@ -114,7 +117,7 @@ export async function renderOverleafResume(
     const metadata = await lstat(directory);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()
       || (process.getuid && metadata.uid !== process.getuid())
-      || (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)) {
+      || (metadata.mode & 0o077) !== 0) {
       throw new Error("Résumé artifact directory must be private to this user");
     }
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
