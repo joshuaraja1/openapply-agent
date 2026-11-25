@@ -34,7 +34,8 @@ if (-not $acl.AreAccessRulesProtected) { throw 'Private path inherits access rul
 $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 if ($rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $identity.Value -or
   $rules[0].AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or
-  -not ($rules[0].FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl)) {
+  ($rules[0].FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne
+    [System.Security.AccessControl.FileSystemRights]::FullControl) {
   throw 'Private path has non-owner access rules'
 }
 if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $identity.Value) {
@@ -54,7 +55,8 @@ async function runAcl(path: string, action: "secure" | "assert"): Promise<void> 
       env: { ...process.env, OPENAPPLY_ACL_PATH: path, OPENAPPLY_ACL_ACTION: action },
       timeout: 15_000, maxBuffer: 16_384,
     });
-  } catch {
+  } catch (error) {
+    if (process.env.OPENAPPLY_ACL_TEST_DEBUG === "1") throw error;
     throw new Error("Windows private path ACL is unsafe or could not be checked");
   }
 }
