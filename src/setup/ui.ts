@@ -4,7 +4,9 @@ import { open, rename, unlink } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { assertPrivateFile, readPrivateFile } from "../storage/private-path.js";
+import { createPrivateOutput } from "../storage/private-output.js";
 import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
+import { compileCandidateMarkdown, compileSearchMarkdown } from "../candidate/markdown.js";
 import { initializeUserWorkspace, userTemplateFiles } from "./init.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -55,6 +57,23 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
           return { name, content, sha256: digest(content), complete: !content.includes("{{") };
         }));
         return send(response, 200, { files });
+      }
+      if (url.pathname === "/api/compile" && request.method === "POST") {
+        const [profile, work, search] = await Promise.all([
+          readPrivateFile(join(destination, "01-candidate-profile.md")),
+          readPrivateFile(join(destination, "02-work-history.md")),
+          readPrivateFile(join(destination, "03-search-preferences.md")),
+        ]);
+        const candidate = compileCandidateMarkdown(profile, work);
+        const preferences = compileSearchMarkdown(search);
+        await createPrivateOutput(join(destination, "candidate-profile.json"),
+          `${JSON.stringify(candidate, null, 2)}\n`);
+        await createPrivateOutput(join(destination, "search-preferences.json"),
+          `${JSON.stringify(preferences, null, 2)}\n`);
+        return send(response, 200, { compiled: true,
+          approvedClaims: [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
+            ...candidate.projects.flatMap((project) => project.claims)]
+            .filter((claim) => claim.status === "verified" || claim.status === "user-confirmed").length });
       }
       const name = decodeURIComponent(url.pathname.slice("/api/template/".length));
       if (!url.pathname.startsWith("/api/template/") || !names.has(name) || request.method !== "PUT") {
@@ -125,14 +144,14 @@ section{min-width:0}.section-head{display:flex;align-items:end;justify-content:s
 h2{font:normal clamp(27px,3vw,42px)/1 Georgia,serif;margin:0}.note{color:var(--muted);max-width:650px;margin:12px 0 20px}
 textarea{width:100%;min-height:min(62vh,750px);padding:22px;background:#fffefa;border:1px solid var(--ink);border-radius:2px;color:var(--ink);font:14px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;resize:vertical}
 textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
-.actions{display:flex;gap:18px;align-items:center;margin:18px 0}.save{border:0;background:var(--ink);color:white;padding:12px 24px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.save:hover{background:var(--accent)}
+.actions{display:flex;gap:18px;align-items:center;margin:18px 0;flex-wrap:wrap}.save{border:0;background:var(--ink);color:white;padding:12px 24px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.save:hover{background:var(--accent)}.compile{border:1px solid var(--ink);background:transparent;color:var(--ink);padding:11px 20px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.compile:hover{background:#eee6d7}
 #message{color:var(--muted);font-size:14px}footer{padding:20px clamp(22px,6vw,90px);border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media(max-width:760px){header{display:block}main{display:block;padding-top:22px}nav{display:grid;grid-template-columns:1fr 1fr;margin-bottom:28px}nav button{font-size:13px}}
 </style><header><div><div class="brand">OpenApply / Local setup</div><h1>Your experience, in your words.</h1></div><div class="eyebrow">Private on this device</div></header>
 <main><nav id="files" aria-label="Setup sections"></nav><section><div class="section-head"><h2 id="title">Loading setup</h2><div class="eyebrow" id="progress"></div></div>
 <p class="note">Complete each template with verified facts. The first three files supply résumé and matching data. Your answers stay in your private OpenApply folder.</p>
 <label for="editor" class="eyebrow">Template contents</label><textarea id="editor" spellcheck="false"></textarea>
-<div class="actions"><button class="save" id="save">Save this section</button><span id="message" role="status" aria-live="polite"></span></div></section></main>
+<div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><span id="message" role="status" aria-live="polite"></span></div></section></main>
 <footer>Local setup · Close this tab and stop the setup process when finished.</footer>
 <script nonce="${nonce}">
 const token=${JSON.stringify(token)};let files=[],selected=0;const editor=document.getElementById('editor'),message=document.getElementById('message');
@@ -141,6 +160,7 @@ function render(){const current=files[selected];document.getElementById('files')
 document.getElementById('title').textContent=labels[selected];document.getElementById('progress').textContent=files.filter(file=>file.complete).length+' / '+files.length+' sections without placeholders';editor.value=current.content;message.textContent=current.complete?'No placeholders detected':'Replace the {{PLACEHOLDER}} values before compiling your profile';}
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
 document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately'}catch(error){message.textContent=error.message}};
+document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims'}catch(error){message.textContent=error.message}};
 load().catch(error=>{message.textContent=error.message});
 </script></html>`;
 }

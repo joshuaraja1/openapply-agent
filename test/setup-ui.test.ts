@@ -1,10 +1,53 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startSetupUi } from "../src/setup/ui.js";
 
 describe("local first-run setup", () => {
+  it("compiles only valid private structured evidence and preserves existing outputs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-setup-compile-"));
+    const destination = join(root, "onboarding");
+    const ui = await startSetupUi({ destination, repositoryRoot: process.cwd() });
+    try {
+      const url = new URL(ui.url);
+      const headers = { "x-openapply-token": url.searchParams.get("token")!, origin: url.origin };
+      expect((await fetch(`${url.origin}/api/compile`, { method: "POST", headers })).status).toBe(400);
+      const fenced = (tag: string, data: unknown) => `\u0060\u0060\u0060${tag}\n${JSON.stringify(data)}\n\u0060\u0060\u0060\n`;
+      await writeFile(join(destination, "01-candidate-profile.md"), fenced("openapply-identity-json", {
+        version: 1, identity: { fullName: "Test Candidate", location: "Dallas, TX",
+          email: "candidate@example.com", phone: "555-0100" },
+        authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false }, education: [],
+      }));
+      await writeFile(join(destination, "02-work-history.md"), fenced("openapply-history-json", {
+        version: 1, skills: { languages: ["Python"] },
+        experience: [{ employer: "Example", title: "Engineer", employmentType: "Full-time",
+          start: "2024", end: "2026", claims: [{ id: "claim-1", claim: "Built Python services",
+            skills: ["Python"], evidence: [{ source: "user", uri: "private:history" }],
+            status: "user-confirmed", allowedUses: ["resume", "matching"] }] }],
+        projects: [], quarantinedClaims: [],
+      }));
+      await writeFile(join(destination, "03-search-preferences.md"), fenced("openapply-search-json", {
+        version: 1, targetRoles: ["Software Engineer"],
+        workArrangements: { preferred: ["Remote"], accepted: ["Hybrid"] },
+        compensation: { preferredBaseFloor: 100000 },
+        applicationPolicy: { dailyTarget: 10, dailyHardCap: 25, requireFinalApproval: true },
+      }));
+      const compile = () => fetch(`${url.origin}/api/compile`, { method: "POST", headers });
+      expect((await compile()).status).toBe(200);
+      expect((await compile()).status).toBe(200);
+      const profile = JSON.parse(await readFile(join(destination, "candidate-profile.json"), "utf8")) as
+        { identity: { fullName: string } };
+      expect(profile.identity.fullName).toBe("Test Candidate");
+      await writeFile(join(destination, "01-candidate-profile.md"), "changed");
+      expect((await compile()).status).toBe(400);
+      expect((await readFile(join(destination, "candidate-profile.json"), "utf8"))).toContain("Test Candidate");
+    } finally {
+      await ui.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("serves private templates, saves with compare-and-swap, and rejects cross-origin writes", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-setup-ui-"));
     const ui = await startSetupUi({ destination: join(root, "onboarding"), repositoryRoot: process.cwd() });
