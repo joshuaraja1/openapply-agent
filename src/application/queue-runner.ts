@@ -7,11 +7,16 @@ export interface QueueOutcome { jobId: string; status: "processed" | "duplicate"
 export async function runApplicationQueue(
   jobs: DiscoveredJob[], quota: DailyQuota, retries: RetryLedger, date: () => string, cap: number,
   execute: (job: DiscoveredJob) => Promise<void>,
+  claimPosting?: (job: DiscoveredJob) => Promise<boolean>,
 ): Promise<QueueOutcome[]> {
   const outcomes: QueueOutcome[] = [];
   for (const job of jobs) {
     if (await retries.exhausted(job.id)) {
       outcomes.push({ jobId: job.id, status: "quarantined" });
+      continue;
+    }
+    if (claimPosting && !await claimPosting(job)) {
+      outcomes.push({ jobId: job.id, status: "duplicate" });
       continue;
     }
     const reservation = await quota.reserve(date(), job.id, cap);

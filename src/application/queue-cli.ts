@@ -25,6 +25,7 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
@@ -49,6 +50,8 @@ const quota = new DailyQuota(new EncryptedApplicationStateStore<DailyQuotaRecord
   join(root, "daily-quota.enc.json"), key));
 const retries = new RetryLedger(new EncryptedApplicationStateStore<RetryRecord>(
   join(root, "retry-ledger.enc.json"), key));
+const postingClaims = new PostingClaimLedger(new EncryptedApplicationStateStore<PostingClaim>(
+  join(root, "posting-claims.enc.json"), key));
 const emailCode = authPolicy?.emailVerification.autoEnter
   ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
     join(root, "email-code-claims.enc.json"), key)) : undefined;
@@ -110,7 +113,7 @@ try {
     if (result.checkpoint.stage === "waiting-human") {
       await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
     }
-  });
+  }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
   console.log(JSON.stringify({ date: date(), outcomes }));
 } finally {
   await connection?.close();
