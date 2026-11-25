@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from "playwright";
 import type { BrowserToolClient, BrowserToolResult } from "./client.js";
+import { isHostOrSubdomain } from "./links.js";
 
 function reply(text: string, structuredContent?: unknown): BrowserToolResult {
   return { content: [{ type: "text", text }], ...(structuredContent ? { structuredContent } : {}) };
@@ -77,9 +78,9 @@ export class OwnedDiscoveryBrowserClient implements BrowserToolClient {
         throw new Error("Search page left its approved origin");
       }
       const host = new URL(page.url()).hostname;
-      const selector = host.endsWith("linkedin.com") ? 'a[href*="/jobs/view/"]'
+      const selector = isHostOrSubdomain(host, "linkedin.com") ? 'a[href*="/jobs/view/"]'
         : host === "jobright.ai" ? 'a[href*="/jobs/info/"]'
-          : host.endsWith("joinhandshake.com") ? 'a[href*="/jobs/"]' : "a[href]";
+          : isHostOrSubdomain(host, "joinhandshake.com") ? 'a[href*="/jobs/"]' : "a[href]";
       await page.locator(selector).first().waitFor({ state: "attached", timeout: 3_000 }).catch(() => {});
       const links = await page.locator("a[href]").evaluateAll((anchors) => anchors.slice(0, 1_500)
         .flatMap((anchor) => {

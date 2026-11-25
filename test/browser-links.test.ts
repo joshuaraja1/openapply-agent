@@ -12,6 +12,7 @@ describe("browser lead extraction", () => {
     const leads = extractBrowserLeads([
       "[Software Engineer](https://www.linkedin.com/jobs/view/123/?trackingId=abc)",
       "[Company](https://www.linkedin.com/company/example)",
+      "[Impostor](https://evil-linkedin.com/jobs/view/999)",
     ].join("\n"), context("linkedin"));
     expect(leads).toEqual([expect.objectContaining({
       title: "Software Engineer",

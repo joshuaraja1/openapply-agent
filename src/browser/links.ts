@@ -1,5 +1,9 @@
 import type { BrowserLead, BrowserPlatform } from "./schema.js";
 
+export function isHostOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const rawUrl = /https?:\/\/[^\s<>)\]]+/g;
 
@@ -8,7 +12,7 @@ function cleanUrl(raw: string, platform: BrowserPlatform): string | null {
     const url = new URL(raw.replace(/[.,;:]+$/, ""));
     if (url.username || url.password) return null;
     url.hash = "";
-    if (url.hostname.endsWith("linkedin.com") && url.pathname.includes("/jobs/view/")) url.search = "";
+    if (isHostOrSubdomain(url.hostname, "linkedin.com") && url.pathname.includes("/jobs/view/")) url.search = "";
     if (url.hostname === "jobright.ai" && url.pathname.includes("/jobs/info/")) url.search = "";
     if (platform === "handshake") url.search = "";
     if (platform === "generic") {
@@ -30,13 +34,13 @@ function accepts(platform: BrowserPlatform, value: string, sourceSearchUrl: stri
   ownedGeneric = false): boolean {
   const url = new URL(value);
   if (platform === "linkedin") {
-    return url.hostname.endsWith("linkedin.com") && url.pathname.includes("/jobs/view/");
+    return isHostOrSubdomain(url.hostname, "linkedin.com") && url.pathname.includes("/jobs/view/");
   }
   if (platform === "jobright") {
     return url.hostname === "jobright.ai" && url.pathname.includes("/jobs/info/");
   }
   if (platform === "handshake") {
-    return url.hostname.endsWith("joinhandshake.com") && /\/jobs\//.test(url.pathname);
+    return isHostOrSubdomain(url.hostname, "joinhandshake.com") && /\/jobs\//.test(url.pathname);
   }
   if (!ownedGeneric) return url.protocol === "http:" || url.protocol === "https:";
   const source = new URL(sourceSearchUrl);
