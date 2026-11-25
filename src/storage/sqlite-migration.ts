@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID }
   from "node:crypto";
-import { chmod, link, unlink } from "node:fs/promises";
+import { chmod, link, lstat, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertPrivateFile, ensurePrivateDirectory, readPrivateFile } from "./private-path.js";
@@ -71,6 +71,8 @@ export async function stageSqliteMigration(
   const records = await new EncryptedApplicationStateStore<unknown>(source, key).snapshotRecords();
   const temporary = `${target}.staging-${randomUUID()}`;
   let db: DatabaseSync | undefined;
+  let published = false;
+  let verified = false;
   try {
     db = new DatabaseSync(temporary);
     if (process.platform === "win32") await secureWindowsPrivatePath(temporary);
@@ -102,16 +104,31 @@ export async function stageSqliteMigration(
     if (currentDigest !== sourceDigest) throw new Error("Legacy state changed during migration");
     // Hard-link publication fails if another process already created the target.
     await link(temporary, target);
+    published = true;
     await assertPrivateFile(target);
     if ((await readStagedRecords(target, key)).length !== records.length) {
       throw new Error("Staged SQLite record parity failed");
     }
+    verified = true;
     return records.length;
   } finally {
     db?.close();
-    await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT") throw error;
-    });
+    try {
+      if (published && !verified) {
+        try {
+          const [stagedFile, targetFile] = await Promise.all([lstat(temporary), lstat(target)]);
+          if (stagedFile.ino && stagedFile.dev === targetFile.dev && stagedFile.ino === targetFile.ino) {
+            await unlink(target);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+    } finally {
+      await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   }
 }
 

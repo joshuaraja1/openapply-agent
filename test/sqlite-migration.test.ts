@@ -3,7 +3,16 @@ import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const verificationFailure = vi.hoisted(() => ({ path: "" }));
+vi.mock("../src/storage/private-path.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/storage/private-path.js")>();
+  return { ...actual, assertPrivateFile: async (path: string) => {
+    if (path === verificationFailure.path) throw new Error("Injected target verification failure");
+    await actual.assertPrivateFile(path);
+  } };
+});
 import { EncryptedApplicationStateStore } from "../src/storage/encrypted-state.js";
 import { ensurePrivateDirectory } from "../src/storage/private-path.js";
 import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
@@ -87,5 +96,23 @@ describe("staged SQLite migration", () => {
         .rejects.toThrow("changed");
       expect(await readFile(f.databasePath)).toBeDefined();
     } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("removes only its newly published database when target verification fails", async () => {
+    const f = await fixture();
+    try {
+      const before = await readFile(f.legacyPath);
+      verificationFailure.path = f.databasePath;
+      await expect(stageSqliteMigration(f.legacyPath, f.databasePath, f.key, true))
+        .rejects.toThrow("Injected target verification failure");
+      verificationFailure.path = "";
+      await expect(readFile(f.databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(f.legacyPath)).toEqual(before);
+      await expect(stageSqliteMigration(f.legacyPath, f.databasePath, f.key, true))
+        .resolves.toBeGreaterThan(0);
+    } finally {
+      verificationFailure.path = "";
+      await rm(f.root, { recursive: true, force: true });
+    }
   }, 30_000);
 });
