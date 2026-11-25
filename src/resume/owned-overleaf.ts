@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import type { BrowserRuntime } from "../browser/runtime.js";
@@ -11,6 +11,7 @@ import { assertOverleafProjectUrl } from "./overleaf.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "./verify-pdf.js";
 
 type Launch = (options: { profileDirectory: string; headless: boolean }) => Promise<BrowserRuntime>;
+const maxPdfBytes = 5_000_000;
 
 /** Compile through the user's persistent local browser session. */
 export async function renderOwnedOverleafResume(
@@ -32,6 +33,7 @@ export async function renderOwnedOverleafResume(
     headless: false,
   });
   let artifactPath: string | undefined;
+  let downloadDirectory: string | undefined;
   let verified = false;
   try {
     await runtime.context.route("**/*", async (route) => {
@@ -44,33 +46,71 @@ export async function renderOwnedOverleafResume(
       await route.fallback();
     });
     const page = await runtime.context.newPage();
+    downloadDirectory = await mkdtemp(join(directory, ".openapply-download-"));
+    const cdp = await runtime.context.newCDPSession(page);
+    await cdp.send("Browser.setDownloadBehavior", {
+      behavior: "allowAndName", downloadPath: downloadDirectory, eventsEnabled: true,
+    });
+    let downloadGuid: string | undefined;
+    let settle: ((path: string) => void) | undefined;
+    let fail: ((error: Error) => void) | undefined;
+    const completed = new Promise<string>((resolve, reject) => { settle = resolve; fail = reject; });
+    void completed.catch(() => {});
+    cdp.on("Browser.downloadWillBegin", (event: { guid: string }) => {
+      if (downloadGuid) {
+        void cdp.send("Browser.cancelDownload", { guid: event.guid }).catch(() => {});
+        fail?.(new Error("Unexpected concurrent browser download"));
+      } else downloadGuid = event.guid;
+    });
+    cdp.on("Browser.downloadProgress", (progress: { guid: string; receivedBytes: number;
+      totalBytes: number; state: string; filePath?: string }) => {
+      if (progress.guid !== downloadGuid) return;
+      if (progress.receivedBytes > maxPdfBytes || progress.totalBytes > maxPdfBytes) {
+        void cdp.send("Browser.cancelDownload", { guid: progress.guid }).catch(() => {});
+        fail?.(new Error("Overleaf PDF download exceeded its transfer budget"));
+      } else if (progress.state === "canceled") {
+        fail?.(new Error("Overleaf PDF download was canceled"));
+      } else if (progress.state === "completed") {
+        if (!progress.filePath) fail?.(new Error("Browser did not provide the downloaded PDF path"));
+        else settle?.(progress.filePath);
+      }
+    });
     await page.goto(projectUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
     if (new URL(page.url()).origin !== "https://www.overleaf.com") {
       throw new Error("Overleaf project left the approved origin");
     }
     const editor = page.getByRole("textbox", { name: "Source Editor editing", exact: true });
+    await editor.waitFor({ state: "visible", timeout: 15_000 });
     if (await editor.count() !== 1) throw new Error("Overleaf source editor is unavailable");
     await editor.fill(source.latex);
     const compile = page.getByRole("button", { name: "Recompile", exact: true });
+    await compile.waitFor({ state: "visible", timeout: 15_000 });
     if (await compile.count() !== 1) throw new Error("Overleaf compile control is unavailable");
     await compile.click();
+    await page.locator('.compile-button[data-ol-loading="true"]').waitFor({ timeout: 5_000 });
     await page.locator('.compile-button[data-ol-loading="false"]').waitFor({ timeout: 30_000 });
     const downloadLink = page.getByRole("link", { name: "Download PDF", exact: true });
+    await downloadLink.waitFor({ state: "visible", timeout: 15_000 });
     if (await downloadLink.count() !== 1) throw new Error("Overleaf PDF download is unavailable");
-    const [download] = await Promise.all([
+    await Promise.all([
       page.waitForEvent("download", { timeout: 15_000 }), downloadLink.click(),
     ]);
-    const stream = await download.createReadStream();
-    const chunks: Buffer[] = [];
-    let size = 0;
-    for await (const chunk of stream) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 5_000_000) throw new Error("Overleaf PDF exceeds the artifact size limit");
-      chunks.push(bytes);
+    const timeout = setTimeout(() => {
+      if (downloadGuid) void cdp.send("Browser.cancelDownload", { guid: downloadGuid }).catch(() => {});
+      fail?.(new Error("Overleaf PDF download timed out"));
+    }, 30_000);
+    let downloadedPath: string;
+    try {
+      downloadedPath = await completed;
+    } finally { clearTimeout(timeout); }
+    if (!downloadGuid || downloadedPath !== join(downloadDirectory, downloadGuid)) {
+      throw new Error("Browser downloaded the PDF outside the private directory");
     }
-    if (size < 100) throw new Error("Overleaf downloaded an invalid PDF");
-    const bytes = Buffer.concat(chunks);
+    const downloaded = await lstat(downloadedPath);
+    if (!downloaded.isFile() || downloaded.isSymbolicLink() || downloaded.size < 100
+      || downloaded.size > maxPdfBytes) throw new Error("Overleaf downloaded an invalid PDF");
+    const bytes = await readFile(downloadedPath);
+    if (bytes.length !== downloaded.size) throw new Error("Overleaf PDF changed during verification");
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
@@ -84,6 +124,9 @@ export async function renderOwnedOverleafResume(
     return artifact;
   } finally {
     try { await runtime.close(); }
-    finally { if (!verified && artifactPath) await unlink(artifactPath).catch(() => {}); }
+    finally {
+      if (!verified && artifactPath) await unlink(artifactPath).catch(() => {});
+      if (downloadDirectory) await rm(downloadDirectory, { recursive: true, force: true });
+    }
   }
 }

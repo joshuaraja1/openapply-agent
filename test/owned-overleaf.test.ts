@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { chromium, type BrowserContext, type Page, type Route } from "playwright";
 import { renderOwnedOverleafResume } from "../src/resume/owned-overleaf.js";
@@ -25,17 +24,38 @@ function fixture() {
   const fill = vi.fn(async () => {});
   const compileClick = vi.fn(async () => {});
   const downloadClick = vi.fn(async () => {});
+  let progress: ((value: { guid: string; receivedBytes: number; totalBytes: number;
+    state: string; filePath?: string }) => void) | undefined;
+  let begin: ((value: { guid: string }) => void) | undefined;
+  let downloadDirectory = "";
   const page = {
     goto: vi.fn(async () => {}), url: () => projectUrl,
     getByRole: vi.fn((role: string, options: { name: string }) => ({
       count: async () => 1,
+      waitFor: async () => {},
       fill: role === "textbox" ? fill : undefined,
       click: options.name === "Recompile" ? compileClick : downloadClick,
     })),
     locator: vi.fn(() => ({ waitFor: vi.fn(async () => {}) })),
-    waitForEvent: vi.fn(async () => ({ createReadStream: async () => Readable.from([Buffer.alloc(200, 7)]) })),
+    waitForEvent: vi.fn(async () => {
+      begin?.({ guid: "fixture" });
+      const filePath = join(downloadDirectory, "fixture");
+      await writeFile(filePath, Buffer.alloc(200, 7));
+      progress?.({ guid: "fixture", receivedBytes: 200, totalBytes: 200,
+        state: "completed", filePath });
+      return {};
+    }),
   } as unknown as Page;
-  const context = { route: vi.fn(async () => {}), newPage: vi.fn(async () => page) } as unknown as BrowserContext;
+  const context = { route: vi.fn(async () => {}), newPage: vi.fn(async () => page),
+    newCDPSession: vi.fn(async () => ({
+      send: vi.fn(async (method: string, options?: { downloadPath?: string }) => {
+        if (method === "Browser.setDownloadBehavior") downloadDirectory = options?.downloadPath ?? "";
+      }),
+      on: vi.fn((event: string, callback: typeof progress) => {
+        if (event === "Browser.downloadProgress") progress = callback;
+        else if (event === "Browser.downloadWillBegin") begin = callback as typeof begin;
+      }),
+    })) } as unknown as BrowserContext;
   const close = vi.fn(async () => {});
   return { page, context, close, fill, compileClick, downloadClick };
 }
@@ -82,9 +102,13 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
       try {
         const output = join(root, "output");
         const bytes = Buffer.alloc(200, 7);
-        const html = `<label for="editor">Source Editor editing</label><textarea id="editor"></textarea>
-          <button class="compile-button" data-ol-loading="false">Recompile</button>
+        const controls = `<label for="editor">Source Editor editing</label><textarea id="editor"></textarea>
+          <button class="compile-button" data-ol-loading="false"
+            onclick="this.dataset.olLoading='true'; setTimeout(() => this.dataset.olLoading='false', 100)">Recompile</button>
           <a download="resume.pdf" href="data:application/pdf;base64,${bytes.toString("base64")}">Download PDF</a>`;
+        const html = `<div id="controls"></div><script>setTimeout(() => {
+          document.getElementById('controls').innerHTML = atob('${Buffer.from(controls).toString("base64")}');
+        }, 100)</script>`;
         const verify = vi.fn(async (path: string) => {
           expect(await readFile(path)).toEqual(bytes);
           return verified(path);
@@ -102,6 +126,36 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
         });
         expect(artifact.path.endsWith(".pdf")).toBe(true);
         expect(verify).toHaveBeenCalledOnce();
+      } finally { await rm(root, { recursive: true, force: true }); }
+    }, 30_000,
+  );
+
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "cancels an oversized browser download before publishing a PDF", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-large-"));
+      try {
+        const output = join(root, "output");
+        const html = `<label for="editor">Source Editor editing</label><textarea id="editor"></textarea>
+          <button class="compile-button" data-ol-loading="false"
+            onclick="this.dataset.olLoading='true'; setTimeout(() => this.dataset.olLoading='false', 100)">Recompile</button>
+          <a href="/download/fixture.pdf">Download PDF</a>`;
+        await expect(renderOwnedOverleafResume(projectUrl, job, candidate, source, output, {
+          launch: async () => {
+            const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true });
+            await runtime.context.route("https://www.overleaf.com/**", async (route) => {
+              if (route.request().url().includes("/download/")) {
+                await route.fulfill({ status: 200, contentType: "application/pdf",
+                  headers: { "content-disposition": "attachment; filename=resume.pdf" },
+                  body: Buffer.alloc(5_100_000, 7) });
+              } else {
+                await route.fulfill({ status: 200, contentType: "text/html", body: html });
+              }
+            });
+            return runtime;
+          },
+          verify: async () => { throw new Error("Oversized file reached PDF verification"); },
+        })).rejects.toThrow("transfer budget");
+        expect(await readdir(output)).toEqual([]);
       } finally { await rm(root, { recursive: true, force: true }); }
     }, 30_000,
   );
