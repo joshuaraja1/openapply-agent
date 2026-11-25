@@ -49,14 +49,20 @@ async function runAcl(path: string, action: "secure" | "assert"): Promise<void> 
   if (metadata.isSymbolicLink() || !(metadata.isFile() || metadata.isDirectory())) {
     throw new Error("Private path must be a regular file or directory");
   }
+  const env: NodeJS.ProcessEnv = { ...process.env, OPENAPPLY_ACL_PATH: path, OPENAPPLY_ACL_ACTION: action };
+  // A PowerShell 7 parent can pass an incompatible module path to Windows PowerShell 5.
+  delete env.PSModulePath;
   try {
     await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand",
       Buffer.from(aclScript, "utf16le").toString("base64")], {
-      env: { ...process.env, OPENAPPLY_ACL_PATH: path, OPENAPPLY_ACL_ACTION: action },
+      env,
       timeout: 15_000, maxBuffer: 16_384,
     });
   } catch (error) {
-    if (process.env.OPENAPPLY_ACL_TEST_DEBUG === "1") throw error;
+    if (process.env.OPENAPPLY_ACL_TEST_DEBUG === "1") {
+      const details = error as { stderr?: string };
+      throw new Error(`Windows ACL test diagnostic: ${details.stderr?.slice(-2_000) ?? "no stderr"}`);
+    }
     throw new Error("Windows private path ACL is unsafe or could not be checked");
   }
 }
