@@ -7,7 +7,7 @@ export interface FormAction {
   name: string;
   tag: string;
   type: string | null;
-  action: "fill" | "upload";
+  action: "fill" | "select" | "upload";
   value: string;
 }
 
@@ -32,6 +32,19 @@ function valueFor(control: BrowserControl, candidate: CandidateProfile, resumePa
   const type = control.type?.toLowerCase() ?? null;
   if (control.tag === "input" && type === "file" && /\b(resume|résumé|cv)\b/.test(label)) {
     return { name: control.name, tag: control.tag, type: control.type, action: "upload", value: resumePath };
+  }
+  if (control.tag === "select") {
+    const isUsAuthorized = /^are you legally authorized to work in the united states\?$/i.test(label);
+    const asksSponsorship = /^will you now or in the future require (?:visa )?sponsorship to work in the united states\?$/i.test(label);
+    if (!isUsAuthorized && !asksSponsorship) return undefined;
+    const yes = control.options.filter((option) => option.trim().toLowerCase() === "yes");
+    const no = control.options.filter((option) => option.trim().toLowerCase() === "no");
+    if (yes.length !== 1 || no.length !== 1) return undefined;
+    const authorized = candidate.authorization.countries.some((country) =>
+      /^(united states|united states of america|us|usa)$/i.test(country.trim()));
+    const answer = isUsAuthorized ? (authorized ? yes[0] : no[0])
+      : (candidate.authorization.sponsorshipRequiredNowOrFuture ? yes[0] : no[0]);
+    return { name: control.name, tag: control.tag, type: control.type, action: "select", value: answer!.trim() };
   }
   if (!(["input", "textarea"].includes(control.tag)) || ["hidden", "password", "file", "checkbox", "radio", "submit"].includes(type ?? "")) return undefined;
   const parts = candidate.identity.fullName.trim().split(/\s+/);
