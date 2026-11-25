@@ -14,6 +14,7 @@ describe("BrowserOS lead discovery", () => {
     });
     const client: BrowserToolClient = { callTool };
     const input: BrowserSearchInput = {
+      runtime: "browseros",
       endpoint: "http://127.0.0.1:9010/mcp",
       searches: [
         { label: "LinkedIn", platform: "linkedin", url: "https://www.linkedin.com/jobs/search/", enabled: true },

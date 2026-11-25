@@ -3,6 +3,7 @@ import { z } from "zod";
 export const browserPlatformSchema = z.enum(["linkedin", "jobright", "handshake", "generic"]);
 
 export const browserSearchInputSchema = z.object({
+  runtime: z.enum(["browseros", "owned"]).default("browseros"),
   endpoint: z.string().url().default("http://127.0.0.1:9010/mcp"),
   searches: z.array(z.object({
     label: z.string().min(1),
