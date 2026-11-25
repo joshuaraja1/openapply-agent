@@ -21,7 +21,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run browser:doctor
-      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/form-mapper.test.ts
+      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/form-mapper.test.ts test/owned-discovery.test.ts
         env:
           OPENAPPLY_BROWSER_E2E: "1"
 

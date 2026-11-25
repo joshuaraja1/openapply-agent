@@ -206,6 +206,19 @@ npm run browser:discover
 
 This produces a deduplicated lead queue. It intentionally does not treat aggregator metadata as authoritative; validate each lead against the employer's official posting before tailoring or applying.
 
+### Preview: owned browser for signed-in discovery
+
+The local Chromium profile can collect job links without a separate BrowserOS neo installation. Install its browser binary, then open the profile and sign in manually to the job boards you use:
+
+```bash
+npm run browser:install
+npm run browser:open
+```
+
+Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and exports listing link labels and URLs to the lead file; it does not export cookies, passwords, or full page text. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
+
+Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
+
 ## Supported discovery sources
 
 - Greenhouse public job-board API
