@@ -26,9 +26,14 @@ Additional drafts add SmartRecruiters lead verification
 deduplication [#93](https://github.com/joshuaraja1/openapply-agent/pull/93),
 Windows ACL smoke serialization [#94](https://github.com/joshuaraja1/openapply-agent/pull/94),
 and exact U.S. authorization selects in the owned browser
-[#95](https://github.com/joshuaraja1/openapply-agent/pull/95).
+[#95](https://github.com/joshuaraja1/openapply-agent/pull/95). The portable CLI
+[#96](https://github.com/joshuaraja1/openapply-agent/pull/96), local setup match
+preview [#97](https://github.com/joshuaraja1/openapply-agent/pull/97), and
+recoverable owned-browser account forms
+[#98](https://github.com/joshuaraja1/openapply-agent/pull/98) are also drafts.
 These changes are **drafts, not merged into `main`**. Their combined local tree
-passes tests, but independent reviews and live beta validation are pending.
+passes typecheck, build, 200 tests (15 skipped), and targeted Chromium tests,
+but independent reviews and live beta validation are pending.
 
 ## Public release decision
 
@@ -43,6 +48,11 @@ after all of these have recorded evidence:
 | Distribution | Signed installers, verified browser installation, upgrade/rollback, export/delete, and clean uninstall on advertised OSes | Open: no consumer installer or updater |
 | Reliability and speed | The stage latency, crash/retry, job-bound confirmation, privacy, and two-week beta targets in [release requirements](autonomy-release-requirements.md) | Open: no completed release evidence set |
 | External release inputs | Product OAuth registrations where offered, signing credentials, independent assessment, privacy and site-terms review, and beta candidate consent | Open: requires owner and third-party participation |
+
+The requested first public release covers macOS, Windows, and Linux. Apple
+code-signing credentials are available; Windows signing, beta participation,
+and an independent reviewer are not yet confirmed. The repository owner cannot
+independently review their own PRs.
 
 The release decision must state exactly which operating systems, providers,
 and form types passed. Unsupported sites and questions continue to hand off;
