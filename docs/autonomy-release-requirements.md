@@ -12,8 +12,10 @@ submitted from a click alone.
 
 1. **Owned browser:** one dedicated, persistent local Chromium profile serves
    signed-in discovery, Overleaf, and applications. A user explicitly signs in
-   or approves a browser-native profile import. OpenApply never copies raw
-   cookie databases or exposes cookie values in logs. BrowserOS remains an
+   or approves a browser-native profile import. Password import is disabled by
+   default; an opt-in migration must move passwords into the OS secret store
+   and remove any browser-vault copy before the owned path is enabled.
+   OpenApply never copies raw cookie databases or exposes cookie values in logs. BrowserOS remains an
    optional adapter during migration, not a prerequisite for the owned path.
 2. **Private state:** OS-backed secrets and authenticated encrypted state work
    on macOS, Linux, and Windows. All private input, output, profile, and lock
@@ -31,10 +33,15 @@ submitted from a click alone.
 5. **Recovery:** crashes, timeouts, browser restarts, expired sessions, and
    duplicate events resume from durable checkpoints. The submit claim is saved
    before clicking, and uncertain submissions never auto-click again. Handoffs
-   show the blocker, exact page, and safe resume action.
+   show the blocker, exact page, and safe resume action. Every form step remains
+   bound to the original requisition; a generic same-domain thank-you message
+   alone is insufficient to confirm that job's submission.
 6. **Consumer setup:** first-run UI collects the completed user templates,
    checks evidence and source precedence, configures preferences, accounts,
    Overleaf, mailbox consent, and daily limits, then runs a dry-run preview.
+   Product-owned Google and Microsoft desktop OAuth clients must be registered
+   and verified for the published redirect URIs and least-privilege scopes;
+   until then, onboarding explicitly requires a user-supplied client ID.
    Passwords go directly to OS secret storage, never into JSON or telemetry.
 7. **Distribution:** signed, updateable builds include the browser runtime or
    a verified browser installation step, platform permissions, rollback,
@@ -50,22 +57,27 @@ every merge. A PR is opened as a draft until its controlled tests pass.
 
 | PR | Scope | Depends on | Exit test |
 | --- | --- | --- | --- |
-| 47 | Requirements and performance measurement plan | none | Review this contract and approve measured gates |
-| 48 | Owned browser lifecycle and profile lock | 47 | Restart preserves a synthetic session; concurrent launch fails safely |
-| 49 | Local browser protocol for discovery, Overleaf, and forms | 48 | Same controlled page works through local and BrowserOS adapters |
-| 50 | Runtime selection, scheduler, and crash recovery | 49 | Kill at each checkpoint; no duplicate final click |
-| 51 | Windows private-file ACL enforcement | 47 | Real Windows CI rejects shared input/output/profile paths |
-| 52 | Greenhouse and Ashby application adapters | 49 | Sanitized multi-step fixtures and synthetic portal E2E |
-| 53 | Lever, SmartRecruiters, and Workday adapters | 52 | Provider fixtures, drift cases, and conditional question handoffs |
-| 54 | Page-image PDF QA and render policy | 47 | Golden PDFs catch clipping/overlap; uncertain images pause |
-| 55 | Local first-run and handoff UI | 50, 51, 54 | Keyboard-only setup, dry run, blocker, and resume E2E |
-| 56 | Signed installer, updater, export, and deletion | 55 | Clean install, upgrade, rollback, uninstall on supported OSes |
-| 57 | Private beta, real-site smoke tests, and release decision | 52–56 | Monitored beta gates below hold; independent security assessment |
+| 47 | Requirements and performance measurement plan | none | Review the contract and measurement protocol |
+| 48 | Disable password import by default | 47 | Policy test rejects implicit password import |
+| 49 | Job-bound multistep submission and confirmation | 47 | Wrong-requisition synthetic portal cannot be recorded as submitted |
+| 50 | Owned browser lifecycle and profile lock | 48 | Restart preserves a synthetic session; concurrent launch fails safely |
+| 51 | Local browser protocol for discovery, Overleaf, and forms | 50 | Same controlled page works through local and BrowserOS adapters |
+| 52 | Runtime selection, scheduler, and crash recovery | 49, 51 | Kill at each checkpoint; no duplicate final click |
+| 53 | Windows private-file ACL enforcement | 47 | Real Windows CI rejects shared input/output/profile paths |
+| 54 | Greenhouse and Ashby application adapters | 49, 51 | Sanitized multi-step fixtures and synthetic portal E2E |
+| 55 | Lever, SmartRecruiters, and Workday adapters | 54 | Provider fixtures, drift cases, and conditional question handoffs |
+| 56 | Page-image PDF QA and render policy | 47 | Golden PDFs catch clipping/overlap; uncertain images pause |
+| 57 | Local first-run and handoff UI plus OAuth clients | 52, 53, 56 | Keyboard-only setup, verified OAuth registration, dry run, and resume E2E |
+| 58 | Signed installer, updater, export, and deletion | 57 | Clean install, upgrade, rollback, uninstall on supported OSes |
+| 59 | Private beta, real-site smoke tests, and release decision | 54–58 | Monitored beta gates below hold; independent security assessment |
 
-PRs 48, 51, and 54 can proceed independently after 47. PR 53 can be split by
+PRs 48, 49, 53, and 56 can proceed independently after 47. PR 55 can be split by
 provider if a sanitized fixture exceeds the review-size target. A provider is
 enabled for unattended use only after its controlled E2E tests and a low-volume
-real-site smoke test pass. BrowserOS remains available until the owned runtime
+real-site smoke test pass. Before any real-site test, confirm candidate consent,
+the site's terms and access rules, and the permitted test scope. Controlled CI
+uses only synthetic portals; real employer submissions require an authorized
+real candidate application. BrowserOS remains available until the owned runtime
 passes the same contract tests.
 
 ## Required test matrix
@@ -78,7 +90,8 @@ passes the same contract tests.
   renderer crash, and a second process attempting the same profile.
 - **Recovery E2E:** kill the process before and after every durable transition,
   including immediately before and after the final click. Verify exactly one
-  click or an explicit `submission-uncertain` handoff.
+  click or an explicit `submission-uncertain` handoff. Switch to a different
+  same-host requisition after Continue and verify it cannot submit or confirm.
 - **Security:** malicious job text, malicious email, hostile PDFs, path traversal,
   cross-account session reuse, log/telemetry leakage, and secret-store lockout.
 - **Platform:** macOS Keychain, Linux Secret Service, and Windows Credential
@@ -90,7 +103,13 @@ passes the same contract tests.
 
 ## Speed and reliability gates
 
-These are targets to measure in PR 47, not current performance claims. API
+These are proposed targets, not current performance claims. PR 50 records the
+first owned-browser baseline and PRs 51–52 compare it with BrowserOS. Use a
+versioned synthetic portal and a fixed 100-job discovery fixture. On each
+supported OS, record hardware, browser/Node versions, warm and cold starts,
+network conditions, and 30 warm-run samples per stage. Time with a monotonic
+clock from operation entry to verified outcome; report median, p95, failures,
+and sample count. Keep employer network waits as a separate measurement. API
 discovery and tailoring may run concurrently; final submissions are serialized
 per user and employer domain. Reuse the signed-in browser and structured DOM
 snapshots rather than reopening a profile or taking screenshots for every field.
@@ -106,6 +125,10 @@ snapshots rather than reopening a profile or taking screenshots for every field.
   two weeks of monitored real-site low-volume runs, at least 99% crash-free
   runs, and no unconfirmed submission reported as complete.
 
+Real-site beta begins only after privacy and site-terms review, explicit
+candidate consent, and an approved application policy. The beta does not
+authorize bulk testing with synthetic identities on real employers.
+
 ## Training decision
 
 No model training is required for the deterministic first release. Measure
@@ -119,6 +142,7 @@ cannot override evidence gates, domain checks, or human handoff conditions.
 ## Release decision
 
 The release owner records the test evidence, CI links, supported OS/provider
-matrix, privacy and terms review, installer signing status, and independent
+matrix, completed privacy and terms review, OAuth registration status,
+installer signing status, and independent
 security findings. General availability waits for every requirement above or
 an explicitly documented reduction in the product promise.
