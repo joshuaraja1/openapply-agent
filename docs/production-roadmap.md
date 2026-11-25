@@ -1,5 +1,8 @@
 # Production roadmap: autonomous application runtime
 
+The remaining implementation sequence and measurable release gates are in
+[autonomy release requirements](autonomy-release-requirements.md).
+
 ## Current implementation status
 
 The repository has a scheduled discovery-to-application CLI, official-source
