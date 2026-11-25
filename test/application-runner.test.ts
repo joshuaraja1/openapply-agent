@@ -119,6 +119,41 @@ describe("application runner", () => {
     expect(wrongSubmit).not.toHaveBeenCalled();
   });
 
+  it("does not retrieve credentials when the opened login is another requisition or origin", async () => {
+    const loginControls = [
+      { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",
+        value: null, required: true, options: [] },
+      { ref: "sign-in", tag: "button", role: "button", name: "Sign in", type: "submit",
+        value: null, required: false, options: [] },
+    ];
+    const account = { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
+      passwordSecretRef: "keychain://example", allowAccountCreation: false };
+    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/wrong-login.pdf", expectedConfirmation: "Thank you for applying" });
+    for (const url of ["https://jobs.example.com/apply/654321",
+      "https://jobs.example.com:8443/apply/123456"]) {
+      const login = { url, title: "Sign in", controls: loginControls };
+      const authenticate = vi.fn(async () => login);
+      const get = vi.fn(async () => "private-password");
+      const result = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
+        "/tmp/profile", { verify: async () => ({ jobId: job.id,
+          sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
+          path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
+        validateOfficial: async () => true, account,
+        secretStore: { get, put: async () => {}, delete: async () => {} },
+        browserFactory: async () => ({ browser: { currentUrl: () => url,
+          navigate: async () => login, authenticate, act: async () => login,
+          fillBatch: async () => login, submit: async () => "Thank you for applying" }, close: async () => {} }),
+      });
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("this requisition");
+      expect(get).not.toHaveBeenCalled();
+      expect(authenticate).not.toHaveBeenCalled();
+    }
+  });
+
   it("resumes the same tab after a human completes external identity-provider sign-in", async () => {
     const login = { url: job.applicationUrl, title: "Sign in", controls: [
       { ref: "password", tag: "input", role: "textbox", name: "Password", type: "password",

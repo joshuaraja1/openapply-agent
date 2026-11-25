@@ -222,7 +222,9 @@ export async function runApplicationPackage(
       throw new Error("Application handoff left the approved employer destination");
     }
     let loginBlocker: string | undefined = !hasStableRequisitionPath(job)
-      ? "Application URL has no stable requisition reference" : undefined;
+      ? "Application URL has no stable requisition reference"
+      : !isOriginalRequisition(snapshot, job)
+        ? "Opened application page cannot be bound to this requisition" : undefined;
     if (!loginBlocker && loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
