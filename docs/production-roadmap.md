@@ -14,12 +14,14 @@ email-code entry, exact-domain login and account creation, and same-tab human
 recovery. These paths have automated tests and the merged changes passed Bugbot,
 security review, CI, and CodeQL.
 
-The product promise below is **not yet a release claim**. The current browser is
-separately installed BrowserOS neo; it is not bundled into an app. The local
-Playwright fallback has its own profile. Greenhouse and Ashby have a small set
-of exact identity-field aliases; complete provider-specific application adapters,
-automated visual PDF inspection beyond text geometry checks, Windows private-file
-ACL handling, first-run user UI,
+The product promise below is **not yet a release claim**. The scheduled queue
+still requires separately installed BrowserOS neo; the single-job path can
+select an owned browser for Overleaf and simple application forms. The browser
+is not bundled into an app, and owned human handoff recovery is incomplete.
+Greenhouse and Ashby have a small set of exact identity-field aliases;
+complete provider-specific application adapters, automated visual PDF inspection
+beyond text geometry checks, remaining Windows artifact ACL and state-key gates,
+first-run user UI,
 signed installer/updater, and live provider beta validation remain open. The
 general-availability gates in this document have not been met.
 

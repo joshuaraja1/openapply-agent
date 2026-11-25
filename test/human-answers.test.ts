@@ -15,7 +15,7 @@ describe("exact human answer approval", () => {
       expect((await loadApprovedHumanAnswers(path, "job-1", 7)).answers.get("Salary expectation")).toBe("Negotiable");
       await expect(loadApprovedHumanAnswers(path, "job-1", 8)).rejects.toThrow("another application tab");
       await chmod(path, 0o644);
-      await expect(loadApprovedHumanAnswers(path, "job-1", 7)).rejects.toThrow("private");
+      await expect(loadApprovedHumanAnswers(path, "job-1", 7)).rejects.toThrow("unsafe permissions");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
