@@ -56,6 +56,17 @@ describe("authentication policy", () => {
       await expect(loadAuthenticationPolicy(path)).rejects.toThrow("private regular file");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+  it("fails closed for an old password-import policy until its private file is updated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-auth-migration-"));
+    try {
+      const path = join(root, "policy.json");
+      await writeFile(path, JSON.stringify({ ...validPolicy,
+        browserProfile: { ...validPolicy.browserProfile, importPasswords: true } }), { mode: 0o600 });
+      await expect(loadAuthenticationPolicy(path)).rejects.toThrow();
+      await writeFile(path, JSON.stringify(validPolicy), { mode: 0o600 });
+      expect((await loadAuthenticationPolicy(path)).browserProfile.importPasswords).toBe(false);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("maps subdomains to the configured account", () => {
     const policy = authenticationPolicySchema.parse(validPolicy);
     expect(accountForUrl(policy, "https://example.wd5.myworkdayjobs.com/job"))
