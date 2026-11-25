@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readApplicationPackage, writeApplicationPackage } from "../src/application/package-file.js";
+import { ensurePrivateDirectory } from "../src/storage/private-path.js";
 import { secureWindowsPrivatePath, assertWindowsPrivatePath } from "../src/storage/windows-acl.js";
 import { applicationPackageSchema } from "../src/application/runner.js";
 
@@ -33,9 +34,11 @@ const pkg = applicationPackageSchema.parse({
 describe("private application package storage", () => {
   it("writes owner-only data and rejects a shared package on read or overwrite", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-package-"));
-    const path = join(root, "application.json");
+    const directory = join(root, "private");
+    const path = join(directory, "application.json");
     try {
       if (process.platform === "win32") await secureWindowsPrivatePath(root);
+      await ensurePrivateDirectory(directory);
       await writeApplicationPackage(path, pkg);
       expect(await readApplicationPackage(path)).toEqual(pkg);
       await writeApplicationPackage(path, pkg);
