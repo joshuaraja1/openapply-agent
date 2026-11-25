@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -22,6 +22,7 @@ import { notifyHumanHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
+import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
@@ -88,7 +89,7 @@ try {
         ? { expectedConfirmation: config.expectedConfirmationByDomain[host] } : {}),
     });
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
-    await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    await writeApplicationPackage(packagePath, pkg);
     const account = authPolicy ? accountForUrl(authPolicy, job.applicationUrl) : undefined;
     const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
       packagePath,

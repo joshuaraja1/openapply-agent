@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
@@ -10,14 +9,15 @@ import { loadApprovedHumanAnswers } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
-import { applicationPackageSchema, approvedDestinationHost, runApplicationPackage } from "./runner.js";
+import { approvedDestinationHost, runApplicationPackage } from "./runner.js";
+import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
 
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private application package JSON file");
-const pkg = applicationPackageSchema.parse(JSON.parse(await readFile(packagePath, "utf8")));
+const pkg = await readApplicationPackage(packagePath);
 const approvedJobId = process.env.OPENAPPLY_APPROVE_JOB_ID;
 if (approvedJobId && approvedJobId !== pkg.job.id) throw new Error("Approval job ID does not match the package");
 const resumedJobId = process.env.OPENAPPLY_RESUME_JOB_ID;

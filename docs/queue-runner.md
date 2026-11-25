@@ -83,4 +83,8 @@ when each Continue control is explicitly a non-submit button. Ambiguous
 navigation, a missing résumé upload, or a repeated step pauses the application.
 Use approval mode while those limits matter for your target portals. Each
 private application package is retained in the artifact directory for recovery
-and manual inspection.
+and manual inspection. Package creation and reading require an owner-only
+file and parent directory on every OS, including Windows. A package created
+before this ACL gate may be rejected; move it out of the private artifact
+directory and regenerate it from the verified source rather than weakening
+permissions in place.
