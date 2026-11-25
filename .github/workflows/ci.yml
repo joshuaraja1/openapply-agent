@@ -36,8 +36,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test -- --run test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts
-        env:
-          OPENAPPLY_ACL_TEST_DEBUG: "1"
 
   verify:
     name: verify (Node ${{ matrix.node }})

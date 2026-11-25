@@ -65,11 +65,7 @@ async function runAcl(path: string, action: "secure" | "assert"): Promise<void> 
       env,
       timeout: 15_000, maxBuffer: 16_384,
     });
-  } catch (error) {
-    if (process.env.OPENAPPLY_ACL_TEST_DEBUG === "1") {
-      const details = error as { stderr?: string };
-      throw new Error(`Windows ACL test diagnostic: ${details.stderr?.slice(-2_000) ?? "no stderr"}`);
-    }
+  } catch {
     throw new Error("Windows private path ACL is unsafe or could not be checked");
   }
 }
