@@ -9,6 +9,7 @@ describe.skipIf(process.platform !== "win32")("native Windows private-file ACL",
   it("secures a directory and file, then rejects a shared ACL", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-acl-"));
     const file = join(root, "private.txt");
+    const currentUser = execFileSync("whoami", [], { encoding: "utf8" }).trim();
     try {
       await secureWindowsPrivatePath(root);
       await assertWindowsPrivatePath(root);
@@ -18,11 +19,11 @@ describe.skipIf(process.platform !== "win32")("native Windows private-file ACL",
       execFileSync("icacls", [file, "/grant", "*S-1-1-0:(R)"], { stdio: "ignore" });
       await expect(assertWindowsPrivatePath(file)).rejects.toThrow("ACL is unsafe");
       await secureWindowsPrivatePath(file);
-      const currentUser = execFileSync("whoami", [], { encoding: "utf8" }).trim();
       execFileSync("icacls", [file, "/grant:r", `${currentUser}:(R)`], { stdio: "ignore" });
       await expect(assertWindowsPrivatePath(file)).rejects.toThrow("ACL is unsafe");
     } finally {
-      await secureWindowsPrivatePath(file).catch(() => {});
+      try { execFileSync("icacls", [file, "/grant:r", `${currentUser}:(F)`], { stdio: "ignore" }); }
+      catch { /* The file may not exist if setup failed. */ }
       await rm(root, { recursive: true, force: true });
     }
   }, 30_000);
