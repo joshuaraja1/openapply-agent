@@ -1,0 +1,126 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { describe, expect, it } from "vitest";
+import { AgentBrowser } from "../src/browser/actions.js";
+import { createApplicationHandoff } from "../src/application/handoff.js";
+import { applicationPackageSchema, runApplicationPackage } from "../src/application/runner.js";
+import { ApplicationWorkflow } from "../src/application/state-machine.js";
+import { candidateProfileSchema } from "../src/candidate/schema.js";
+import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
+import type { Provider, DiscoveredJob } from "../src/types.js";
+
+type Scenario = "success" | "unknown-required" | "wrong-requisition";
+
+const candidate = candidateProfileSchema.parse({
+  version: 1,
+  identity: { fullName: "Test Candidate", location: "Dallas, TX", email: "test@example.com",
+    phone: "555-0100" },
+  authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
+  skills: {}, education: [], experience: [], projects: [],
+});
+
+function portal(provider: Provider, scenario: Scenario): string {
+  const nameLabel = provider === "ashby" ? "Your name" : "Full name";
+  const unknown = scenario === "unknown-required"
+    ? '<label>Unanswered legal question<input required name="legal"></label>' : "";
+  const changeJob = scenario === "wrong-requisition"
+    ? "history.pushState({}, '', '/apply/654321')" : "";
+  return `<!doctype html><title>Example Co application</title>
+    <h1>Example Co Software Engineer</h1>
+    <section id="first"><label>${nameLabel}<input name="name" required></label>
+      <label>Email<input type="email" name="email" required></label>
+      <label>Resume<input type="file" name="resume" required></label>
+      <button type="button" onclick="document.getElementById('first').hidden=true;
+        document.getElementById('second').hidden=false;${changeJob}">Continue</button></section>
+    <section id="second" hidden>
+      <label>Are you legally authorized to work in the United States?
+        <select required><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+      ${unknown}
+      <button type="submit" onclick="document.getElementById('done').hidden=false;this.hidden=true">
+        Submit application</button></section>
+    <p id="done" hidden>Thank you for applying to Example Co as Software Engineer</p>`;
+}
+
+async function run(provider: Provider, scenario: Scenario) {
+  const root = await mkdtemp(join(tmpdir(), "openapply-provider-e2e-"));
+  const resumePath = join(root, "verified-resume.pdf");
+  const resumeBytes = Buffer.from("%PDF-1.4\nsynthetic fixture\n%%EOF\n");
+  await writeFile(resumePath, resumeBytes);
+  const pdfSha256 = createHash("sha256").update(resumeBytes).digest("hex");
+  const job: DiscoveredJob = {
+    id: `${provider}:example:123456`, provider, company: "Example Co", title: "Software Engineer",
+    descriptionText: "Build software", location: "Remote", department: null,
+    employmentType: null, workplaceType: "Remote", compensation: null,
+    applicationUrl: "https://jobs.example.com/apply/123456",
+    sourceUrl: "https://jobs.example.com/job/123456", sourcePublishedAt: null,
+    sourceUpdatedAt: null, firstSeenAt: "2026-11-24T00:00:00Z",
+    discoveredAt: "2026-11-24T00:00:00Z", isNew: true, isFresh: true,
+    freshnessBasis: "first-seen", matchedKeywords: [],
+  };
+  const source = { provider, boardToken: "example", boardName: "example", company: job.company,
+    enabled: true, allowedApplicationHosts: ["jobs.example.com"] };
+  const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    handoff: createApplicationHandoff(job, false), browserRuntime: "owned",
+    resumeSource: { latex: "synthetic fixture", fingerprint: "f".repeat(64),
+      renderToken: "a".repeat(64), claimIds: ["fixture-claim"] },
+    resumePdfPath: resumePath, expectedConfirmation: "Thank you for applying" });
+  const context = await chromium.launchPersistentContext(join(root, "profile"), { headless: true });
+  try {
+    await context.route("https://jobs.example.com/**", (route) => route.fulfill({
+      contentType: "text/html", body: portal(provider, scenario),
+    }));
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const result = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
+      validateOfficial: async () => true,
+      verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256, path: resumePath, pages: 1, verifiedAt: new Date().toISOString() }),
+      browserFactory: async (hosts, artifacts) => ({
+        browser: new AgentBrowser(context, hosts, artifacts), close: async () => {},
+      }),
+    });
+    const page = context.pages().at(-1)!;
+    return { checkpoint: result.checkpoint,
+      nameValue: await page.locator('input[name="name"]').inputValue(),
+      emailValue: await page.locator('input[name="email"]').inputValue(),
+      authorizationValue: await page.locator("select").inputValue(),
+      fileName: await page.locator('input[type="file"]').evaluate((input) =>
+        (input as HTMLInputElement).files?.[0]?.name),
+      confirmationVisible: await page.locator("#done").isVisible() };
+  } finally {
+    await context.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider portal", () => {
+  for (const provider of ["greenhouse", "ashby"] as const) {
+    it(`${provider} submits a two-step job-bound form with the verified résumé`, async () => {
+      const result = await run(provider, "success");
+      expect(result.checkpoint.stage).toBe("submitted");
+      expect(result.checkpoint.confirmation).toContain("Thank you for applying");
+      expect(result.nameValue).toBe("Test Candidate");
+      expect(result.emailValue).toBe("test@example.com");
+      expect(result.authorizationValue).toBe("Yes");
+      expect(result.fileName).toBe("verified-resume.pdf");
+      expect(result.confirmationVisible).toBe(true);
+    }, 30_000);
+
+    it(`${provider} pauses on an unknown required question after Continue`, async () => {
+      const result = await run(provider, "unknown-required");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("Unanswered legal question");
+      expect(result.fileName).toBe("verified-resume.pdf");
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
+
+    it(`${provider} rejects a switch to another requisition before Submit`, async () => {
+      const result = await run(provider, "wrong-requisition");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("original requisition");
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
+  }
+});

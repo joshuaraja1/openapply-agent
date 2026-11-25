@@ -84,7 +84,9 @@ export class AgentBrowser {
       const role = await handle.getAttribute("role");
       const metadata = await handle.evaluate((element) => {
         const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-        const label = field.labels?.[0]?.textContent?.trim();
+        const labelNode = field.labels?.[0]?.cloneNode(true) as HTMLElement | undefined;
+        labelNode?.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
+        const label = labelNode?.textContent?.trim();
         return {
           label: label ?? field.getAttribute("aria-label") ?? field.getAttribute("placeholder")
             ?? field.getAttribute("name") ?? field.textContent ?? "",
@@ -158,7 +160,7 @@ export class AgentBrowser {
     if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
       throw new Error("Selected control is not a submit action");
     }
-    if (await page.getByText(expectedConfirmation, { exact: false }).count()) {
+    if (await page.getByText(expectedConfirmation, { exact: false }).filter({ visible: true }).count()) {
       throw new Error("Confirmation was already visible before submission");
     }
     const existingPages = new Set(this.context.pages());
@@ -166,7 +168,8 @@ export class AgentBrowser {
     const popup = this.context.pages().find((candidate) => !existingPages.has(candidate) && !candidate.isClosed());
     if (popup) this.page = popup;
     this.assertAllowedPage();
-    const confirmation = this.requirePage().getByText(expectedConfirmation, { exact: false }).first();
+    const confirmation = this.requirePage().getByText(expectedConfirmation, { exact: false })
+      .filter({ visible: true }).first();
     await confirmation.waitFor({ timeout: 10000 });
     return (await confirmation.innerText()).trim();
   }

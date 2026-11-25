@@ -29,10 +29,10 @@ function fixture(fieldName = "email", fieldType: string | null = null, text = ""
     goto: vi.fn(async () => {}),
     evaluate: vi.fn(async () => ({ text: text.slice(0, 50_000), overflow: text.length > 50_000 })),
     locator: () => ({ elementHandles: async () => [handle] }),
-    getByText: () => ({
+    getByText: () => ({ filter: () => ({
       count: async () => confirmationVisible ? 1 : 0,
       first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }),
-    }),
+    }) }),
   };
   const context = {
     route: vi.fn(async () => {}),
