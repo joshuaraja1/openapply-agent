@@ -26,7 +26,7 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
-import { isEligibleQueuedJob } from "./queue-eligibility.js";
+import { scoreJob } from "../matching/score.js";
 
 const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema,
   source: sourceSchema.optional() })) });
@@ -57,6 +57,7 @@ const emailCode = authPolicy?.emailVerification.autoEnter
     join(root, "email-code-claims.enc.json"), key)) : undefined;
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
+const needsReview: { jobId: string; reasons: string[] }[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
 const jobSources = new Map<string, (typeof discovery.sources)[number]>();
 for (const source of discovery.sources.filter((entry) => entry.enabled)) {
@@ -72,8 +73,13 @@ for (const entry of queue.queue) {
     && entry.source.company === job.company) {
     jobSources.set(job.id, entry.source);
   }
-  if ((jobSources.has(job.id) || sources.has(`${job.provider}:${job.company}`))
-    && isEligibleQueuedJob(job, candidate, preferences)) eligible.push(job);
+  if (jobSources.has(job.id) || sources.has(`${job.provider}:${job.company}`)) {
+    const match = scoreJob(job, candidate, preferences);
+    if (match.eligible) eligible.push(job);
+    else if (match.reviewFlags.includes("Review mandatory qualifications before applying")) {
+      needsReview.push({ jobId: job.id, reasons: match.reasons });
+    }
+  }
 }
 const connection = config.browserRuntime === "browseros"
   ? await connectBrowserOs(config.browserEndpoint!) : undefined;
@@ -120,7 +126,7 @@ try {
       await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
     }
   });
-  console.log(JSON.stringify({ date: date(), outcomes }));
+  console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
   await connection?.close();
 }
