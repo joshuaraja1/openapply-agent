@@ -61,10 +61,11 @@ every merge. A PR is opened as a draft until its controlled tests pass.
 | 48 | Disable password import by default | 47 | Policy test rejects implicit password import |
 | 49 | Job-bound multistep submission and confirmation | 47 | Wrong-requisition synthetic portal cannot be recorded as submitted |
 | 50 | Owned browser lifecycle and profile lock | 48 | Restart preserves a synthetic session; concurrent launch fails safely |
-| 51 | Local browser protocol for discovery, Overleaf, and forms | 50 | Same controlled page works through local and BrowserOS adapters |
-| 52 | Runtime selection, scheduler, and crash recovery | 49, 51 | Kill at each checkpoint; no duplicate final click |
+| 51 | Owned-browser signed-in discovery | 50 | Local profile collects bounded leads; BrowserOS remains a rollback option |
+| 51b | Owned-browser application and Overleaf adapters | 51 | Synthetic application and render flows work through local and BrowserOS adapters |
+| 52 | Runtime selection, scheduler, and crash recovery | 49, 51b | Kill at each checkpoint; no duplicate final click |
 | 53 | Windows private-file ACL enforcement | 47 | Real Windows CI rejects shared input/output/profile paths |
-| 54 | Greenhouse and Ashby application adapters | 49, 51 | Sanitized multi-step fixtures and synthetic portal E2E |
+| 54 | Greenhouse and Ashby application adapters | 49, 51b | Sanitized multi-step fixtures and synthetic portal E2E |
 | 55 | Lever, SmartRecruiters, and Workday adapters | 54 | Provider fixtures, drift cases, and conditional question handoffs |
 | 56 | Page-image PDF QA and render policy | 47 | Golden PDFs catch clipping/overlap; uncertain images pause |
 | 57 | Local first-run and handoff UI | 52, 53, 56 | Keyboard-only setup, user-supplied OAuth client fallback, dry run, and resume E2E |
