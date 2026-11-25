@@ -54,7 +54,7 @@ export class AgentBrowser {
             return;
           }
         }
-        await route.continue();
+        await route.fallback();
       });
       this.routingReady = true;
     }
@@ -69,6 +69,12 @@ export class AgentBrowser {
     this.assertAllowedPage();
     this.controls.clear();
     this.generation += 1;
+    const pageText = await page.evaluate(() => {
+      const text = document.body?.innerText ?? "";
+      return { text: text.slice(0, 50_000), overflow: text.length > 50_000 };
+    });
+    if (pageText.overflow) throw new Error("Application page text exceeds the safe snapshot limit");
+    const visibleText = pageText.text;
     const handles = await page.locator("a, button, input, textarea, select, [role=button]").elementHandles();
     const controls: BrowserControl[] = [];
     for (const handle of handles) {
@@ -96,7 +102,7 @@ export class AgentBrowser {
       controls.push({ ref, tag, role, name: name.trim(), type, value,
         required: metadata.required, options: metadata.options });
     }
-    return { url: page.url(), title: await page.title(), controls };
+    return { url: page.url(), title: await page.title(), controls, visibleText };
   }
 
   async act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot> {

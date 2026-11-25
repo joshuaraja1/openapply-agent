@@ -49,6 +49,7 @@ function browserFixture(extraRequired = false) {
     click: async () => { confirmationVisible = true; },
   }));
   const page = { url: () => job.applicationUrl, title: async () => "Apply", goto: async () => {},
+    evaluate: async () => ({ text: "Example Co Software Engineer application", overflow: false }),
     locator: () => ({ elementHandles: async () => handles }),
     getByText: () => ({ count: async () => confirmationVisible ? 1 : 0,
       first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) };
