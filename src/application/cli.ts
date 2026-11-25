@@ -8,6 +8,7 @@ import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
 import { loadApprovedHumanAnswers } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { approvedDestinationHost, runApplicationPackage } from "./runner.js";
@@ -15,6 +16,8 @@ import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
+
+await holdWorkflowLease();
 
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private application package JSON file");

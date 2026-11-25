@@ -2,9 +2,12 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import type { ApplicationCheckpoint } from "./state-machine.js";
+
+await holdWorkflowLease();
 
 const jobId = process.env.OPENAPPLY_JOB_ID;
 if (!jobId) throw new Error("Set OPENAPPLY_JOB_ID to an exact job ID");

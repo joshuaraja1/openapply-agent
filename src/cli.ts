@@ -13,6 +13,7 @@ import { browserLeadsFileSchema, verifyOfficialBrowserLeads } from "./browser/ve
 import { persistDiscoveryOutput } from "./storage/discovery-output.js";
 import { readPrivateFile } from "./storage/private-path.js";
 import { openDefaultSqliteRuntimeIfPresent } from "./storage/sqlite-runtime.js";
+import { holdWorkflowLease } from "./storage/workflow-lease.js";
 import type { DiscoveryState } from "./types.js";
 
 const inputPath = process.env.OPENAPPLY_INPUT ?? "examples/discovery-input.json";
@@ -21,6 +22,7 @@ const preferencesPath = process.env.OPENAPPLY_PREFERENCES ?? "examples/search-pr
 const statePath = process.env.OPENAPPLY_STATE ?? "storage/state.json";
 const outputPath = process.env.OPENAPPLY_OUTPUT ?? "output/application-queue.json";
 const browserLeadsPath = process.env.OPENAPPLY_BROWSER_LEADS;
+await holdWorkflowLease();
 
 async function json(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8"));

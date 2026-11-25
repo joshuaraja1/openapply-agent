@@ -15,6 +15,7 @@ import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
@@ -30,6 +31,7 @@ import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
+await holdWorkflowLease();
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
 const config = queueRunnerConfigSchema.parse(await json(configPath));

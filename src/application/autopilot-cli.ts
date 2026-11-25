@@ -1,5 +1,8 @@
 import { readPrivateFile } from "../storage/private-path.js";
 import { queueRunnerConfigSchema, setDiscoveryEnvironment } from "./queue-config.js";
+import { holdWorkflowLease } from "../storage/workflow-lease.js";
+
+await holdWorkflowLease();
 
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");

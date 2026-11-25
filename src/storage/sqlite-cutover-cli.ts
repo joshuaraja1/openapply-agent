@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { holdWorkflowLease } from "./workflow-lease.js";
 import { join } from "node:path";
 import { userInfo } from "node:os";
 import { queueRunnerConfigSchema } from "../application/queue-config.js";
@@ -9,6 +10,8 @@ import { EncryptedApplicationStateStore } from "./encrypted-state.js";
 import { stageSqliteMigration } from "./sqlite-migration.js";
 import { activateSqliteRuntime, DEFAULT_SQLITE_PATH, ENCRYPTED_STATE_FILES,
   openActiveSqliteRuntime, rollbackActiveSqliteRuntime } from "./sqlite-runtime.js";
+
+await holdWorkflowLease();
 
 if (!process.argv.includes("--confirm-inactive")) {
   throw new Error("Stop the discovery and application workers, then run with --confirm-inactive");
