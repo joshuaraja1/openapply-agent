@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
@@ -72,3 +72,16 @@ async function runAcl(path: string, action: "secure" | "assert"): Promise<void> 
 
 export const secureWindowsPrivatePath = (path: string): Promise<void> => runAcl(path, "secure");
 export const assertWindowsPrivatePath = (path: string): Promise<void> => runAcl(path, "assert");
+
+/** Create one directory privately, or reject an existing directory with a shared ACL. */
+export async function ensureWindowsPrivateDirectory(path: string): Promise<void> {
+  if (process.platform !== "win32") throw new Error("Windows ACL checks require Windows");
+  try {
+    await mkdir(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    await assertWindowsPrivatePath(path);
+    return;
+  }
+  await secureWindowsPrivatePath(path);
+}

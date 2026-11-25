@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { AsyncEntry } from "@napi-rs/keyring";
 import type { SecretStore } from "./contracts.js";
+import { assertWindowsPrivatePath, ensureWindowsPrivateDirectory, secureWindowsPrivatePath } from "./windows-acl.js";
 
 interface KeychainEntry {
   getPassword(): Promise<string | null>;
@@ -48,22 +49,29 @@ export class MacKeychainSecretStore implements SecretStore {
 
 /** Lock key initialization under one canonical path per OS user and reference. */
 export async function getOrCreateStateKey(store: SecretStore, reference: string): Promise<Buffer> {
-  if (!/^(keychain|secret-service):\/\/[A-Za-z0-9._/@:-]+$/.test(reference)) {
+  if (!/^(keychain|secret-service|credential-manager):\/\/[A-Za-z0-9._/@:-]+$/.test(reference)) {
     throw new Error("Expected an operating-system secret reference for the application key");
   }
   const root = join(userInfo().homedir, ".openapply-agent");
   const parentPath = join(root, "key-init");
   const name = createHash("sha256").update(reference).digest("hex");
   const lock = join(parentPath, `${name}.lock`);
-  await mkdir(parentPath, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") {
+    await ensureWindowsPrivateDirectory(root);
+    await ensureWindowsPrivateDirectory(parentPath);
+  } else {
+    await mkdir(parentPath, { recursive: true, mode: 0o700 });
+  }
   for (const path of [root, parentPath]) {
     const metadata = await lstat(path);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Key lock parent must be a real directory");
     if (process.getuid && metadata.uid !== process.getuid()) throw new Error("Key lock directory has another owner");
-    if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) throw new Error("Key lock directory must be private");
+    if (process.platform === "win32") await assertWindowsPrivatePath(path);
+    else if ((metadata.mode & 0o077) !== 0) throw new Error("Key lock directory must be private");
   }
   await mkdir(lock, { mode: 0o700 });
   try {
+    if (process.platform === "win32") await secureWindowsPrivatePath(lock);
     const existing = await store.get(reference);
     if (existing) return decodeStateKey(existing);
     const generated = randomBytes(32).toString("base64");
