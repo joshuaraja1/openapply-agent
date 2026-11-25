@@ -5,8 +5,9 @@ OpenApply Agent is a privacy-first, human-in-the-loop workflow for discovering f
 The scheduled runner can submit supported applications when the user's private
 policy authorizes it and records them as submitted only after employer
 confirmation. This repository is still a
-development project, not a packaged autonomous consumer app. Queued runs depend
-on a separately installed BrowserOS neo and a signed-in Overleaf project; some
+development project, not a packaged autonomous consumer app. Queued runs need
+a signed-in Overleaf project. The BrowserOS queue is the established path; an
+owned-browser preview supports simple forms without a separate installation. Some
 portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
 The remaining PR sequence and release gates are in the
 [autonomy release requirements](docs/autonomy-release-requirements.md).
@@ -77,8 +78,8 @@ To render with OpenApply's owned Chromium profile, set `"browserRuntime": "owned
 and remove `browserEndpoint` from the private input. Sign in to Overleaf in that
 profile using `npm run browser:open` first. The generated package stays bound
 to the owned runtime; `application:run` uses the same profile and rejects a
-BrowserOS endpoint for that package. The scheduled queue still uses BrowserOS
-until owned application recovery and handoffs pass their release gates.
+BrowserOS endpoint for that package. The scheduled queue can also select the
+owned browser, but owned application recovery and handoffs remain release gates.
 `expectedConfirmation` must match an employer confirmation after submission;
 without it, the runner pauses for a human instead of reporting success.
 
@@ -223,7 +224,7 @@ npm run browser:open
 
 Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and exports listing link labels and URLs to the lead file; it does not export cookies, passwords, or full page text. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
 
-Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
+Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. The owned-browser queue preview also supports Overleaf rendering and simple application forms. Account creation and human-handoff recovery still need the release tests in the roadmap.
 
 ## Supported discovery sources
 

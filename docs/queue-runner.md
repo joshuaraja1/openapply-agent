@@ -2,7 +2,7 @@
 
 The queue runner consumes a discovery queue, creates an evidence-backed Jake
 résumé in a dedicated private Overleaf project, verifies the PDF, then opens
-each official application in the persistent local browser. It processes jobs
+each official application in a persistent local browser. It processes jobs
 sequentially. A Keychain-backed encrypted reservation file enforces the lower
 of `dailyTarget` and `dailyHardCap` across restarts. Reservations remain spent
 after failures or uncertain submissions so a crash cannot exceed the cap.
@@ -14,6 +14,12 @@ and source before retrying manually.
    `authenticationPolicyPath` only after creating a private policy and storing
    its account passwords in the operating-system secret store; otherwise remove
    that optional property.
+   For the owned-browser preview, set `"browserRuntime": "owned"` and remove
+   `browserEndpoint`. Sign in to Overleaf and any job boards with
+   `npm run browser:open` first. The queue then uses the dedicated local profile
+   for Overleaf and supported employer forms without a BrowserOS installation.
+   Owned human-handoff recovery and account registration remain release gates;
+   use the BrowserOS path for portals that need those flows.
 2. Put the completed candidate, preferences, and discovery JSON in private
    files. Configure official sources in discovery input and enable them.
    Set `allowedApplicationHosts` on each source to exact employer application

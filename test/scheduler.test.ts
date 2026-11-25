@@ -32,6 +32,12 @@ describe("macOS background schedule", () => {
     setDiscoveryEnvironment(queue, env);
     expect(env.OPENAPPLY_CANDIDATE).toBe(queue.candidatePath);
     expect(env.OPENAPPLY_OUTPUT).toBe(queue.queuePath);
+    expect(queue.browserRuntime).toBe("browseros");
     expect(() => queueRunnerConfigSchema.parse({ ...queue, candidatePath: "candidate.json" })).toThrow();
+    const { browserEndpoint: _endpoint, ...withoutEndpoint } = queue;
+    const owned = queueRunnerConfigSchema.parse({ ...withoutEndpoint, browserRuntime: "owned" });
+    expect(owned.browserEndpoint).toBeUndefined();
+    expect(() => queueRunnerConfigSchema.parse({ ...owned, browserEndpoint: queue.browserEndpoint })).toThrow();
+    expect(() => queueRunnerConfigSchema.parse({ ...withoutEndpoint, browserRuntime: "browseros" })).toThrow();
   });
 });
