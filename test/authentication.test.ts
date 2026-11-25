@@ -53,7 +53,7 @@ describe("authentication policy", () => {
       await writeFile(path, JSON.stringify(validPolicy), { mode: 0o600 });
       expect((await loadAuthenticationPolicy(path)).accounts[0]?.id).toBe("jobs");
       await chmod(path, 0o644);
-      await expect(loadAuthenticationPolicy(path)).rejects.toThrow("private regular file");
+      await expect(loadAuthenticationPolicy(path)).rejects.toThrow("unsafe permissions");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("fails closed for an old password-import policy until its private file is updated", async () => {

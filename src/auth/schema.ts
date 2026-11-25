@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { lstat, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { assertPrivateFile } from "../storage/private-path.js";
 
 const secretReferenceSchema = z.string().regex(
   /^(keychain|credential-manager|secret-service):\/\/[A-Za-z0-9._/@:-]+$/,
@@ -102,14 +103,10 @@ export type AuthenticationPolicy = z.infer<typeof authenticationPolicySchema>;
 export type SiteAccount = z.infer<typeof siteAccountSchema>;
 
 export async function loadAuthenticationPolicy(path: string): Promise<AuthenticationPolicy> {
-  if (process.platform === "win32" || !isAbsolute(path)) {
+  if (!isAbsolute(path)) {
     throw new Error("Authentication policy requires an absolute private file path");
   }
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())
-    || (info.mode & 0o077) !== 0) {
-    throw new Error("Authentication policy must be a private regular file");
-  }
+  await assertPrivateFile(path);
   return authenticationPolicySchema.parse(JSON.parse(await readFile(path, "utf8")));
 }
 
