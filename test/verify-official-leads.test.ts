@@ -20,12 +20,30 @@ describe("official browser lead verification", () => {
       .toBe("ashby");
     expect(officialSourceForLead("https://jobs.eu.lever.co/acme/abc-123")?.source.provider)
       .toBe("lever");
+    expect(officialSourceForLead("https://jobs.smartrecruiters.com/Acme/744000138717897-software-engineer")?.postingId)
+      .toBe("744000138717897");
     for (const url of ["http://job-boards.greenhouse.io/example/jobs/1234",
       "https://job-boards.greenhouse.io.evil.test/example/jobs/1234",
       "https://job-boards.greenhouse.io/example/jobs/1234/other",
-      "https://jobs.ashbyhq.com/acme", "https://www.linkedin.com/jobs/view/1234/"]) {
+      "https://jobs.ashbyhq.com/acme", "https://www.linkedin.com/jobs/view/1234/",
+      "https://jobs.smartrecruiters.com.evil.test/Acme/744000138717897",
+      "https://jobs.smartrecruiters.com/Acme/744000138717897/other"]) {
       expect(officialSourceForLead(url)).toBeNull();
     }
+  });
+
+  it("promotes a SmartRecruiters slug only when its posting ID is live", async () => {
+    const url = "https://jobs.smartrecruiters.com/Acme/744000138717897-software-engineer";
+    const boardLead = { ...lead, url };
+    const official = { ...live, id: "smartrecruiters:Acme:744000138717897" as const,
+      provider: "smartrecruiters" as const, company: "Acme", sourceUrl: url,
+      applicationUrl: `${url}/apply` };
+    expect(await verifyOfficialBrowserLeads([boardLead], new Date(), async () => []))
+      .toHaveLength(0);
+    const verified = await verifyOfficialBrowserLeads([boardLead], new Date(), async () => [official]);
+    expect(verified).toHaveLength(1);
+    expect(verified[0]?.source.provider).toBe("smartrecruiters");
+    expect(verified[0]?.source.allowedApplicationHosts).toContain("jobs.smartrecruiters.com");
   });
 
   it("requires a matching live posting and deduplicates repeated leads", async () => {

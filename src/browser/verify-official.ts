@@ -39,6 +39,13 @@ export function officialSourceForLead(rawUrl: string): OfficialLead | null {
       region: url.hostname === "jobs.eu.lever.co" ? "eu" : "global",
       enabled: true, allowedApplicationHosts: [url.hostname] }, postingId: parts[1]! };
   }
+  if (url.hostname === "jobs.smartrecruiters.com" && parts.length === 2
+    && slug.test(parts[0]!)) {
+    const id = /^(\d{6,20})(?:-[a-z0-9-]+)?$/i.exec(parts[1]!);
+    if (id) return { source: { provider: "smartrecruiters", company: parts[0]!,
+      companyIdentifier: parts[0]!, enabled: true,
+      allowedApplicationHosts: [url.hostname] }, postingId: id[1]! };
+  }
   return null;
 }
 
