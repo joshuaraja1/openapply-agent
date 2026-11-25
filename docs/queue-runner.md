@@ -75,6 +75,14 @@ the verified requisition in its private profile and refills the résumé and
 approved plain-text answers. It cannot restore unsaved in-page challenge state;
 if CAPTCHA or MFA completion was not saved to that profile, the run pauses again.
 
+The queue saves a private encrypted claim for each canonical official application
+URL before reserving the daily slot. Referral parameters do not make a second
+board lead eligible; requisition parameters remain part of the identity. A claim
+survives a crash, date rollover, and uncertain submission. On an existing
+installation, prior submissions predate this ledger and need a one-time review
+before unattended use. A reused employer URL also needs manual review rather
+than automatic resubmission.
+
 On macOS, build the project, copy `examples/schedule.example.json` to a private
 path, set its paths and interval, then install a LaunchAgent. It runs at login
 and each interval while the user session is active. The installer writes a
