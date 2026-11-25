@@ -42,6 +42,8 @@ source response and ranks the whole queue again. A job that disappeared from
 a successfully refreshed official source is removed from that run's queue. A
 source outage retains its pending jobs with `sourceVerification: unavailable`;
 the runner skips them until a later successful fetch verifies them again. A
+dropped job is also retained as unavailable when the configured per-source limit
+truncates the official response, because its absence cannot prove closure. A
 dropped queue entry remains eligible for rediscovery if it reappears. The encrypted application checkpoint
 still prevents a confirmed submission from being repeated. Discovery keeps all
 eligible active jobs in the ranked queue; the application runner enforces the

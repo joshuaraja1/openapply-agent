@@ -67,6 +67,9 @@ const verifiedSources = new Map(verified.map((entry) => [entry.job.id, entry.sou
 for (const failure of batch.failures) {
   console.warn(`Skipped ${failure.source.company} (${failure.source.provider}): ${failure.message}`);
 }
+for (const source of batch.incomplete) {
+  console.warn(`Limited ${source.company} (${source.provider}) to ${input.maxJobsPerSource} jobs; absent postings remain unverified`);
+}
 
 const evaluated = fetched.flatMap((job) => {
   const result = evaluateJob(job, input, state, now);
@@ -88,7 +91,10 @@ const newQueue = selectRankedJobs(evaluated, candidate, preferences,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failures,
+const uncertainSources = [...batch.failures, ...batch.incomplete.map((source) => ({
+  source, message: "Source response was truncated",
+}))];
+const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, uncertainSources,
   new Set(newQueue.map((entry) => entry.job.id)))];
 reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
 markJobsReported(state, queue.map((entry) => entry.job.id), now);
