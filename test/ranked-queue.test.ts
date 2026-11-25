@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reconcileReportedQueue, retainUnavailableJobs, runnableJobs } from "../src/application/queue-reconcile.js";
+import { reconcileReportedQueue, retainUnavailableJobs, runnableEntries } from "../src/application/queue-reconcile.js";
 import { queueFileSchema } from "../src/application/queue-schema.js";
 import { selectRankedJobs } from "../src/application/ranked-queue.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../src/candidate/schema.js";
@@ -38,7 +38,7 @@ describe("daily ranked queue", () => {
   it("fails closed for queue entries written before source verification was recorded", () => {
     const legacy = queueFileSchema.parse({ queue: [{ job: job("legacy", 3) }] });
     expect(legacy.queue[0]?.sourceVerification).toBe("unavailable");
-    expect(runnableJobs(legacy.queue)).toEqual([]);
+    expect(runnableEntries(legacy.queue)).toEqual([]);
   });
 
   it("retains a pending job during its source outage but bars it from execution", () => {
@@ -48,8 +48,10 @@ describe("daily ranked queue", () => {
       boardToken: "example", enabled: true, allowedApplicationHosts: [] }, message: "HTTP 503" }];
     const retained = retainUnavailableJobs([{ job: pending, sourceVerification: "verified" }], failures);
     expect(retained).toEqual([{ job: pending, sourceVerification: "unavailable" }]);
-    expect(runnableJobs([{ job: verified, sourceVerification: "verified" }, ...retained]))
-      .toEqual([verified]);
+    expect(runnableEntries([{ job: verified, sourceVerification: "verified" }, ...retained])
+      .map(({ job: item }) => item)).toEqual([verified]);
+    expect(retainUnavailableJobs([{ job: verified, sourceVerification: "verified" }], failures,
+      new Set([verified.id]))).toEqual([]);
 
     const state: DiscoveryState = { jobs: { pending: {
       firstSeenAt: now.toISOString(), lastSeenAt: now.toISOString(), reportedAt: now.toISOString(),

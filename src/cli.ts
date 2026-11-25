@@ -88,7 +88,8 @@ const newQueue = selectRankedJobs(evaluated, candidate, preferences,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
   }));
-const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failures)];
+const queue = [...newQueue, ...retainUnavailableJobs(previousQueue, batch.failures,
+  new Set(newQueue.map((entry) => entry.job.id)))];
 reconcileReportedQueue(state, previouslyQueued, new Set(queue.map((entry) => entry.job.id)));
 markJobsReported(state, queue.map((entry) => entry.job.id), now);
 const queuedTier = selectFreshnessTier(queue.map((entry) => entry.job),

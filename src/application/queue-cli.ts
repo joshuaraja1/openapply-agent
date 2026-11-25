@@ -22,6 +22,7 @@ import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
 import { notifyHumanHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
+import { runnableEntries } from "./queue-reconcile.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
 import { queueFileSchema } from "./queue-schema.js";
@@ -72,8 +73,7 @@ for (const source of discovery.sources.filter((entry) => entry.enabled)) {
   if (sources.has(key)) throw new Error(`Ambiguous configured source for ${key}`);
   sources.set(key, source);
 }
-for (const entry of queue.queue) {
-  if (entry.sourceVerification !== "verified") continue;
+for (const entry of runnableEntries(queue.queue)) {
   const job = entry.job;
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;

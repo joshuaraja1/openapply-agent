@@ -9,14 +9,17 @@ export interface QueuedJob {
 }
 
 /** Preserve pending jobs on a source outage, but never pass them to the runner. */
-export function retainUnavailableJobs(previous: QueuedJob[], failures: SourceFailure[]): QueuedJob[] {
+export function retainUnavailableJobs(
+  previous: QueuedJob[], failures: SourceFailure[], freshlyVerifiedIds: ReadonlySet<string> = new Set(),
+): QueuedJob[] {
   const unavailable = new Set(failures.map(({ source }) => `${source.provider}:${source.company}`));
-  return previous.filter(({ job }) => unavailable.has(`${job.provider}:${job.company}`))
+  return previous.filter(({ job }) => unavailable.has(`${job.provider}:${job.company}`)
+    && !freshlyVerifiedIds.has(job.id))
     .map((entry) => ({ ...entry, sourceVerification: "unavailable" }));
 }
 
-export function runnableJobs(queue: QueuedJob[]): DiscoveredJob[] {
-  return queue.filter((entry) => entry.sourceVerification === "verified").map((entry) => entry.job);
+export function runnableEntries<T extends QueuedJob>(queue: T[]): T[] {
+  return queue.filter((entry) => entry.sourceVerification === "verified");
 }
 
 /** Reported means queued, not submitted. Dropped entries may be rediscovered later. */
