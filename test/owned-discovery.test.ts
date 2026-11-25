@@ -1,7 +1,15 @@
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { BrowserContext, Page, Route } from "playwright";
+import { chromium, type BrowserContext, type Page, type Route } from "playwright";
 import { OwnedDiscoveryBrowserClient } from "../src/browser/owned-discovery.js";
 import { resultText } from "../src/browser/client.js";
+import { discoverBrowserLeads } from "../src/browser/discover.js";
+import { launchBrowser } from "../src/browser/runtime.js";
+import { browserSearchInputSchema } from "../src/browser/schema.js";
 
 function fixture() {
   let currentUrl = "about:blank";
@@ -70,4 +78,40 @@ describe("owned browser discovery", () => {
     await expect(OwnedDiscoveryBrowserClient.create(context,
       ["https://user:password@jobs.example.test/search"])).rejects.toThrow("credential-free HTTPS");
   });
+
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "discovers job links from a synthetic HTTPS page in real Chromium", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-owned-discovery-"));
+      try {
+        const keyPath = join(root, "key.pem");
+        const certPath = join(root, "cert.pem");
+        execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+          "-keyout", keyPath, "-out", certPath, "-subj", "/CN=127.0.0.1"], { stdio: "ignore" });
+        const server = createServer({ key: await readFile(keyPath), cert: await readFile(certPath) },
+          (_request, response) => {
+            response.writeHead(200, { "content-type": "text/html" });
+            response.end(`<a href="/jobs/123?jobId=123&access_token=secret">Software Engineer</a>
+              <a href="/account/settings">Account</a>`);
+          });
+        await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+        try {
+          const address = server.address();
+          if (!address || typeof address === "string") throw new Error("Test server did not bind");
+          const url = `https://127.0.0.1:${address.port}/search`;
+          const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true,
+            launch: (path, options) => chromium.launchPersistentContext(path,
+              { ...options, ignoreHTTPSErrors: true }) });
+          try {
+            const client = await OwnedDiscoveryBrowserClient.create(runtime.context, [url]);
+            const leads = await discoverBrowserLeads(client, browserSearchInputSchema.parse({
+              runtime: "owned", searches: [{ label: "Synthetic", platform: "generic", url }],
+            }));
+            expect(leads.map((lead) => lead.url)).toEqual([
+              `https://127.0.0.1:${address.port}/jobs/123?jobId=123`,
+            ]);
+          } finally { await runtime.close(); }
+        } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+      } finally { await rm(root, { recursive: true, force: true }); }
+    },
+  );
 });
