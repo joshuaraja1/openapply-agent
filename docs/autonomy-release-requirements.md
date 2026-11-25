@@ -67,7 +67,7 @@ every merge. A PR is opened as a draft until its controlled tests pass.
 | 54 | Greenhouse and Ashby application adapters | 49, 51 | Sanitized multi-step fixtures and synthetic portal E2E |
 | 55 | Lever, SmartRecruiters, and Workday adapters | 54 | Provider fixtures, drift cases, and conditional question handoffs |
 | 56 | Page-image PDF QA and render policy | 47 | Golden PDFs catch clipping/overlap; uncertain images pause |
-| 57 | Local first-run and handoff UI plus OAuth clients | 52, 53, 56 | Keyboard-only setup, verified OAuth registration, dry run, and resume E2E |
+| 57 | Local first-run and handoff UI | 52, 53, 56 | Keyboard-only setup, user-supplied OAuth client fallback, dry run, and resume E2E |
 | 58 | Signed installer, updater, export, and deletion | 57 | Clean install, upgrade, rollback, uninstall on supported OSes |
 | 59 | Private beta, real-site smoke tests, and release decision | 54–58 | Monitored beta gates below hold; independent security assessment |
 
@@ -79,6 +79,12 @@ the site's terms and access rules, and the permitted test scope. Controlled CI
 uses only synthetic portals; real employer submissions require an authorized
 real candidate application. BrowserOS remains available until the owned runtime
 passes the same contract tests.
+
+Product-owned Google and Microsoft OAuth registrations are an external release
+prerequisite, tracked separately from PR 57. Their registered redirect URIs,
+consent-screen verification, and scopes must be checked before a consumer build
+offers one-click mailbox setup. Signing/notarization credentials and beta
+candidate consent are also external prerequisites, never CI secrets in a PR.
 
 ## Required test matrix
 
