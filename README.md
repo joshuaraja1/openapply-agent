@@ -39,6 +39,8 @@ git clone https://github.com/joshuaraja1/openapply-agent.git
 cd openapply-agent
 npm ci
 npm run check
+npm run browser:install
+npm run browser:doctor
 ```
 
 ## Quick start

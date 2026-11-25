@@ -9,7 +9,10 @@ BrowserOS cookies do not automatically transfer into it. Sign in inside that
 fallback browser if you choose to use it.
 
 The embedded runtime uses Playwright's Chromium binary. Install it with
-`npx playwright install chromium` after `npm ci`. Pass a dedicated private
+`npm run browser:install` after `npm ci`, then verify it with
+`npm run browser:doctor`. The doctor launches one blank page in the dedicated
+profile, reports startup time and browser version, and prints no cookies or
+account data. Pass a dedicated private
 profile directory to `launchBrowser`. The runtime holds a process lock while
 open, so a second process cannot launch against the same profile.
 After a crash, inspect the process and profile before removing its empty

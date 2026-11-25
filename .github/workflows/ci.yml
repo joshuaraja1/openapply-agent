@@ -9,6 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  owned-browser-smoke:
+    name: Owned Chromium profile smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run browser:doctor
+      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/form-mapper.test.ts
+        env:
+          OPENAPPLY_BROWSER_E2E: "1"
+
   windows-secret-smoke:
     name: Windows Credential Manager smoke
     runs-on: windows-latest

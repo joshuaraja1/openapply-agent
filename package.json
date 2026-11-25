@@ -9,6 +9,8 @@
   "scripts": {
     "start": "tsx src/cli.ts",
     "browser:discover": "tsx src/browser/cli.ts",
+    "browser:install": "playwright install chromium",
+    "browser:doctor": "tsx src/browser/doctor-cli.ts",
     "application:run": "tsx src/application/cli.ts",
     "application:status": "tsx src/application/status-cli.ts",
     "queue:run": "tsx src/application/queue-cli.ts",
