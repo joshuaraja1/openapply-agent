@@ -29,8 +29,9 @@ to the operating-system secret store, never to this repository or JSON files.
    submission only after reviewing the candidate's policy and testing the
    target portals.
 
-The scheduled queue still depends on BrowserOS neo while the owned-browser
-queue and human-resume flow are completed. `setup:init` is a private template
+The scheduled queue's established path uses BrowserOS neo. An owned-browser
+queue preview is tracked in the release PR stack; recovery from human handoffs
+still needs validation. `setup:init` is a private template
 scaffold, not the finished first-run UI or installer. OpenApply cannot promise
 every job on the internet or bypass CAPTCHA, MFA, legal questions, or site
 access controls. See the [release requirements](autonomy-release-requirements.md)

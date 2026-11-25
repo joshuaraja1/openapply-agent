@@ -28,11 +28,11 @@ The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](te
 
 ## Development
 
-Requires Node.js 22.13 or later. BrowserOS neo supplies one persistent signed-in
-profile for job-board discovery, Overleaf rendering, and queued applications.
-The single-job runner also uses BrowserOS when its private package contains a
-local endpoint. A separate persistent Chromium fallback remains available for
-packages without that endpoint. Public ATS discovery needs no browser.
+Requires Node.js 22.13 or later. The owned persistent Chromium profile supports
+signed-in discovery, Overleaf rendering, and individual applications. BrowserOS
+neo is an optional adapter and the established scheduled-queue path. The owned
+scheduled-queue preview is tracked in the release PR stack. Public ATS discovery
+needs no browser.
 
 ```bash
 git clone https://github.com/joshuaraja1/openapply-agent.git
@@ -122,13 +122,13 @@ It records submission only when the configured employer confirmation is visible
 on the approved host and your [attestation](examples/manual-confirmation-attestation.example.json)
 names that exact job, tab, and confirmation URL.
 
-## Set up BrowserOS neo
+## Optional: set up BrowserOS neo
 
 [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) is the local,
 open-source browser used for websites that require a real signed-in session.
-OpenApply does not receive or store your browser passwords. BrowserOS neo must
-be installed, running, and connected before OpenApply can use LinkedIn,
-Jobright, Handshake, Overleaf, or an employer's application portal.
+OpenApply does not receive or store your browser passwords. Install BrowserOS
+neo only if you select its browser runtime; the owned profile instructions below
+work without a separate BrowserOS installation.
 
 ### 1. Install and start BrowserOS neo
 
@@ -223,7 +223,7 @@ npm run browser:open
 
 Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and exports listing link labels and URLs to the lead file; it does not export cookies, passwords, or full page text. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
 
-Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
+Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. The owned profile also supports individual application forms and Overleaf rendering; scheduled owned-browser execution and recovery remain release gates.
 
 ## Supported discovery sources
 
