@@ -35,7 +35,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- --run test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts
+      - run: npm test -- --run test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts
 
   verify:
     name: verify (Node ${{ matrix.node }})

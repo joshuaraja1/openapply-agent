@@ -2,6 +2,8 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:
 import { mkdir, open, readFile, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { ApplicationStateStore } from "./contracts.js";
+import { assertWindowsPrivatePath, ensureWindowsPrivateDirectory, secureWindowsPrivatePath }
+  from "./windows-acl.js";
 
 interface StoredRecord<State> {
   version: number;
@@ -60,18 +62,22 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
   /** Call only after an operator has confirmed no process is using this state file. */
   async recoverLockAfterInspection(confirmedInactive: true): Promise<void> {
     if (confirmedInactive !== true) throw new Error("Recovery requires explicit inactivity confirmation");
+    if (process.platform === "win32") await assertWindowsPrivatePath(`${this.path}.lock`);
     await rmdir(`${this.path}.lock`);
   }
 
   private async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
     const directory = dirname(this.path);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (process.platform === "win32") await ensureWindowsPrivateDirectory(directory);
+    else await mkdir(directory, { recursive: true, mode: 0o700 });
     const metadata = await stat(directory);
     if (process.getuid && metadata.uid !== process.getuid()) throw new Error("State directory has another owner");
-    if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) throw new Error("State directory must be private");
+    if (process.platform === "win32") await assertWindowsPrivatePath(directory);
+    else if ((metadata.mode & 0o077) !== 0) throw new Error("State directory must be private");
     const lock = `${this.path}.lock`;
     await mkdir(lock, { mode: 0o700 });
     try {
+      if (process.platform === "win32") await secureWindowsPrivatePath(lock);
       return await operation();
     } finally {
       await rmdir(lock);
@@ -81,6 +87,10 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
   private async load(): Promise<Record<string, StoredRecord<State>>> {
     let raw: string;
     try {
+      if (process.platform === "win32") {
+        await assertWindowsPrivatePath(dirname(this.path));
+        await assertWindowsPrivatePath(this.path);
+      }
       raw = await readFile(this.path, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return Object.create(null);
@@ -114,6 +124,7 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
       } finally {
         await file.close();
       }
+      if (process.platform === "win32") await secureWindowsPrivatePath(temporary);
       await rename(temporary, this.path);
       if (process.platform !== "win32") {
         const directory = await open(dirname(this.path), "r");
