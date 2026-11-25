@@ -56,13 +56,45 @@ async function fetchSmartRecruitersJobs(
   return details;
 }
 
+async function fetchWorkdayJobs(
+  source: Extract<JobSource, { provider: "workday" }>, now: Date, maxJobs: number,
+): Promise<NormalizedJob[]> {
+  const jobs: NormalizedJob[] = [];
+  const seen = new Set<string>();
+  let offset = 0;
+  let total: number | undefined;
+  while (jobs.length <= maxJobs && (total === undefined || offset < total)) {
+    const limit = Math.min(20, maxJobs + 1 - jobs.length);
+    const response = await fetch(sourceUrl(source), {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ appliedFacets: {}, limit, offset, searchText: source.searchText }),
+    });
+    if (!response.ok) throw new Error(`${source.company} workday returned HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    const page = parseWorkdayJobs(payload, source, now);
+    const metadata = z.object({ total: z.number().int().nonnegative().optional() }).parse(payload);
+    if (!page.length) {
+      if (metadata.total !== undefined && offset < metadata.total) {
+        throw new Error(`${source.company} workday pagination stopped early`);
+      }
+      break;
+    }
+    for (const job of page) {
+      if (seen.has(job.id)) throw new Error(`${source.company} workday repeated a posting across pages`);
+      seen.add(job.id);
+      jobs.push(job);
+    }
+    offset += page.length;
+    total = metadata.total;
+    if (total === undefined && page.length < limit) break;
+  }
+  return jobs;
+}
+
 export async function fetchSource(source: JobSource, now = new Date(), maxJobs = 1_000): Promise<NormalizedJob[]> {
   if (source.provider === "smartrecruiters") return fetchSmartRecruitersJobs(source, maxJobs);
-  const response = await fetch(sourceUrl(source), source.provider === "workday" ? {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: source.searchText }),
-  } : undefined);
+  if (source.provider === "workday") return fetchWorkdayJobs(source, now, maxJobs);
+  const response = await fetch(sourceUrl(source));
   if (!response.ok) throw new Error(`${source.company} ${source.provider} returned HTTP ${response.status}`);
   if (source.provider === "jsonld") {
     return parseJsonLdJobs(await response.text(), { sourceUrl: source.url, company: source.company });
@@ -78,10 +110,5 @@ export async function fetchSource(source: JobSource, now = new Date(), maxJobs =
   if (source.provider === "lever") {
     return parseLeverJobs(payload, { site: source.site, company: source.company });
   }
-  return parseWorkdayJobs(payload, {
-    host: source.host,
-    tenant: source.tenant,
-    site: source.site,
-    company: source.company,
-  }, now);
+  throw new Error("Unsupported source provider");
 }
