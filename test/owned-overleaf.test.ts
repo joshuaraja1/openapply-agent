@@ -30,6 +30,7 @@ function fixture() {
   let downloadDirectory = "";
   const page = {
     goto: vi.fn(async () => {}), url: () => projectUrl,
+    evaluate: vi.fn(async () => {}),
     getByRole: vi.fn((role: string, options: { name: string }) => ({
       count: async () => 1,
       waitFor: async () => {},
@@ -104,7 +105,7 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
         const bytes = Buffer.alloc(200, 7);
         const controls = `<label for="editor">Source Editor editing</label><textarea id="editor"></textarea>
           <button class="compile-button" data-ol-loading="false"
-            onclick="this.dataset.olLoading='true'; setTimeout(() => this.dataset.olLoading='false', 100)">Recompile</button>
+            onclick="this.dataset.olLoading='true'; this.dataset.olLoading='false'">Recompile</button>
           <a download="resume.pdf" href="data:application/pdf;base64,${bytes.toString("base64")}">Download PDF</a>`;
         const html = `<div id="controls"></div><script>setTimeout(() => {
           document.getElementById('controls').innerHTML = atob('${Buffer.from(controls).toString("base64")}');

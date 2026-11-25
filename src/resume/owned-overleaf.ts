@@ -86,8 +86,20 @@ export async function renderOwnedOverleafResume(
     const compile = page.getByRole("button", { name: "Recompile", exact: true });
     await compile.waitFor({ state: "visible", timeout: 15_000 });
     if (await compile.count() !== 1) throw new Error("Overleaf compile control is unavailable");
+    await page.evaluate(() => {
+      const button = document.querySelector(".compile-button");
+      if (!button) throw new Error("Overleaf compile control is unavailable");
+      const observer = new MutationObserver((changes) => {
+        if (changes.some((change) => change.oldValue === "true")
+          || button.getAttribute("data-ol-loading") === "true") {
+          button.setAttribute("data-openapply-compile-started", "true");
+          observer.disconnect();
+        }
+      });
+      observer.observe(button, { attributes: true, attributeFilter: ["data-ol-loading"], attributeOldValue: true });
+    });
     await compile.click();
-    await page.locator('.compile-button[data-ol-loading="true"]').waitFor({ timeout: 5_000 });
+    await page.locator('.compile-button[data-openapply-compile-started="true"]').waitFor({ timeout: 5_000 });
     await page.locator('.compile-button[data-ol-loading="false"]').waitFor({ timeout: 30_000 });
     const downloadLink = page.getByRole("link", { name: "Download PDF", exact: true });
     await downloadLink.waitFor({ state: "visible", timeout: 15_000 });
