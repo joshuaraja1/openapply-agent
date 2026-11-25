@@ -23,7 +23,10 @@ const candidate = candidateProfileSchema.parse({
 });
 
 function portal(provider: Provider, scenario: Scenario): string {
-  const nameLabel = provider === "ashby" ? "Your name" : "Full name";
+  const nameLabel = provider === "ashby" || provider === "lever" ? "Your name" : "Full name";
+  const emailLabel = provider === "workday" ? "Primary Email" : "Email";
+  const phone = provider === "smartrecruiters"
+    ? '<label>Mobile Phone<input name="phone" required></label>' : "";
   const unknown = scenario === "unknown-required"
     ? '<label>Unanswered legal question<input required name="legal"></label>' : "";
   const changeJob = scenario === "wrong-requisition"
@@ -31,7 +34,8 @@ function portal(provider: Provider, scenario: Scenario): string {
   return `<!doctype html><title>Example Co application</title>
     <h1>Example Co Software Engineer</h1>
     <section id="first"><label>${nameLabel}<input name="name" required></label>
-      <label>Email<input type="email" name="email" required></label>
+      <label>${emailLabel}<input type="email" name="email" required></label>
+      ${phone}
       <label>Resume<input type="file" name="resume" required></label>
       <button type="button" onclick="document.getElementById('first').hidden=true;
         document.getElementById('second').hidden=false;${changeJob}">Continue</button></section>
@@ -60,7 +64,8 @@ async function run(provider: Provider, scenario: Scenario) {
     discoveredAt: "2026-11-24T00:00:00Z", isNew: true, isFresh: true,
     freshnessBasis: "first-seen", matchedKeywords: [],
   };
-  const source = { provider, boardToken: "example", boardName: "example", company: job.company,
+  const source = { provider, boardToken: "example", boardName: "example", site: "example",
+    companyIdentifier: "example", host: "jobs.example.com", tenant: "example", company: job.company,
     enabled: true, allowedApplicationHosts: ["jobs.example.com"] };
   const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
     handoff: createApplicationHandoff(job, false), browserRuntime: "owned",
@@ -85,6 +90,8 @@ async function run(provider: Provider, scenario: Scenario) {
     return { checkpoint: result.checkpoint,
       nameValue: await page.locator('input[name="name"]').inputValue(),
       emailValue: await page.locator('input[name="email"]').inputValue(),
+      phoneValue: await page.locator('input[name="phone"]').count()
+        ? await page.locator('input[name="phone"]').inputValue() : null,
       authorizationValue: await page.locator("select").inputValue(),
       fileName: await page.locator('input[type="file"]').evaluate((input) =>
         (input as HTMLInputElement).files?.[0]?.name),
@@ -96,13 +103,14 @@ async function run(provider: Provider, scenario: Scenario) {
 }
 
 describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider portal", () => {
-  for (const provider of ["greenhouse", "ashby"] as const) {
+  for (const provider of ["greenhouse", "ashby", "lever", "smartrecruiters", "workday"] as const) {
     it(`${provider} submits a two-step job-bound form with the verified résumé`, async () => {
       const result = await run(provider, "success");
       expect(result.checkpoint.stage).toBe("submitted");
       expect(result.checkpoint.confirmation).toContain("Thank you for applying");
       expect(result.nameValue).toBe("Test Candidate");
       expect(result.emailValue).toBe("test@example.com");
+      if (provider === "smartrecruiters") expect(result.phoneValue).toBe("555-0100");
       expect(result.authorizationValue).toBe("Yes");
       expect(result.fileName).toBe("verified-resume.pdf");
       expect(result.confirmationVisible).toBe(true);
