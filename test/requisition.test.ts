@@ -17,7 +17,7 @@ describe("requisition binding", () => {
 
   it("rejects changed generic URLs even when unrelated page text mentions the role", () => {
     const generic = { ...job, id: "test:runner:1", applicationUrl: "https://jobs.example.com/apply" };
-    expect(isOriginalRequisition(page(generic.applicationUrl), generic)).toBe(true);
+    expect(isOriginalRequisition(page(generic.applicationUrl), generic)).toBe(false);
     expect(isOriginalRequisition(page("https://jobs.example.com/apply/step-2"), generic)).toBe(false);
     expect(isOriginalRequisition(page("https://jobs.example.com/apply/step-2",
       "Apply to Data Engineer at Example Co. Related jobs: Software Engineer"), generic)).toBe(false);

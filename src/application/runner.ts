@@ -221,12 +221,13 @@ export async function runApplicationPackage(
       || new URL(snapshot.url).hostname.toLowerCase() !== host) {
       throw new Error("Application handoff left the approved employer destination");
     }
-    let loginBlocker: string | undefined;
-    if (loginRecoveryPending && snapshot.url !== job.applicationUrl
+    let loginBlocker: string | undefined = !hasStableRequisitionPath(job)
+      ? "Application URL has no stable requisition reference" : undefined;
+    if (!loginBlocker && loginRecoveryPending && snapshot.url !== job.applicationUrl
       && !hasStableJobReference(snapshot, job)) {
       loginBlocker = "Post-login page cannot be bound to this requisition";
     }
-    if (registrationRecoveryPending && !isRegistrationPage(snapshot)
+    if (!loginBlocker && registrationRecoveryPending && !isRegistrationPage(snapshot)
       && (!identifiesJob(snapshot, job)
         || (snapshot.url !== job.applicationUrl && !hasStableJobReference(snapshot, job)))) {
       loginBlocker = "Post-registration page cannot be bound to this requisition";
@@ -237,7 +238,7 @@ export async function runApplicationPackage(
       && snapshot.controls.some((control) => control.tag === "button"
         && /^(sign in|log in|login)$/i.test(control.name.trim()));
     let authenticatedRedirect = false;
-    if (loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
+    if (!loginBlocker && loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
       const account = dependencies.account;
       if (!account.domains.some((domain) => domain.toLowerCase() === host)) {
         loginBlocker = "Automatic sign-in requires an exact account domain";
@@ -258,13 +259,13 @@ export async function runApplicationPackage(
           recoveryPageUrl = snapshot.url;
         }
       }
-    } else if (loginPage) {
+    } else if (!loginBlocker && loginPage) {
       loginBlocker = "Portal sign-in requires a configured exact-domain account";
     }
     if ((resumingApproval || resumingHuman) && checkpoint.stage === "waiting-human") {
       checkpoint = await workflow.advance(job.id, "applying");
     }
-    if (isRegistrationPage(snapshot)) {
+    if (!loginBlocker && isRegistrationPage(snapshot)) {
       const account = dependencies.account;
       if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
         || !account.domains.some((domain) => domain.toLowerCase() === host)) {

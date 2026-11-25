@@ -360,7 +360,7 @@ describe("application runner", () => {
         act: async () => { current = wrong; return wrong; }, submit,
       }, close: async () => {} }) });
     expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("original requisition");
+    expect(result.checkpoint.blocker).toContain("no stable requisition reference");
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -373,6 +373,7 @@ describe("application runner", () => {
         value: null, required: false, options: [] },
     ] };
     const submit = vi.fn(async () => "Thank you for applying");
+    const fillBatch = vi.fn(async () => page);
     const pkg = applicationPackageSchema.parse({ version: 1, job: genericJob, source, candidate,
       handoff: createApplicationHandoff(genericJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
@@ -383,10 +384,11 @@ describe("application runner", () => {
         path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
       validateOfficial: async () => true, browserFactory: async () => ({ browser: {
         currentUrl: () => page.url, navigate: async () => page,
-        fillBatch: async () => page, act: async () => page, submit,
+        fillBatch, act: async () => page, submit,
       }, close: async () => {} }) });
     expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("job-bound requisition reference");
+    expect(result.checkpoint.blocker).toContain("no stable requisition reference");
+    expect(fillBatch).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
 

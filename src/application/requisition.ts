@@ -34,7 +34,7 @@ export function isOriginalRequisition(page: BrowserSnapshot, job: DiscoveredJob)
     return Boolean(actual) && bound.parts.slice(0, bound.index + 1)
       .every((part, index) => actual![index] === part);
   }
-  return page.url === job.applicationUrl;
+  return false;
 }
 
 /** A receipt must remain on the original job path until a provider can prove another receipt format. */
