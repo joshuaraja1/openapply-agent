@@ -54,7 +54,7 @@ export class AgentBrowser {
             return;
           }
         }
-        await route.continue();
+        await route.fallback();
       });
       this.routingReady = true;
     }
@@ -67,10 +67,14 @@ export class AgentBrowser {
   async snapshot(): Promise<BrowserSnapshot> {
     const page = this.requirePage();
     this.assertAllowedPage();
-    const visibleText = await page.evaluate(() => document.body?.innerText ?? "");
-    if (visibleText.length > 50_000) throw new Error("Application page text exceeds the safe snapshot limit");
     this.controls.clear();
     this.generation += 1;
+    const pageText = await page.evaluate(() => {
+      const text = document.body?.innerText ?? "";
+      return { text: text.slice(0, 50_000), overflow: text.length > 50_000 };
+    });
+    if (pageText.overflow) throw new Error("Application page text exceeds the safe snapshot limit");
+    const visibleText = pageText.text;
     const handles = await page.locator("a, button, input, textarea, select, [role=button]").elementHandles();
     const controls: BrowserControl[] = [];
     for (const handle of handles) {
