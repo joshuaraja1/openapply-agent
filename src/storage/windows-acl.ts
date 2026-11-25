@@ -9,16 +9,22 @@ const aclScript = `
 $ErrorActionPreference = 'Stop'
 $path = $env:OPENAPPLY_ACL_PATH
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$item = Get-Item -LiteralPath $path -ErrorAction Stop
+if ([System.IO.Directory]::Exists($path)) {
+  $item = [System.IO.DirectoryInfo]::new($path)
+  $isDirectory = $true
+} elseif ([System.IO.File]::Exists($path)) {
+  $item = [System.IO.FileInfo]::new($path)
+  $isDirectory = $false
+} else { throw 'Private path is missing' }
 if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not private files' }
-$acl = Get-Acl -LiteralPath $path
+$acl = $item.GetAccessControl()
 if ($env:OPENAPPLY_ACL_ACTION -eq 'secure') {
   $acl.SetAccessRuleProtection($true, $false)
   foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) {
     [void]$acl.RemoveAccessRuleAll($rule)
   }
   $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
-  if ($item.PSIsContainer) {
+  if ($isDirectory) {
     $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
       [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
   }
@@ -27,8 +33,8 @@ if ($env:OPENAPPLY_ACL_ACTION -eq 'secure') {
     $inheritance, [System.Security.AccessControl.PropagationFlags]::None,
     [System.Security.AccessControl.AccessControlType]::Allow)
   [void]$acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $path -AclObject $acl
-  $acl = Get-Acl -LiteralPath $path
+  $item.SetAccessControl($acl)
+  $acl = $item.GetAccessControl()
 }
 if (-not $acl.AreAccessRulesProtected) { throw 'Private path inherits access rules' }
 $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
