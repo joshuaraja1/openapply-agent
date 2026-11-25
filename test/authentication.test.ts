@@ -14,7 +14,7 @@ const validPolicy = {
     strategy: "import-once",
     sourceBrowser: "chrome",
     importCookies: true,
-    importPasswords: true,
+    importPasswords: false,
     persistSessions: true,
     requireInteractiveConsent: true,
   },
@@ -38,6 +38,14 @@ const validPolicy = {
 } as const;
 
 describe("authentication policy", () => {
+  it("defaults password import off and rejects an unsupported browser-vault import", () => {
+    const profile = { ...validPolicy.browserProfile };
+    const { importPasswords: _unused, ...withoutPasswordImport } = profile;
+    expect(authenticationPolicySchema.parse({ ...validPolicy,
+      browserProfile: withoutPasswordImport }).browserProfile.importPasswords).toBe(false);
+    expect(authenticationPolicySchema.safeParse({ ...validPolicy,
+      browserProfile: { ...profile, importPasswords: true } }).success).toBe(false);
+  });
   it("loads only a private user-owned policy file", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-auth-"));
     try {

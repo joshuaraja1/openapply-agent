@@ -22,6 +22,10 @@ The onboarding flow may offer a one-time browser-native import from Chrome,
 Edge, Brave, Firefox, or Safari. Import requires an explicit user action and any
 operating-system consent required to decrypt protected browser data. OpenApply
 does not read or copy raw cookie databases in the background.
+Password import is disabled by the authentication policy even when explicitly
+requested. Enter portal passwords through the OS secret store. A future
+opt-in password migration requires separate review and deletion of any
+browser-vault copy.
 
 After import, the user verifies important sessions such as LinkedIn, Jobright,
 Handshake, Gmail or Microsoft, Overleaf, and commonly used ATS portals. A site

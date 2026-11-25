@@ -32,7 +32,8 @@ export const authenticationPolicySchema = z.strictObject({
     sourceBrowser: z.enum(["chrome", "edge", "brave", "firefox", "safari", "none"]),
     sourceProfile: z.string().min(1).optional(),
     importCookies: z.boolean().default(true),
-    importPasswords: z.boolean().default(true),
+    // Browser-vault imports are disabled until an explicit OS-store migration exists.
+    importPasswords: z.literal(false).default(false),
     persistSessions: z.boolean().default(true),
     requireInteractiveConsent: z.literal(true),
   }),
