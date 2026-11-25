@@ -213,6 +213,9 @@ export class NeoApplicationBrowser {
 
   async fillBatch(actions: FormAction[]): Promise<BrowserSnapshot> {
     if (this.page === undefined || !this.latest) throw new Error("Application page is not open");
+    if (actions.some((action) => action.action === "select")) {
+      throw new Error("BrowserOS cannot verify select options on this page");
+    }
     const before = this.latest;
     const fills = actions.filter((action) => action.action === "fill").map((action) => {
       const control = before.controls.find((entry) => entry.name === action.name
