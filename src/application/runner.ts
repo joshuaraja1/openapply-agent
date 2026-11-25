@@ -14,7 +14,7 @@ import { fillApplicationForm, isEmailCodeControl } from "./form-mapper.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
-import { isOriginalRequisition } from "./requisition.js";
+import { hasStableRequisitionPath, isOriginalRequisition } from "./requisition.js";
 
 export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
@@ -359,13 +359,13 @@ export async function runApplicationPackage(
         }
         recoveryPageUrl = page.url;
       }
-      if (!isOriginalRequisition(page, job)) {
+      if (!isOriginalRequisition(page, job) || (continued && !hasStableRequisitionPath(job))) {
         filled = { snapshot: page, blockers: ["Application step cannot be bound to the original requisition"],
           uploaded: false };
         break;
       }
       filled = await fillApplicationForm(browser, page, pkg.candidate, artifact.path, formOptions);
-      if (!isOriginalRequisition(filled.snapshot, job)) {
+      if (!isOriginalRequisition(filled.snapshot, job) || (continued && !hasStableRequisitionPath(job))) {
         filled.blockers.push("Application step changed to another requisition during form filling");
         break;
       }

@@ -96,14 +96,7 @@ export class AgentBrowser {
       controls.push({ ref, tag, role, name: name.trim(), type, value,
         required: metadata.required, options: metadata.options });
     }
-    let visibleText: string | undefined;
-    try {
-      visibleText = (await page.locator("body").innerText({ timeout: 2000 })).slice(0, 40_000);
-    } catch {
-      // A detached body is handled by the job-binding check as unknown state.
-    }
-    return { url: page.url(), title: await page.title(), controls,
-      ...(visibleText !== undefined ? { visibleText } : {}) };
+    return { url: page.url(), title: await page.title(), controls };
   }
 
   async act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot> {

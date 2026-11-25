@@ -26,7 +26,8 @@ export async function submitApplication(
     || handoff.jobId !== jobId
     || current?.officialUrl !== handoff.applicationUrl || !current.artifactSha256
     || !current.sourceFingerprint || !handoff.allowedDomains.includes(host)
-    || page.protocol !== "https:" || page.hostname !== host || page.username || page.password
+    || page.protocol !== "https:" || page.hostname !== host
+    || page.origin !== new URL(handoff.applicationUrl).origin || page.username || page.password
     || page.href !== new URL(approvedFinalUrl ?? handoff.applicationUrl).href) {
     throw new Error("Application submission is not authorized for this job and destination");
   }
