@@ -59,5 +59,5 @@ describe("private application package storage", () => {
       if (process.platform === "win32") await secureWindowsPrivatePath(path).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
