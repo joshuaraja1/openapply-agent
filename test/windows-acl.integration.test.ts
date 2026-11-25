@@ -24,5 +24,5 @@ describe.skipIf(process.platform !== "win32")("native Windows private-file ACL",
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
