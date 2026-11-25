@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { EncryptedApplicationStateStore } from "../src/storage/encrypted-state.js";
 import { ensurePrivateDirectory } from "../src/storage/private-path.js";
@@ -105,6 +106,43 @@ describe("SQLite runtime cutover", () => {
         discoveryStatePath: f.discoveryStatePath, queuePath: f.queuePath }, true))
         .rejects.toThrow("changed");
       expect(await openActiveSqliteRuntime(f.key, f.databasePath)).toBeUndefined();
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 120_000);
+
+  it("rejects a staged ledger with a deleted record even when its count metadata is altered", async () => {
+    const f = await setup();
+    try {
+      await stageSqliteMigration(f.applicationPath, f.databasePath, f.key, true);
+      const db = new DatabaseSync(f.databasePath);
+      try {
+        db.exec("DELETE FROM legacy_records WHERE rowid = (SELECT MIN(rowid) FROM legacy_records)");
+        db.prepare("UPDATE schema_meta SET value = '1' WHERE key = 'legacy_record_count'").run();
+      } finally { db.close(); }
+      await expect(activateSqliteRuntime(f.databasePath, f.key, { encryptedDirectory: f.privateDir,
+        discoveryStatePath: f.discoveryStatePath, queuePath: f.queuePath }, true))
+        .rejects.toThrow("Staged application records changed");
+      expect(await openActiveSqliteRuntime(f.key, f.databasePath)).toBeUndefined();
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }, 120_000);
+
+  it("rejects a metadata-only rollback that would expose stale legacy state", async () => {
+    const f = await setup();
+    try {
+      await stageSqliteMigration(f.applicationPath, f.databasePath, f.key, true);
+      await activateSqliteRuntime(f.databasePath, f.key, { encryptedDirectory: f.privateDir,
+        discoveryStatePath: f.discoveryStatePath, queuePath: f.queuePath }, true);
+      const active = (await openActiveSqliteRuntime(f.key, f.databasePath))!;
+      await active.store("applications").compareAndSwap("job:after-cutover", undefined,
+        { stage: "submitted" });
+      active.close();
+      const db = new DatabaseSync(f.databasePath);
+      try {
+        db.prepare("UPDATE schema_meta SET value = 'rolled-back' WHERE key = 'migration_state'").run();
+      } finally { db.close(); }
+      await expect(openActiveSqliteRuntime(f.key, f.databasePath))
+        .rejects.toThrow("rollback marker is missing or invalid");
+      expect(await new EncryptedApplicationStateStore(f.applicationPath, f.key)
+        .read("job:after-cutover")).toBeUndefined();
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 120_000);
 

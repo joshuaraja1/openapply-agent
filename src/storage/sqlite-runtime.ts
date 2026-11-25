@@ -56,6 +56,20 @@ function keyCheck(key: Buffer): string {
   return createHmac("sha256", key).update("openapply-sqlite-state-v2-key-check").digest("hex");
 }
 
+function rollbackMarker(db: DatabaseSync, key: Buffer): string {
+  const hmac = createHmac("sha256", key).update("openapply-sqlite-v2-rollback\0");
+  const rows = db.prepare(`SELECT namespace, record_key, version, nonce, tag, ciphertext
+    FROM state_records ORDER BY namespace, record_key`).all() as unknown as
+    Array<StoredRow & { namespace: string; record_key: string }>;
+  for (const row of rows) {
+    hmac.update(JSON.stringify([row.namespace, row.record_key, row.version,
+      Buffer.from(row.nonce).toString("base64"), Buffer.from(row.tag).toString("base64"),
+      Buffer.from(row.ciphertext).toString("base64")]));
+    hmac.update("\n");
+  }
+  return hmac.digest("hex");
+}
+
 function boundPaths(paths: LegacyStatePaths): Array<[string, string]> {
   return [...Object.entries(ENCRYPTED_STATE_FILES).map(([namespace, filename]) =>
     [namespace, join(paths.encryptedDirectory, filename)] as [string, string]),
@@ -122,6 +136,12 @@ export async function activateSqliteRuntime(
     throw new Error("SQLite database and legacy state paths must be distinct");
   }
   const applications = await readStagedRecords(path, key);
+  const sourceApplications = await new EncryptedApplicationStateStore<unknown>(applicationPath, key)
+    .snapshotRecords();
+  const byId = (a: MigratedRecord, b: MigratedRecord) => a.id.localeCompare(b.id);
+  if (!isDeepStrictEqual([...applications].sort(byId), [...sourceApplications].sort(byId))) {
+    throw new Error("Staged application records changed from the original state");
+  }
   const sources: Array<{ namespace: string; path: string; records: MigratedRecord[]; digest: string }> = [
     { namespace: "applications", path: applicationPath, records: applications,
       digest: createHash("sha256").update(await readPrivateFile(applicationPath)).digest("hex") },
@@ -205,12 +225,25 @@ export async function openActiveSqliteRuntime(
   const key = keyBuffer(keyBytes);
   const db = new DatabaseSync(databasePath);
   try {
-    if ((meta(db, "migration_state") === "staged" && meta(db, "schema_version") === "1")
-      || (meta(db, "migration_state") === "rolled-back" && meta(db, "schema_version") === "2")) {
+    const version = meta(db, "schema_version");
+    const migrationState = meta(db, "migration_state");
+    const hasActiveTable = !!db.prepare(`SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'state_records'`).get();
+    if (migrationState === "staged" && version === "1" && !hasActiveTable
+      && meta(db, "key_check") === undefined) {
       db.close();
       return undefined;
     }
-    if (meta(db, "migration_state") !== "active" || meta(db, "schema_version") !== "2") {
+    if (migrationState === "rolled-back" && version === "2" && hasActiveTable) {
+      if (meta(db, "key_check") !== keyCheck(key)
+        || meta(db, "rollback_marker") !== rollbackMarker(db, key)) {
+        throw new Error("SQLite rollback marker is missing or invalid");
+      }
+      db.close();
+      return undefined;
+    }
+    if (migrationState !== "active" || version !== "2" || !hasActiveTable
+      || meta(db, "rollback_marker") !== undefined) {
       throw new Error("Unsupported SQLite state version or cutover status");
     }
     if (meta(db, "key_check") !== keyCheck(key)) throw new Error("SQLite state key does not match");
@@ -296,6 +329,8 @@ export class SqliteRuntime {
     if (confirmedInactive !== true) throw new Error("SQLite rollback requires inactive-run confirmation");
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      this.db.prepare("INSERT INTO schema_meta (key, value) VALUES ('rollback_marker', ?)")
+        .run(rollbackMarker(this.db, this.key));
       this.db.prepare("UPDATE schema_meta SET value = 'rolled-back' WHERE key = 'migration_state'").run();
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
