@@ -8,7 +8,12 @@ const candidate = candidateProfileSchema.parse({
   identity: { fullName: "Example Candidate", location: "Dallas, TX", email: "candidate@example.com", phone: "+1 555 555 0100" },
   authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
   skills: { languages: ["TypeScript", "Python"], frontend: ["React"] },
-  education: [], experience: [], projects: [], quarantinedClaims: [],
+  education: [], experience: [{ employer: "Example", title: "Engineer", employmentType: "Intern",
+    start: "2025", end: "2025", claims: [{ id: "experience-1", claim: "Built TypeScript and Python services with React",
+      skills: ["TypeScript", "Python", "React"],
+      evidence: [{ source: "user-confirmed", uri: "private:work-history" }],
+      status: "user-confirmed", allowedUses: ["matching", "resume"] }] }],
+  projects: [], quarantinedClaims: [],
 });
 const preferences = searchPreferencesSchema.parse({
   version: 1,
@@ -37,6 +42,36 @@ describe("evidence-backed matching", () => {
 
   it("rejects excluded seniority", () => {
     expect(scoreJob({ ...job, title: "Senior Product Engineer" }, candidate, preferences).eligible).toBe(false);
+  });
+
+  it("rejects a title match with no supported skill overlap", () => {
+    const result = scoreJob({ ...job, descriptionText: "Early career C++ firmware development" },
+      candidate, preferences);
+    expect(result.eligible).toBe(false);
+    expect(result.reasons).toContain("No job skill matches an approved candidate claim");
+  });
+
+  it("does not count unverified, quarantined, or resume-only skills", () => {
+    const unsupported = candidateProfileSchema.parse({ ...candidate,
+      skills: { languages: ["Rust"] },
+      experience: [{ ...candidate.experience[0], claims: [{
+        id: "unconfirmed", claim: "Used Rust", skills: ["Rust"],
+        evidence: [{ source: "user", uri: "private:pending" }],
+        status: "needs-confirmation", allowedUses: ["matching"] }] }],
+      quarantinedClaims: [{ id: "quarantined", claim: "Used Rust", skills: ["Rust"],
+        evidence: [{ source: "user", uri: "private:pending" }], status: "do-not-use",
+        allowedUses: ["matching"] }],
+    });
+    expect(scoreJob({ ...job, descriptionText: "Rust" }, unsupported, preferences).eligible).toBe(false);
+  });
+
+  it("matches verified skills containing punctuation without matching partial words", () => {
+    const withCpp = candidateProfileSchema.parse({ ...candidate,
+      experience: [{ ...candidate.experience[0], claims: [{ ...candidate.experience[0]!.claims[0]!,
+        skills: ["C++"] }] }],
+    });
+    expect(scoreJob({ ...job, descriptionText: "Build C++ services" }, withCpp, preferences).eligible).toBe(true);
+    expect(scoreJob({ ...job, descriptionText: "Build C services" }, withCpp, preferences).eligible).toBe(false);
   });
 
   it("targets the configured point in a salary range", () => {
