@@ -119,6 +119,40 @@ describe("agent browser controls", () => {
     }, 30_000,
   );
 
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "fills only exact owned-browser account forms and rejects challenge text", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-account-form-"));
+      const context = await chromium.launchPersistentContext(join(root, "profile"), { headless: true });
+      try {
+        await context.route("https://jobs.example.com/**", async (route) => {
+          const path = new URL(route.request().url()).pathname;
+          const body = path === "/register" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<label>Confirm password<input name="confirm" type="password"></label>'
+            + '<button>Create account</button></form>'
+            : path === "/login" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<button>Sign in</button></form>'
+            : path === "/challenge" ? '<form><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<button>Sign in</button><p>Verify you are human</p></form>'
+            : "<h1>Account ready</h1>";
+          await route.fulfill({ contentType: "text/html", body });
+        });
+        const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
+        await browser.navigate("https://jobs.example.com/register");
+        expect((await browser.register("candidate@example.com", "private-password")).url)
+          .toBe("https://jobs.example.com/home");
+        await browser.navigate("https://jobs.example.com/login");
+        expect((await browser.authenticate("candidate@example.com", "private-password")).url)
+          .toBe("https://jobs.example.com/home");
+        await browser.navigate("https://jobs.example.com/challenge");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("human review");
+      } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
+    }, 30_000,
+  );
+
   it("blocks generic submit clicks and unapproved uploads", async () => {
     const submit = fixture("apply", "submit");
     const first = await submit.browser.navigate("https://jobs.example.com/apply");

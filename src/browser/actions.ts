@@ -145,6 +145,57 @@ export class AgentBrowser {
     return this.snapshot();
   }
 
+  private accountForm(snapshot: BrowserSnapshot, kind: "login" | "registration") {
+    const controls = snapshot.controls;
+    const one = (pattern: RegExp) => {
+      const matches = controls.filter((control) => control.tag === "input" && pattern.test(control.name.trim()));
+      if (matches.length !== 1) throw new Error("Portal credential form is ambiguous");
+      return matches[0]!;
+    };
+    const email = one(/^(email|email address|e-mail)$/i);
+    const password = one(kind === "registration" ? /^(password|create password)$/i
+      : /^(password|account password)$/i);
+    const confirmation = kind === "registration"
+      ? one(/^(confirm password|password confirmation|re-enter password)$/i) : undefined;
+    const submit = controls.filter((control) => control.tag === "button"
+      && (kind === "registration" ? /^(create account|sign up|register)$/i
+        : /^(sign in|log in|login)$/i).test(control.name.trim()));
+    if (submit.length !== 1 || /\b(captcha|verify you are human|security question|i agree|by (?:creating|registering|signing up|clicking)\b.{0,160}\b(?:agree|accept)|agree to (?:the )?(?:terms|privacy)|accept (?:the )?(?:terms|privacy))\b/i
+      .test(snapshot.visibleText ?? "") || controls.some((control) => control.required
+        && control.tag !== "button" && ![email, password, confirmation].includes(control))) {
+      throw new Error("Portal credential form requires human review");
+    }
+    return { email, password, confirmation, submit: submit[0]! };
+  }
+
+  private async submitAccountForm(kind: "login" | "registration", email: string, password: string) {
+    if (!email || !password) throw new Error("Portal credentials are unavailable");
+    let snapshot = await this.snapshot();
+    for (const field of ["email", "password", ...(kind === "registration" ? ["confirmation"] as const : [])] as const) {
+      const controls = this.accountForm(snapshot, kind);
+      snapshot = await this.act(controls[field]!.ref, "fill", field === "email" ? email : password);
+    }
+    const controls = this.accountForm(snapshot, kind);
+    if (controls.email.value !== email) throw new Error("Portal credential form changed during fill");
+    const handle = this.controls.get(controls.submit.ref);
+    if (!handle || !(await handle.evaluate((element) => element.isConnected))) {
+      throw new Error("Portal credential submit control changed");
+    }
+    this.controls.clear();
+    this.generation += 1;
+    await handle.click();
+    this.assertAllowedPage();
+    return this.snapshot();
+  }
+
+  async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
+    return this.submitAccountForm("login", email, password);
+  }
+
+  async register(email: string, password: string): Promise<BrowserSnapshot> {
+    return this.submitAccountForm("registration", email, password);
+  }
+
   async submit(ref: string, expectedConfirmation: string): Promise<string> {
     if (!expectedConfirmation.trim()) throw new Error("Expected employer confirmation is required");
     const page = this.requirePage();

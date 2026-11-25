@@ -873,5 +873,39 @@ describe("application runner", () => {
         }, close: async () => {} }),
       });
     expect(unrelated.checkpoint.blocker).toContain("cannot be bound to this requisition");
+
+    const ownedPkg = applicationPackageSchema.parse({ ...pkg, browserEndpoint: undefined,
+      browserRuntime: "owned" });
+    const ownedRegister = vi.fn(async () => application);
+    const ownedOptions = { ...options, browserFactory: async () => ({ browser: {
+      currentUrl: () => job.applicationUrl, navigate: async () => registration,
+      register: ownedRegister, act: async () => application, fillBatch: async () => application,
+      submit: async () => "Thank you for applying",
+    }, close: async () => {} }) };
+    const ownedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const ownedResult = await runApplicationPackage(ownedPkg, ownedWorkflow, "/tmp/profile", ownedOptions);
+    expect(ownedResult.checkpoint.stage).toBe("submitted");
+    expect(ownedRegister).toHaveBeenCalledOnce();
+
+    const interrupted = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const uncertain = await runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", {
+      ...ownedOptions, browserFactory: async () => ({ browser: {
+        ...(await ownedOptions.browserFactory()).browser,
+        register: async () => { throw new Error("registration uncertain"); },
+      }, close: async () => {} }),
+    });
+    expect(uncertain.checkpoint).toMatchObject({ stage: "waiting-human",
+      blocker: "Account registration may need human completion", browserPageUrl: job.applicationUrl });
+    expect(uncertain.checkpoint.browserPageId).toBeUndefined();
+    await expect(runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", ownedOptions))
+      .rejects.toThrow("inspect or resume");
+    const resumed = await runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", {
+      ...ownedOptions, resumedJobId: job.id,
+      browserFactory: async () => ({ browser: {
+        ...(await ownedOptions.browserFactory()).browser, navigate: async () => application,
+      }, close: async () => {} }),
+    });
+    expect(resumed.checkpoint.stage).toBe("submitted");
+    expect(ownedRegister).toHaveBeenCalledOnce();
   });
 });
