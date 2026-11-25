@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +60,33 @@ describe("persistent browser runtime", () => {
     await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow();
     expect(launch).not.toHaveBeenCalled();
     await rm(`${directory}.lock`, { recursive: true });
+  });
+
+  it("reclaims a lock owned by a dead process and preserves live lock ownership", async () => {
+    const directory = await testProfile();
+    await mkdir(`${directory}.lock`, { mode: 0o700 });
+    await writeFile(join(`${directory}.lock`, "owner.json"),
+      JSON.stringify({ pid: 2147483647, token: "dead-process-token" }), { mode: 0o600 });
+    const launch = vi.fn(async () => ({ close: async () => {} })) as unknown as NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
+    const browser = await launchBrowser({ profileDirectory: directory, launch });
+    expect(launch).toHaveBeenCalledOnce();
+    const owner = JSON.parse(await readFile(join(`${directory}.lock`, "owner.json"), "utf8")) as { pid: number };
+    expect(owner.pid).toBe(process.pid);
+    await expect(launchBrowser({ profileDirectory: directory, launch })).rejects.toThrow("locked");
+    await browser.close();
+    await expect(stat(`${directory}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a symlinked lock owner file", async () => {
+    const directory = await testProfile();
+    const outside = join(directory, "unrelated.json");
+    await writeFile(outside, JSON.stringify({ pid: 2147483647, token: "dead-process-token" }));
+    await mkdir(`${directory}.lock`, { mode: 0o700 });
+    await symlink(outside, join(`${directory}.lock`, "owner.json"));
+    const launch = vi.fn(async () => ({ close: async () => {} })) as unknown as NonNullable<Parameters<typeof launchBrowser>[0]["launch"]>;
+    await expect(launchBrowser({ profileDirectory: directory, launch }))
+      .rejects.toThrow("manual inspection");
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it.skipIf(process.platform === "win32")("rejects a shared profile directory", async () => {
