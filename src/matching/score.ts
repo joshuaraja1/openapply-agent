@@ -12,7 +12,17 @@ export interface JobMatch {
 
 function contains(value: string, term: string): boolean {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`\\b${escaped}\\b`, "i").test(value);
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "i").test(value);
+}
+
+function approvedMatchingSkills(candidate: CandidateProfile): string[] {
+  const claims = [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
+    ...candidate.projects.flatMap((project) => project.claims)];
+  const approved = claims.filter((claim) => (claim.status === "verified" || claim.status === "user-confirmed")
+    && claim.allowedUses.includes("matching"));
+  return [...new Map(approved.flatMap((claim) => claim.skills)
+    .map((skill) => [skill.trim().toLowerCase(), skill.trim()] as const)
+    .filter(([key]) => key.length > 0)).values()];
 }
 
 export function parseSalaryTarget(compensation: string | null, position: number): number | null {
@@ -57,8 +67,16 @@ export function scoreJob(
     reviewFlags: [],
   };
 
-  const skills = [...new Set(Object.values(candidate.skills).flat())];
+  const skills = approvedMatchingSkills(candidate);
   const matchedSkills = skills.filter((skill) => contains(searchable, skill));
+  if (!matchedSkills.length) return {
+    eligible: false,
+    score: 0,
+    reasons: ["No job skill matches an approved candidate claim"],
+    matchedSkills: [],
+    salaryTarget,
+    reviewFlags: ["Review candidate evidence or this role manually"],
+  };
   const reasons = ["Target role family"];
   const reviewFlags: string[] = [];
   let score = 35 + Math.min(30, matchedSkills.length * 3);

@@ -3,6 +3,9 @@
 ## 1. Prepare private inputs
 
 Copy `templates/user/` outside the repository, complete every relevant placeholder, and convert the approved facts into a private candidate JSON file matching `candidateProfileSchema`.
+Automatic matching requires at least one skill shared by the job and an
+approved work-history claim. A skills inventory entry without an evidenced
+claim does not make a role eligible for unattended application.
 
 ## 2. Configure sources
 
