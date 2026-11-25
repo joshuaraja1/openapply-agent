@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +11,8 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
   it("rejects shared inputs and creates owner-only outputs", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-private-files-"));
     const input = join(root, "candidate.md");
+    const shared = join(root, "shared");
+    const sharedInput = join(shared, "candidate.md");
     const directory = join(root, "output");
     const output = join(directory, "candidate.json");
     try {
@@ -18,6 +20,13 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
       await writeFile(input, "candidate fixture");
       await secureWindowsPrivatePath(input);
       await assertPrivateFile(input);
+      await mkdir(shared);
+      await secureWindowsPrivatePath(shared);
+      await writeFile(sharedInput, "candidate fixture");
+      await secureWindowsPrivatePath(sharedInput);
+      execFileSync("icacls", [shared, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
+      await expect(assertPrivateFile(sharedInput)).rejects.toThrow("ACL is unsafe");
+      await secureWindowsPrivatePath(shared);
       execFileSync("icacls", [input, "/grant", "*S-1-1-0:(R)"], { stdio: "ignore" });
       await expect(assertPrivateFile(input)).rejects.toThrow("ACL is unsafe");
       await secureWindowsPrivatePath(input);
@@ -31,6 +40,7 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
       await expect(createPrivateOutput(output, "private fixture\n")).rejects.toThrow("ACL is unsafe");
     } finally {
       await secureWindowsPrivatePath(input).catch(() => {});
+      await secureWindowsPrivatePath(shared).catch(() => {});
       await secureWindowsPrivatePath(output).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }

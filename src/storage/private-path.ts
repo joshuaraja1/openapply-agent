@@ -9,7 +9,10 @@ export async function assertPrivateFile(path: string): Promise<void> {
   if (!info.isFile() || info.isSymbolicLink() || (process.getuid && info.uid !== process.getuid())) {
     throw new Error("Private input must be a regular file owned by this user");
   }
-  if (process.platform === "win32") await assertWindowsPrivatePath(path);
+  if (process.platform === "win32") {
+    await assertWindowsPrivatePath(dirname(path));
+    await assertWindowsPrivatePath(path);
+  }
   else if ((info.mode & 0o077) !== 0) throw new Error("Private input has unsafe permissions");
 }
 
