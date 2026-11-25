@@ -48,6 +48,23 @@ describe("deterministic application field mapping", () => {
       ]);
   });
 
+  it("maps only exact identity aliases on Lever, SmartRecruiters, and Workday", () => {
+    const cases = [
+      { provider: "lever" as const, label: "LinkedIn URL", expected: "https://linkedin.com/in/test" },
+      { provider: "smartrecruiters" as const, label: "Mobile Phone", expected: "555-0100" },
+      { provider: "workday" as const, label: "Primary Email", expected: "test@example.com" },
+    ];
+    for (const { provider, label, expected } of cases) {
+      const plan = planApplicationForm(snapshot(field("1", label), field("2", "Visa sponsorship")),
+        candidate, "/tmp/resume.pdf", { provider, allowMissingResume: true });
+      expect(plan.actions).toContainEqual(expect.objectContaining({ name: label, value: expected }));
+      expect(plan.blockers).toContain("Required field needs an answer: Visa sponsorship");
+    }
+    const unknown = planApplicationForm(snapshot(field("1", "Primary Email")),
+      candidate, "/tmp/resume.pdf", { provider: "lever", allowMissingResume: true });
+    expect(unknown.blockers).toContain("Required field needs an answer: Primary Email");
+  });
+
   it("does not answer sensitive or ambiguous provider questions", () => {
     const plan = planApplicationForm(snapshot(field("1", "Visa sponsorship"),
       field("2", "Your race"), field("3", "LinkedIn Profile"), field("4", "Resume", "file")),

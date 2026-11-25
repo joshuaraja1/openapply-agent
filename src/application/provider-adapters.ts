@@ -23,6 +23,25 @@ const aliases: Partial<Record<Provider, Readonly<Record<string, IdentityKey>>>> 
     "your github profile": "github",
     "personal website url": "portfolio",
   },
+  lever: {
+    "your name": "fullName",
+    "linkedin url": "linkedin",
+    "github url": "github",
+    "personal website": "portfolio",
+  },
+  smartrecruiters: {
+    "mobile phone": "phone",
+    "linkedin profile url": "linkedin",
+    "github profile url": "github",
+    "personal website url": "portfolio",
+  },
+  workday: {
+    "primary phone": "phone",
+    "primary email": "email",
+    "linkedin profile url": "linkedin",
+    "github profile url": "github",
+    "personal website url": "portfolio",
+  },
 };
 
 export function providerIdentityValue(
