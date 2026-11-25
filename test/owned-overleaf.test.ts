@@ -10,6 +10,7 @@ import type { VerifiedResumeArtifact } from "../src/resume/verify-pdf.js";
 import type { CandidateProfile } from "../src/candidate/schema.js";
 import type { DiscoveredJob } from "../src/types.js";
 import type { ResumeSource } from "../src/resume/jake.js";
+import { assertWindowsPrivatePath, secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
 const projectUrl = `https://www.overleaf.com/project/${"a".repeat(24)}`;
 const job = { id: "test:123" } as DiscoveredJob;
@@ -61,9 +62,11 @@ function fixture() {
   return { page, context, close, fill, compileClick, downloadClick };
 }
 
-describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
+describe("owned Overleaf renderer", () => {
   it("compiles, downloads, verifies, and closes the local browser", async () => {
-    const output = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
+    const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
+    const output = join(root, "output");
     try {
       const { context, close, fill, compileClick, downloadClick } = fixture();
       const verify = vi.fn(async (path: string) => verified(path));
@@ -74,6 +77,7 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
       expect(compileClick).toHaveBeenCalledOnce();
       expect(downloadClick).toHaveBeenCalledOnce();
       expect(await readFile(artifact.path)).toHaveLength(200);
+      if (process.platform === "win32") await assertWindowsPrivatePath(artifact.path);
       expect(verify).toHaveBeenCalledWith(artifact.path, job, candidate, source);
       expect(close).toHaveBeenCalledOnce();
       const routeHandler = vi.mocked(context.route).mock.calls[0]?.[1] as (route: Route) => Promise<void>;
@@ -81,11 +85,13 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
       await routeHandler({ request: () => ({ isNavigationRequest: () => true,
         url: () => "https://evil.example/" }), abort } as unknown as Route);
       expect(abort).toHaveBeenCalledOnce();
-    } finally { await rm(output, { recursive: true, force: true }); }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("removes an unverified PDF and releases the profile", async () => {
-    const output = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
+    const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
+    const output = join(root, "output");
     try {
       const { context, close } = fixture();
       await expect(renderOwnedOverleafResume(projectUrl, job, candidate, source, output, {
@@ -94,10 +100,10 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
       })).rejects.toThrow("PDF failed verification");
       expect(await readdir(output)).toEqual([]);
       expect(close).toHaveBeenCalledOnce();
-    } finally { await rm(output, { recursive: true, force: true }); }
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1" || process.platform === "win32")(
     "compiles and downloads through a controlled Chromium page", async () => {
       const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-e2e-"));
       try {
@@ -131,7 +137,7 @@ describe.skipIf(process.platform === "win32")("owned Overleaf renderer", () => {
     }, 30_000,
   );
 
-  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1" || process.platform === "win32")(
     "cancels an oversized browser download before publishing a PDF", async () => {
       const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-large-"));
       try {

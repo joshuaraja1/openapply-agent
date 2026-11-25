@@ -20,7 +20,8 @@ select an owned browser for Overleaf and simple application forms. The browser
 is not bundled into an app, and owned human handoff recovery is incomplete.
 Greenhouse and Ashby have a small set of exact identity-field aliases;
 complete provider-specific application adapters, automated visual PDF inspection
-beyond text geometry checks, remaining Windows artifact ACL and state-key gates,
+beyond text geometry checks, remaining Windows BrowserOS artifact, application
+package, and state-key gates,
 first-run user UI,
 signed installer/updater, and live provider beta validation remain open. The
 general-availability gates in this document have not been met.

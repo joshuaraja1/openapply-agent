@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import type { BrowserRuntime } from "../browser/runtime.js";
@@ -9,6 +9,8 @@ import type { DiscoveredJob } from "../types.js";
 import type { ResumeSource } from "./jake.js";
 import { assertOverleafProjectUrl } from "./overleaf.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "./verify-pdf.js";
+import { ensurePrivateDirectory } from "../storage/private-path.js";
+import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 
 type Launch = (options: { profileDirectory: string; headless: boolean }) => Promise<BrowserRuntime>;
 const maxPdfBytes = 5_000_000;
@@ -20,14 +22,8 @@ export async function renderOwnedOverleafResume(
   options: { launch?: Launch; verify?: typeof verifyResumePdf; profileDirectory?: string } = {},
 ): Promise<VerifiedResumeArtifact> {
   assertOverleafProjectUrl(projectUrl);
-  if (process.platform === "win32") throw new Error("Owned Overleaf output needs Windows artifact ACL support");
   const directory = resolve(outputDirectory);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const metadata = await lstat(directory);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()
-    || (process.getuid && metadata.uid !== process.getuid()) || (metadata.mode & 0o077) !== 0) {
-    throw new Error("Résumé artifact directory must be private to this user");
-  }
+  await ensurePrivateDirectory(directory);
   const runtime = await (options.launch ?? launchBrowser)({
     profileDirectory: options.profileDirectory ?? join(userInfo().homedir, ".openapply-agent", "browser-profile"),
     headless: false,
@@ -47,6 +43,7 @@ export async function renderOwnedOverleafResume(
     });
     const page = await runtime.context.newPage();
     downloadDirectory = await mkdtemp(join(directory, ".openapply-download-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(downloadDirectory);
     const cdp = await runtime.context.newCDPSession(page);
     await cdp.send("Browser.setDownloadBehavior", {
       behavior: "allowAndName", downloadPath: downloadDirectory, eventsEnabled: true,
@@ -126,6 +123,7 @@ export async function renderOwnedOverleafResume(
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
+    if (process.platform === "win32") await secureWindowsPrivatePath(artifactPath);
     const artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source);
     if (artifact.path !== artifactPath || artifact.jobId !== job.id
       || artifact.sourceFingerprint !== source.fingerprint
