@@ -8,10 +8,10 @@ import { assertWindowsPrivatePath, secureWindowsPrivatePath } from "../src/stora
 describe.skipIf(process.platform !== "win32")("native Windows private-file ACL", () => {
   it("secures a directory and file, then rejects a shared ACL", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-acl-"));
+    const file = join(root, "private.txt");
     try {
       await secureWindowsPrivatePath(root);
       await assertWindowsPrivatePath(root);
-      const file = join(root, "private.txt");
       await writeFile(file, "fixture");
       await secureWindowsPrivatePath(file);
       await assertWindowsPrivatePath(file);
@@ -22,6 +22,7 @@ describe.skipIf(process.platform !== "win32")("native Windows private-file ACL",
       execFileSync("icacls", [file, "/grant:r", `${currentUser}:(R)`], { stdio: "ignore" });
       await expect(assertWindowsPrivatePath(file)).rejects.toThrow("ACL is unsafe");
     } finally {
+      await secureWindowsPrivatePath(file).catch(() => {});
       await rm(root, { recursive: true, force: true });
     }
   }, 30_000);
