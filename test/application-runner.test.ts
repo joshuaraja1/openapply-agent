@@ -79,7 +79,7 @@ describe("application runner", () => {
     const get = vi.fn(async () => "private-password");
     let currentUrl = boundJob.applicationUrl;
     const authenticate = vi.fn(async () => { currentUrl = application.url; return application; });
-    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: boundJob, source, candidate,
       handoff: createApplicationHandoff(boundJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/login.pdf", expectedConfirmation: "Thank you for applying" });
@@ -129,7 +129,7 @@ describe("application runner", () => {
     ];
     const account = { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
       passwordSecretRef: "keychain://example", allowAccountCreation: false };
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/wrong-login.pdf", expectedConfirmation: "Thank you for applying" });
@@ -320,7 +320,7 @@ describe("application runner", () => {
       act: async () => { steps.push("continue"); current = second; return second; },
       submit: async () => { steps.push("submit"); return "Thank you for applying"; },
     };
-    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: boundJob, source, candidate,
       handoff: createApplicationHandoff(boundJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/two-step.pdf", expectedConfirmation: "Thank you for applying" });
@@ -349,7 +349,7 @@ describe("application runner", () => {
       ] };
     const submit = vi.fn(async () => "Thank you for applying");
     let current: typeof first | typeof wrong = first;
-    const pkg = applicationPackageSchema.parse({ version: 1, job: boundJob, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: boundJob, source, candidate,
       handoff: createApplicationHandoff(boundJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/wrong-job.pdf", expectedConfirmation: "Thank you for applying" });
@@ -382,7 +382,7 @@ describe("application runner", () => {
       ] };
     let current: typeof first | typeof wrong = first;
     const submit = vi.fn(async () => "Thank you for applying");
-    const pkg = applicationPackageSchema.parse({ version: 1, job: genericJob, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: genericJob, source, candidate,
       handoff: createApplicationHandoff(genericJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/spa-job.pdf", expectedConfirmation: "Thank you for applying" });
@@ -410,7 +410,7 @@ describe("application runner", () => {
     ] };
     const submit = vi.fn(async () => "Thank you for applying");
     const fillBatch = vi.fn(async () => page);
-    const pkg = applicationPackageSchema.parse({ version: 1, job: genericJob, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: genericJob, source, candidate,
       handoff: createApplicationHandoff(genericJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/generic.pdf", expectedConfirmation: "Thank you for applying" });
@@ -436,7 +436,7 @@ describe("application runner", () => {
         value: null, required: false, options: [] },
     ] };
     const submit = vi.fn(async () => "Thank you for applying");
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/missing-resume.pdf", expectedConfirmation: "Thank you for applying" });
@@ -506,7 +506,7 @@ describe("application runner", () => {
         value: null, required: false, options: [] },
     ], visibleText: "Step 1 of 2" };
     const click = vi.fn(async () => ({ ...page, visibleText: `${page.visibleText}\n- heading "Please correct errors"` }));
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/no-op.pdf", expectedConfirmation: "Thank you for applying" });
@@ -557,7 +557,7 @@ describe("application runner", () => {
 
   it("pauses before filling when the portal asks an unknown required question", async () => {
     const browser = browserFixture(true);
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/resume.pdf", expectedConfirmation: "Thank you for applying" });
@@ -573,7 +573,7 @@ describe("application runner", () => {
 
   it("does not open the browser when official-source validation fails", async () => {
     const browser = browserFixture();
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/resume.pdf" });
@@ -593,7 +593,7 @@ describe("application runner", () => {
       const bytes = Buffer.from("%PDF-1.4\ncontrolled-test-pdf\n%%EOF\n");
       await writeFile(path, bytes);
       const browser = browserFixture();
-      const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+      const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
         handoff: createApplicationHandoff(job, true),
         resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
         resumePdfPath: path });
@@ -629,7 +629,7 @@ describe("application runner", () => {
   });
 
   it("rejects an approval token before a final-approval checkpoint exists", async () => {
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/resume.pdf", expectedConfirmation: "Thank you for applying" });
@@ -705,7 +705,7 @@ describe("application runner", () => {
   });
 
   it("rejects a posting whose application host was not independently configured", async () => {
-    const pkg = applicationPackageSchema.parse({ version: 1, job,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job,
       source: { ...source, allowedApplicationHosts: [] }, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
@@ -729,7 +729,7 @@ describe("application runner", () => {
       return page();
     });
     const submit = vi.fn(async () => "Thank you for applying");
-    const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/tmp/email-code.pdf", expectedConfirmation: "Thank you for applying" });

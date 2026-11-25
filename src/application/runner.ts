@@ -41,6 +41,9 @@ export const applicationPackageSchema = z.object({
   authenticationPolicyPath: z.string().min(1).optional(),
   expectedConfirmation: z.string().min(1).optional(),
 }).superRefine((pkg, context) => {
+  if (!pkg.browserRuntime && !pkg.browserEndpoint) {
+    context.addIssue({ code: "custom", message: "Application package must save a browser runtime or endpoint" });
+  }
   if (pkg.browserRuntime === "owned" && pkg.browserEndpoint) {
     context.addIssue({ code: "custom", message: "Owned application package cannot have a BrowserOS endpoint" });
   }

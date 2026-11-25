@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { applicationPackageSchema } from "../src/application/runner.js";
 import { createApplicationHandoff } from "../src/application/handoff.js";
+import { savedBrowserEndpoint } from "../src/application/runtime-selection.js";
 import { renderInputSchema } from "../src/resume/render-input.js";
 
 const example = JSON.parse(await readFile("examples/render-input.example.json", "utf8"));
@@ -24,6 +25,7 @@ describe("single-application browser runtime selection", () => {
       candidate: example.candidate, handoff: createApplicationHandoff(example.job, true),
       resumeSource: { latex: "source", fingerprint: "a".repeat(64), renderToken: "b".repeat(64),
         claimIds: ["example-claim"] }, resumePdfPath: "/private/resume.pdf" };
+    expect(applicationPackageSchema.safeParse(packageFields).success).toBe(false);
     expect(applicationPackageSchema.safeParse({ ...packageFields, browserRuntime: "owned" }).success)
       .toBe(true);
     expect(applicationPackageSchema.safeParse({ ...packageFields, browserRuntime: "browseros",
@@ -32,5 +34,14 @@ describe("single-application browser runtime selection", () => {
       browserEndpoint: example.browserEndpoint }).success).toBe(false);
     expect(applicationPackageSchema.safeParse({ ...packageFields, browserRuntime: "browseros" }).success)
       .toBe(false);
+  });
+
+  it("pins CLI endpoint overrides to the saved package", () => {
+    const owned = { browserRuntime: "owned" as const };
+    const legacy = { browserEndpoint: example.browserEndpoint as string };
+    expect(savedBrowserEndpoint(owned)).toBeUndefined();
+    expect(() => savedBrowserEndpoint(owned, example.browserEndpoint)).toThrow("Owned");
+    expect(savedBrowserEndpoint(legacy, example.browserEndpoint)).toBe(example.browserEndpoint);
+    expect(() => savedBrowserEndpoint(legacy, "http://127.0.0.1:9999/mcp")).toThrow("differs");
   });
 });

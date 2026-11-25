@@ -13,6 +13,7 @@ import { createNativeSecretStore, stateKeyReference } from "../storage/native-se
 import { applicationPackageSchema, approvedDestinationHost, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
+import { savedBrowserEndpoint } from "./runtime-selection.js";
 
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private application package JSON file");
@@ -41,14 +42,7 @@ if (answerPath && !resumedJobId) throw new Error("Approved answers require an ex
 const pending = resumedJobId ? await workflow.current(resumedJobId) : undefined;
 const humanAnswerApproval = answerPath
   ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
-if (pkg.browserRuntime === "owned" && (pkg.browserEndpoint || process.env.OPENAPPLY_BROWSER_ENDPOINT)) {
-  throw new Error("Owned application package cannot use a BrowserOS endpoint");
-}
-const endpoint = pkg.browserRuntime === "owned" ? undefined
-  : process.env.OPENAPPLY_BROWSER_ENDPOINT ?? pkg.browserEndpoint;
-if (pkg.browserRuntime === "browseros" && !endpoint) {
-  throw new Error("BrowserOS application package requires its saved endpoint");
-}
+const endpoint = savedBrowserEndpoint(pkg, process.env.OPENAPPLY_BROWSER_ENDPOINT);
 if (endpoint) assertLocalBrowserEndpoint(endpoint);
 if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
   throw new Error("BrowserOS endpoint differs from the saved application package");
