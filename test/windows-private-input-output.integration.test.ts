@@ -64,16 +64,18 @@ describe.skipIf(process.platform !== "win32")("Windows private onboarding files"
       execFileSync("icacls", [grandparent, "/grant", "*S-1-1-0:(M)"], { stdio: "ignore" });
       expect(await readPrivateFile(path)).toBe("original");
       const pinned = await open(path, "r");
+      let identity;
       try {
-        const identity = await pinned.stat();
-        await rename(privateParent, join(grandparent, "moved"));
-        await mkdir(privateParent);
-        await secureWindowsPrivatePath(privateParent);
-        await writeFile(path, "replacement");
-        await secureWindowsPrivatePath(path);
-        const named = await lstat(path);
-        expect(() => assertSameFileIdentity(identity, named)).toThrow("changed");
+        identity = await pinned.stat();
       } finally { await pinned.close(); }
+      // Windows can prevent renaming a directory while a child handle is open.
+      await rename(privateParent, join(grandparent, "moved"));
+      await mkdir(privateParent);
+      await secureWindowsPrivatePath(privateParent);
+      await writeFile(path, "replacement");
+      await secureWindowsPrivatePath(path);
+      const named = await lstat(path);
+      expect(() => assertSameFileIdentity(identity, named)).toThrow("changed");
     } finally {
       await secureWindowsPrivatePath(grandparent).catch(() => {});
       await rm(root, { recursive: true, force: true });
