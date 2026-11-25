@@ -213,6 +213,18 @@ npm run browser:discover
 
 This produces a deduplicated lead queue. It intentionally does not treat aggregator metadata as authoritative; validate each lead against the employer's official posting before tailoring or applying.
 
+If that lead file contains direct Greenhouse, Ashby, or Lever posting URLs, include it in the next discovery run:
+
+```bash
+OPENAPPLY_INPUT=/private/discovery-input.json \
+OPENAPPLY_CANDIDATE=/private/candidate-profile.json \
+OPENAPPLY_PREFERENCES=/private/search-preferences.json \
+OPENAPPLY_BROWSER_LEADS=/private/browser-leads.json \
+npm start
+```
+
+OpenApply checks each direct ATS URL against the provider's live postings. A missing or incomplete posting does not enter the queue. LinkedIn, Jobright, and Handshake listing pages remain leads until a direct official posting URL is resolved; this command does not infer an employer posting from the board's title or date.
+
 ### Preview: owned browser for signed-in discovery
 
 The local Chromium profile can collect job links without a separate BrowserOS neo installation. Install its browser binary, then open the profile and sign in manually to the job boards you use:
