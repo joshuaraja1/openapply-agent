@@ -44,6 +44,18 @@ npm run browser:install
 npm run browser:doctor
 ```
 
+### Portable CLI package preview
+
+Maintainers can build a local package with `npm pack` and install the resulting
+tarball with `npm install -g ./openapply-agent-0.1.0.tgz`. It contains the
+compiled CLI and public templates; private candidate data is excluded. Run
+`openapply setup` for the private first-run editor, then
+`openapply browser:install` and `openapply browser:open` to prepare the owned
+browser. `openapply autopilot` uses the private queue configuration described
+in [the queue guide](docs/queue-runner.md). `openapply --help` lists the other
+commands. This package is a development preview, not a signed installer or a
+public-release claim.
+
 ## Quick start
 
 1. Run `npm run setup:ui` to edit private user templates in a local browser, or use `npm run setup:init` and edit the Markdown files directly. Complete the structured JSON blocks in files 01–03, then click **Compile profile** or run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON. See [self-hosting](docs/self-hosting.md) for your own accounts and optional OAuth client ID.
