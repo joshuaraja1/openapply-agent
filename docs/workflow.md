@@ -49,6 +49,9 @@ still prevents a confirmed submission from being repeated. Discovery keeps all
 eligible active jobs in the ranked queue; the application runner enforces the
 daily cap after skipping jobs with terminal or waiting checkpoints, so those
 jobs cannot consume every queue slot ahead of usable backfill.
+SmartRecruiters discovery follows the public posting API's offset pagination
+and fetches each posting's detail; an incomplete page or failed detail fetch
+pauses that source instead of treating omitted jobs as closed.
 If the queue file is lost, discovery can reconstruct it from current official
 postings: `reportedAt` means queued, while encrypted application checkpoints
 prevent a completed or uncertain submission from being repeated.

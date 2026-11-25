@@ -1,4 +1,5 @@
 import type { JobSource } from "../config.js";
+import { z } from "zod";
 import { sourceUrl } from "../config.js";
 import { parseAshbyJobs } from "./ashby.js";
 import { parseGreenhouseJobs } from "./greenhouse.js";
@@ -8,7 +9,55 @@ import { parseSmartRecruitersJobs } from "./smartrecruiters.js";
 import { parseWorkdayJobs } from "./workday.js";
 import type { NormalizedJob } from "../types.js";
 
-export async function fetchSource(source: JobSource, now = new Date()): Promise<NormalizedJob[]> {
+async function fetchSmartRecruitersJobs(
+  source: Extract<JobSource, { provider: "smartrecruiters" }>, maxJobs: number,
+): Promise<NormalizedJob[]> {
+  const summaries: NormalizedJob[] = [];
+  const seen = new Set<string>();
+  let offset = 0;
+  let totalFound = Number.POSITIVE_INFINITY;
+  while (offset < totalFound && summaries.length <= maxJobs) {
+    const url = new URL(sourceUrl(source));
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("limit", String(Math.min(100, maxJobs + 1 - summaries.length)));
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${source.company} smartrecruiters returned HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    const page = z.object({ offset: z.number().int().nonnegative(),
+      totalFound: z.number().int().nonnegative() }).parse(payload);
+    if (page.offset !== offset) throw new Error(`${source.company} smartrecruiters returned an unexpected page`);
+    const jobs = parseSmartRecruitersJobs(payload, {
+      companyIdentifier: source.companyIdentifier, company: source.company,
+    });
+    if (!jobs.length && offset < page.totalFound) throw new Error(`${source.company} smartrecruiters pagination stopped early`);
+    for (const job of jobs) {
+      if (seen.has(job.id)) throw new Error(`${source.company} smartrecruiters repeated a posting across pages`);
+      seen.add(job.id);
+      summaries.push(job);
+    }
+    offset += jobs.length;
+    totalFound = page.totalFound;
+  }
+
+  const details: NormalizedJob[] = [];
+  for (let start = 0; start < summaries.length; start += 10) {
+    details.push(...await Promise.all(summaries.slice(start, start + 10).map(async (summary) => {
+      const id = summary.id.split(":").at(-1);
+      const url = `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(source.companyIdentifier)}/postings/${encodeURIComponent(id ?? "")}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${source.company} smartrecruiters detail returned HTTP ${response.status}`);
+      const [detail] = parseSmartRecruitersJobs([await response.json()], {
+        companyIdentifier: source.companyIdentifier, company: source.company,
+      });
+      if (!detail || detail.id !== summary.id) throw new Error(`${source.company} smartrecruiters detail changed posting identity`);
+      return detail;
+    })));
+  }
+  return details;
+}
+
+export async function fetchSource(source: JobSource, now = new Date(), maxJobs = 1_000): Promise<NormalizedJob[]> {
+  if (source.provider === "smartrecruiters") return fetchSmartRecruitersJobs(source, maxJobs);
   const response = await fetch(sourceUrl(source), source.provider === "workday" ? {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -28,23 +77,6 @@ export async function fetchSource(source: JobSource, now = new Date()): Promise<
   }
   if (source.provider === "lever") {
     return parseLeverJobs(payload, { site: source.site, company: source.company });
-  }
-  if (source.provider === "smartrecruiters") {
-    const summaries = parseSmartRecruitersJobs(payload, {
-      companyIdentifier: source.companyIdentifier,
-      company: source.company,
-    });
-    const details = await Promise.all(summaries.map(async (summary) => {
-      const id = summary.id.split(":").at(-1);
-      const detailResponse = await fetch(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(source.companyIdentifier)}/postings/${encodeURIComponent(id ?? "")}`);
-      if (!detailResponse.ok) return summary;
-      const [detail] = parseSmartRecruitersJobs([await detailResponse.json()], {
-        companyIdentifier: source.companyIdentifier,
-        company: source.company,
-      });
-      return detail ?? summary;
-    }));
-    return details;
   }
   return parseWorkdayJobs(payload, {
     host: source.host,

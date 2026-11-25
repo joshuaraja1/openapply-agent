@@ -13,7 +13,7 @@ export interface SourceBatchResult {
   incomplete: JobSource[];
 }
 
-type SourceFetcher = (source: JobSource, now: Date) => Promise<NormalizedJob[]>;
+type SourceFetcher = (source: JobSource, now: Date, maxJobs: number) => Promise<NormalizedJob[]>;
 
 export async function fetchSourceBatch(
   sources: JobSource[],
@@ -24,7 +24,7 @@ export async function fetchSourceBatch(
   const enabledSources = sources.filter((source) => source.enabled);
   const settled = await Promise.allSettled(
     enabledSources.map(async (source) => {
-      const fetched = await fetcher(source, now);
+      const fetched = await fetcher(source, now, maxJobsPerSource);
       return { source, jobs: fetched.slice(0, maxJobsPerSource),
         truncated: fetched.length > maxJobsPerSource };
     }),
