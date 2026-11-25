@@ -33,6 +33,18 @@ export class EncryptedApplicationStateStore<State> implements ApplicationStateSt
     return record?.state === undefined ? undefined : { version: record.version, state: record.state };
   }
 
+  /** Read-only snapshot for a staged, offline migration. Includes tombstone versions. */
+  async snapshotRecords(): Promise<Array<{ id: string; version: number; state?: State }>> {
+    const records = await this.load();
+    return Object.entries(records).map(([id, record]) => {
+      if (!id || !Number.isSafeInteger(record.version) || record.version < 1) {
+        throw new Error("Legacy application state has an invalid record");
+      }
+      return record.state === undefined ? { id, version: record.version }
+        : { id, version: record.version, state: record.state };
+    });
+  }
+
   async compareAndSwap(
     applicationId: string,
     expectedVersion: number | undefined,
