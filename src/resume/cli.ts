@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { applicationPackageSchema } from "../application/runner.js";
@@ -10,10 +10,12 @@ import { createJakeResumeSource } from "./jake.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "./overleaf.js";
 import { renderOwnedOverleafResume } from "./owned-overleaf.js";
 import { renderInputSchema } from "./render-input.js";
+import { createPrivateOutput } from "../storage/private-output.js";
+import { readPrivateFile } from "../storage/private-path.js";
 
 const inputPath = process.env.OPENAPPLY_RENDER_INPUT;
 if (!inputPath) throw new Error("Set OPENAPPLY_RENDER_INPUT to a private render input JSON file");
-const input = renderInputSchema.parse(JSON.parse(await readFile(inputPath, "utf8")));
+const input = renderInputSchema.parse(JSON.parse(await readPrivateFile(inputPath)));
 if (input.browserEndpoint) assertLocalBrowserEndpoint(input.browserEndpoint);
 const job = input.job as DiscoveredJob;
 const template = await readFile("templates/resume/main.tex", "utf8");
@@ -36,7 +38,7 @@ try {
     ...(input.expectedConfirmation ? { expectedConfirmation: input.expectedConfirmation } : {}),
   });
   const packagePath = join(input.outputDirectory, `application-${randomUUID()}.json`);
-  await writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+  await createPrivateOutput(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
   console.log(JSON.stringify({ jobId: job.id, packagePath, pdfPath: artifact.path }));
 } finally {
   await connection?.close();

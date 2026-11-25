@@ -32,7 +32,7 @@ describe("Overleaf renderer adapter", () => {
       .toThrow("Overleaf");
   });
 
-  it("fills, compiles, downloads, and verifies a private artifact", async () => {
+  it.skipIf(process.platform === "win32")("fills, compiles, downloads, and verifies a private artifact", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-overleaf-"));
     try {
       const downloads = join(root, "Downloads");
@@ -72,5 +72,12 @@ describe("Overleaf renderer adapter", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it.skipIf(process.platform !== "win32")("blocks BrowserOS downloads without a Windows artifact ACL", async () => {
+    const client: BrowserToolClient = { callTool: vi.fn(async () => result("unexpected")) };
+    await expect(renderOverleafResume(client, projectUrl, job, candidate, source, "C:\\private"))
+      .rejects.toThrow("Windows private artifact support");
+    expect(client.callTool).not.toHaveBeenCalled();
   });
 });
