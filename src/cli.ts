@@ -7,6 +7,7 @@ import { evaluateJob, markJobsReported, selectFreshnessTier } from "./discovery.
 import { scoreJob } from "./matching/score.js";
 import { createTailoringBrief } from "./resume/tailoring.js";
 import { fetchSourceBatch } from "./sources/batch.js";
+import { browserLeadsFileSchema, verifyOfficialBrowserLeads } from "./browser/verify-official.js";
 import { persistDiscoveryOutput } from "./storage/discovery-output.js";
 import type { DiscoveryState } from "./types.js";
 
@@ -15,6 +16,7 @@ const candidatePath = process.env.OPENAPPLY_CANDIDATE ?? "examples/candidate-pro
 const preferencesPath = process.env.OPENAPPLY_PREFERENCES ?? "examples/search-preferences.json";
 const statePath = process.env.OPENAPPLY_STATE ?? "storage/state.json";
 const outputPath = process.env.OPENAPPLY_OUTPUT ?? "output/application-queue.json";
+const browserLeadsPath = process.env.OPENAPPLY_BROWSER_LEADS;
 
 async function json(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8"));
@@ -28,7 +30,12 @@ const [input, candidate, preferences] = await Promise.all([
 const state = await json(statePath).catch(() => ({ jobs: {} })) as DiscoveryState;
 const now = new Date();
 const batch = await fetchSourceBatch(input.sources, input.maxJobsPerSource, now);
-const fetched = batch.jobs;
+const verified = browserLeadsPath
+  ? await json(browserLeadsPath).then((value) => browserLeadsFileSchema.parse(value))
+    .then((value) => verifyOfficialBrowserLeads(value.leads, now)) : [];
+const fetched = [...new Map([...batch.jobs, ...verified.map((entry) => entry.job)]
+  .map((job) => [job.id, job])).values()];
+const verifiedSources = new Map(verified.map((entry) => [entry.job.id, entry.source]));
 for (const failure of batch.failures) {
   console.warn(`Skipped ${failure.source.company} (${failure.source.provider}): ${failure.message}`);
 }
@@ -51,6 +58,7 @@ const newQueue = tier.jobs
   .slice(0, preferences.applicationPolicy.dailyHardCap)
   .map(({ job, match }) => ({
     job,
+    ...(verifiedSources.has(job.id) ? { source: verifiedSources.get(job.id)! } : {}),
     match,
     tailoringBrief: createTailoringBrief(job, candidate),
     handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),

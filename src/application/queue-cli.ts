@@ -9,6 +9,7 @@ import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
+import { sourceSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
@@ -24,7 +25,8 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, jobSchema, runApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 
-const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema })) });
+const queueSchema = z.object({ queue: z.array(z.object({ job: jobSchema,
+  source: sourceSchema.optional() })) });
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
@@ -53,6 +55,7 @@ const emailCode = authPolicy?.emailVerification.autoEnter
 const template = await readFile("templates/resume/main.tex", "utf8");
 const eligible: DiscoveredJob[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
+const jobSources = new Map<string, (typeof discovery.sources)[number]>();
 for (const source of discovery.sources.filter((entry) => entry.enabled)) {
   const key = `${source.provider}:${source.company}`;
   if (sources.has(key)) throw new Error(`Ambiguous configured source for ${key}`);
@@ -62,7 +65,11 @@ for (const entry of queue.queue) {
   const job = entry.job as DiscoveredJob;
   const current = await workflow.current(job.id);
   if (current && ["submitted", "waiting-human", "submission-uncertain", "submit-claimed", "skipped"].includes(current.stage)) continue;
-  if (sources.has(`${job.provider}:${job.company}`)) eligible.push(job);
+  if (entry.source && entry.source.provider === job.provider
+    && entry.source.company === job.company) {
+    jobSources.set(job.id, entry.source);
+  }
+  if (jobSources.has(job.id) || sources.has(`${job.provider}:${job.company}`)) eligible.push(job);
 }
 const connection = await connectBrowserOs(config.browserEndpoint);
 const client: BrowserToolClient = { callTool: async (request) =>
@@ -74,7 +81,7 @@ try {
   };
   const cap = Math.min(preferences.applicationPolicy.dailyTarget, preferences.applicationPolicy.dailyHardCap);
   const outcomes = await runApplicationQueue(eligible, quota, retries, date, cap, async (job) => {
-    const source = sources.get(`${job.provider}:${job.company}`)!;
+    const source = jobSources.get(job.id) ?? sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
     const artifact = await renderOverleafResume(client, config.overleafProjectUrl, job, candidate,
       resumeSource, config.outputDirectory);
