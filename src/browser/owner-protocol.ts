@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -17,6 +17,14 @@ const ownerRequestSchema = z.discriminatedUnion("action", [
 
 export type OwnerRequest = z.infer<typeof ownerRequestSchema>;
 export type OwnerEnvelope = { request: OwnerRequest; mac: string };
+export const MAX_OWNER_MESSAGE_BYTES = 16_384;
+export type OwnerClaimBinding = Pick<Extract<OwnerRequest, { action: "inspect-tab" }>,
+  "tabId" | "claimId" | "jobId" | "officialUrl" | "packageSha256" | "artifactSha256">;
+
+/** Call once on every owner process start; never reuse an earlier generation. */
+export function createOwnerIdentity(): { secret: Buffer; generation: string } {
+  return { secret: randomBytes(32), generation: randomUUID() };
+}
 
 function assertSecret(secret: Buffer): void {
   if (secret.length !== 32) throw new Error("Browser owner secret must be 32 bytes");
@@ -44,11 +52,14 @@ export class OwnerRequestVerifier {
     this.secret = Buffer.from(secret);
   }
 
-  verify(input: unknown): OwnerRequest {
+  verify(raw: string | Buffer, expectedBinding?: OwnerClaimBinding): OwnerRequest {
     let envelope: OwnerEnvelope;
     try {
-      if (Buffer.byteLength(JSON.stringify(input), "utf8") > 16_384) throw new Error();
-      envelope = z.object({ request: ownerRequestSchema, mac: digest }).strict().parse(input);
+      // Reject transport bytes before JSON parsing. A future socket reader must
+      // also stop buffering once this limit is reached.
+      if (Buffer.byteLength(raw) > MAX_OWNER_MESSAGE_BYTES) throw new Error();
+      envelope = z.object({ request: ownerRequestSchema, mac: digest }).strict()
+        .parse(JSON.parse(raw.toString()) as unknown);
     } catch {
       throw new Error("Invalid browser-owner protocol message");
     }
@@ -56,6 +67,15 @@ export class OwnerRequestVerifier {
     const expected = macFor(envelope.request, this.secret);
     if (!timingSafeEqual(actual, expected) || envelope.request.generation !== this.generation) {
       throw new Error("Browser-owner authentication failed");
+    }
+    if (envelope.request.action === "inspect-tab") {
+      // The caller must obtain this binding from the active durable checkpoint
+      // under the workflow lease. A valid MAC alone never authorizes inspection.
+      if (!expectedBinding || Object.entries(expectedBinding).length !== 6
+        || Object.entries(expectedBinding).some(([key, value]) =>
+          envelope.request[key as keyof OwnerRequest] !== value)) {
+        throw new Error("Browser-owner request does not match the active claim");
+      }
     }
     if (this.seen.has(envelope.request.requestId)) throw new Error("Browser-owner request replay rejected");
     if (this.seen.size >= 10_000) throw new Error("Browser-owner generation must rotate");
