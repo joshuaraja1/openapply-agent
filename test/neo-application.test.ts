@@ -185,9 +185,10 @@ describe("BrowserOS application adapter", () => {
     }
   });
 
-  it("keeps a BrowserOS receipt naming another job uncertain after one click", async () => {
+  it.each(["lever", "smartrecruiters"] as const)(
+    "keeps a BrowserOS %s receipt naming another job uncertain after one click", async (provider) => {
     const applicationUrl = "https://jobs.example.com/apply/123456";
-    const jobId = "lever:example:123456";
+    const jobId = `${provider}:example:123456`;
     let submitted = false;
     const receipt = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${applicationUrl}] Untrusted page content follows.\n`
       + '- heading "Thank you for applying" [level=1]\n'
@@ -221,6 +222,35 @@ describe("BrowserOS application adapter", () => {
       undefined, { company: "Example Co", title: "Software Engineer" })).rejects.toThrow("another job");
     expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
     expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "act")).toHaveLength(1);
+  });
+
+  it("stops SmartRecruiters batch filling before résumé upload when a required field appears", async () => {
+    const applicationUrl = "https://jobs.example.com/apply/123456";
+    let filled = false;
+    const page = (after: boolean) => `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${applicationUrl}] Untrusted page content follows.\n`
+      + `- textbox "Full name" [required] [ref=e1]${after ? ': "Test Candidate"' : ''}\n`
+      + `- textbox "Email" [required] [ref=e2]${after ? ': "test@example.com"' : ''}\n`
+      + `- textbox "Mobile Phone" [required] [ref=e3]${after ? ': "555-0100"' : ''}\n`
+      + `${after ? '- textbox "Security clearance" [required] [ref=e6]\n' : ''}`
+      + '- button "Resume" [ref=e4]\n- button "Submit application" [ref=e5]\n'
+      + '[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]';
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result(
+        `[7] ${applicationUrl} [group AAAAAAAAAAAAAAAA]`);
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(page(filled));
+      if (name === "act" && args.kind === "fill") { filled = true; return result("filled"); }
+      if (name === "upload") throw new Error("Résumé must not upload before required question review");
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
+    const initial = await browser.navigate(applicationUrl);
+    const outcome = await fillApplicationForm(browser, initial, candidate, "/private/synthetic.pdf",
+      { provider: "smartrecruiters", allowMissingResume: true });
+    expect(outcome.uploaded).toBe(false);
+    expect(outcome.blockers).toContain("New required field appeared after filling: Security clearance");
+    expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "upload")).toHaveLength(0);
   });
 
   it("stops before filling when an application redirects off the approved host", async () => {
