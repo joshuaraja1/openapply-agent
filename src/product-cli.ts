@@ -8,6 +8,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "setup:init": () => import("./setup/init-cli.js"),
   "profile:compile": () => import("./candidate/markdown-cli.js"),
   "browser:doctor": () => import("./browser/doctor-cli.js"),
+  "browser:benchmark": () => import("./browser/benchmark-cli.js"),
   "browser:open": () => import("./browser/open-cli.js"),
   "browser:discover": () => import("./browser/cli.js"),
   autopilot: () => import("./application/autopilot-cli.js"),
