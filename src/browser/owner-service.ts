@@ -42,7 +42,7 @@ type RegisteredTab = { binding: OwnerClaimBinding; inspect: () => Promise<{
   receipt?: OwnerReceiptPolicy;
   acceptedPost?: Request;
   postAllowed?: boolean; postCount?: number; submitting?: boolean;
-  navigationAttempted?: boolean };
+  navigationAttempted?: boolean; initialDocumentRequested?: boolean };
 
 function sameBinding(left: OwnerClaimBinding, right: OwnerClaimBinding): boolean {
   return Object.keys(left).every((key) => left[key as keyof OwnerClaimBinding]
@@ -192,7 +192,8 @@ async function runSubmitAction(tab: RegisteredTab, journal: OwnerSubmitJournal |
 export async function startOwnerInspectionService(input: {
   socketPath: string; secret: Buffer; generation: string; journalDirectory?: string;
 }): Promise<{ register(binding: OwnerClaimBinding, inspect: RegisteredTab["inspect"]): void;
-  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime, receipt?: RegisteredTab["receipt"]): Promise<void>;
+  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime,
+    receipt?: RegisteredTab["receipt"], readOnlyGetUrls?: readonly string[]): Promise<void>;
   close(): Promise<void> }> {
   if (process.platform === "win32") {
     throw new Error("Windows owner pipe ACL has not been validated; owner service is disabled");
@@ -272,7 +273,7 @@ export async function startOwnerInspectionService(input: {
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
       tabs.set(binding.tabId, { binding: { ...binding }, inspect });
     },
-    async registerBrowser(binding, runtime, receipt) {
+    async registerBrowser(binding, runtime, receipt, readOnlyGetUrls = []) {
       signOwnerRequest({ version: 1, action: "inspect-tab", requestId: randomUUID(),
         generation: input.generation, ...binding }, input.secret);
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
@@ -282,7 +283,14 @@ export async function startOwnerInspectionService(input: {
       const context = runtime.context;
       assertServiceWorkersBlocked(context);
       if (context.serviceWorkers().length) throw new Error("Active service workers are not allowed");
-      const officialOrigin = new URL(binding.officialUrl).origin;
+      // launchBrowser closes its initial blank page. A page created since then
+      // can hold in-flight requests or sockets that routing cannot revoke.
+      if (context.pages().length > 0 || context.backgroundPages().length > 0) {
+        await runtime.close();
+        throw new Error("Browser-owner context contained a preexisting page; start a fresh owner generation");
+      }
+      const official = new URL(binding.officialUrl);
+      const officialOrigin = official.origin;
       if (receipt && (!journal || !receipt.company.trim() || !receipt.role.trim()
         || !receipt.phrase.trim() || new URL(receipt.postUrl).origin !== officialOrigin
         || new URL(receipt.postUrl).protocol !== "https:"
@@ -291,21 +299,35 @@ export async function startOwnerInspectionService(input: {
         || Object.entries(receipt.postFields).some(([key, value]) => !key || typeof value !== "string"))) {
         throw new Error("Owner submit staging requires a private journal and exact receipt binding");
       }
+      const approvedReadOnlyUrls = new Set(readOnlyGetUrls.map((value) => {
+        const url = new URL(value);
+        if (url.protocol !== "https:" || url.origin !== officialOrigin || url.hash
+          || url.username || url.password || url.href === official.href
+          || (receipt && url.pathname === new URL(receipt.postUrl).pathname)) {
+          throw new Error("Browser-owner read-only URL is not an exact approved employer URL");
+        }
+        return url.href;
+      }));
       const tab: RegisteredTab = { binding: { ...binding },
         inspect: async () => { throw new Error("Browser tab has not been initialized"); },
         ...(receipt ? { receipt: { ...receipt, postFields: { ...receipt.postFields } } } : {}),
         postAllowed: false, postCount: 0 };
       // The owner must launch this context with serviceWorkers: "block". This
-      // route prevents page JavaScript from submitting by POST while workers
-      // have only navigation/snapshot access.
+      // route permits the first exact posting document, explicit reviewed GETs,
+      // and one claim-bound form POST. HTTP method alone is not a safety gate.
       await context.route("**/*", async (route) => {
         const request = route.request();
         const destination = new URL(request.url());
         const approvedPost = tab.postAllowed && tab.postCount === 0
           && exactFormPost(request, tab);
         if (approvedPost) { tab.postCount = 1; tab.acceptedPost = request; }
-        if (!(approvedPost || (["GET", "HEAD"].includes(request.method())
-          && destination.origin === officialOrigin))) {
+        const initialDocument = tab.navigationAttempted && !tab.initialDocumentRequested
+          && request.method() === "GET" && request.isNavigationRequest()
+          && request.resourceType() === "document" && destination.href === official.href;
+        if (initialDocument) tab.initialDocumentRequested = true;
+        const reviewedRead = ["GET", "HEAD"].includes(request.method())
+          && approvedReadOnlyUrls.has(destination.href);
+        if (!approvedPost && !initialDocument && !reviewedRead) {
           await route.abort("blockedbyclient");
           return;
         }
