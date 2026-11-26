@@ -27,6 +27,7 @@ describe("user-level recurring schedule rendering", () => {
       "/private/OpenApply Project/dist/src/application/autopilot-cli.js", "/private/logs");
     expect(service).toContain('ExecStart="/usr/bin/node" "/private/OpenApply Project/dist/src/application/autopilot-cli.js"');
     expect(service).toContain('Environment="OPENAPPLY_QUEUE_CONFIG=/private/queue.json"');
+    expect(service).toContain("StandardOutput=append:/private/logs/autopilot.out.log");
     expect(timer).toContain("OnUnitInactiveSec=60min");
     expect(timer).toContain("WantedBy=timers.target");
     expect(service).not.toContain("npm run");

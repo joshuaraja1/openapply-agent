@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { readPrivateFile } from "../storage/private-path.js";
 import type { ScheduleConfig } from "./launchd.js";
@@ -30,7 +30,7 @@ function unitPath(value: string): string {
 
 export function systemdUnits(config: ScheduleConfig, nodePath: string, script: string,
   logs: string): { service: string; timer: string } {
-  const service = `${marker}\n[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitPath(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitPath(join(logs, "autopilot.out.log"))}\nStandardError=append:${unitPath(join(logs, "autopilot.err.log"))}\n`;
+  const service = `${marker}\n[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitPath(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitPath(posix.join(logs, "autopilot.out.log"))}\nStandardError=append:${unitPath(posix.join(logs, "autopilot.err.log"))}\n`;
   const timer = `${marker}\n[Unit]\nDescription=Run OpenApply on a local schedule\n\n[Timer]\nOnStartupSec=1min\nOnUnitInactiveSec=${config.intervalMinutes}min\nUnit=${name}.service\n\n[Install]\nWantedBy=timers.target\n`;
   return { service, timer };
 }
