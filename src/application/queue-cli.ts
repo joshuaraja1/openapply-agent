@@ -130,6 +130,8 @@ try {
       ...(config.browserEndpoint ? { browserEndpoint: config.browserEndpoint } : {}),
       ...(config.authenticationPolicyPath
         ? { authenticationPolicyPath: config.authenticationPolicyPath } : {}),
+      ...(config.notificationConfigPath
+        ? { notificationConfigPath: config.notificationConfigPath } : {}),
       ...(config.expectedConfirmationByDomain[host]
         ? { expectedConfirmation: config.expectedConfirmationByDomain[host] } : {}),
     });

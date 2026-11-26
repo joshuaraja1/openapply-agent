@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SecretStore } from "../src/storage/contracts.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import { assertAutonomousNotificationReady, handoffNotificationSchema, loadHandoffNotificationConfig,
-  notifyPendingHandoff, sendHandoffEmail } from "../src/application/notification.js";
+  notificationConfigPathForPackage, notifyPendingHandoff, sendHandoffEmail } from "../src/application/notification.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "../src/application/state-machine.js";
 
 const config = handoffNotificationSchema.parse({ version: 1, email: {
@@ -23,6 +23,13 @@ function memorySecrets(): SecretStore {
 }
 
 describe("human handoff email", () => {
+  it("keeps the queued alert configuration when a paused application resumes in a new process", () => {
+    const saved = "/private/notifications.json";
+    expect(notificationConfigPathForPackage({ notificationConfigPath: saved })).toBe(saved);
+    expect(notificationConfigPathForPackage({ notificationConfigPath: saved }, "/other.json"))
+      .toBe(saved);
+    expect(notificationConfigPathForPackage({}, "/manual.json")).toBe("/manual.json");
+  });
   it("requires a configured secret-backed alert before an unattended queue run", async () => {
     const secrets = memorySecrets();
     await assertAutonomousNotificationReady(true, undefined, secrets);

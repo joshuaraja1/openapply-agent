@@ -29,6 +29,7 @@ const pkg = applicationPackageSchema.parse({
     stopConditions: ["final-submit"] },
   resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
   resumePdfPath: "/private/resume.pdf",
+  notificationConfigPath: "/private/notifications.json",
 });
 
 describe("private application package storage", () => {

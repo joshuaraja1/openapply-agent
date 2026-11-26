@@ -16,7 +16,8 @@ import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
-import { loadHandoffNotificationConfig, notifyPendingHandoff } from "./notification.js";
+import { loadHandoffNotificationConfig, notificationConfigPathForPackage,
+  notifyPendingHandoff } from "./notification.js";
 
 await holdWorkflowLease();
 
@@ -85,7 +86,8 @@ try {
   console.log(JSON.stringify({ jobId: pkg.job.id, stage: result.checkpoint.stage,
     blocker: result.checkpoint.blocker ?? null }));
   if (result.checkpoint.stage === "waiting-human") {
-    const configPath = process.env.OPENAPPLY_NOTIFICATION_CONFIG;
+    const configPath = notificationConfigPathForPackage(runtimePackage,
+      process.env.OPENAPPLY_NOTIFICATION_CONFIG);
     const config = configPath ? await loadHandoffNotificationConfig(configPath) : undefined;
     await notifyPendingHandoff(workflow, result.checkpoint, secrets, config);
   }

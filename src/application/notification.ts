@@ -23,6 +23,13 @@ export const handoffNotificationSchema = z.strictObject({
 });
 export type HandoffNotificationConfig = z.infer<typeof handoffNotificationSchema>;
 
+/** Resume from the saved queue configuration, even when the handoff UI starts in a new process. */
+export function notificationConfigPathForPackage(
+  pkg: { notificationConfigPath?: string | undefined }, environmentPath?: string,
+): string | undefined {
+  return pkg.notificationConfigPath ?? environmentPath;
+}
+
 export async function loadHandoffNotificationConfig(path: string): Promise<HandoffNotificationConfig> {
   if (!isAbsolute(path)) throw new Error("Notification config requires an absolute private path");
   return handoffNotificationSchema.parse(JSON.parse(await readPrivateFile(path)));

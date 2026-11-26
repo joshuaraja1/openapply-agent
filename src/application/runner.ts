@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolute } from "node:path";
 import { AgentBrowser, type BrowserSnapshot } from "../browser/actions.js";
 import { launchBrowser, type BrowserRuntime } from "../browser/runtime.js";
 import { candidateProfileSchema } from "../candidate/schema.js";
@@ -40,6 +41,7 @@ export const applicationPackageSchema = z.object({
   browserRuntime: z.enum(["browseros", "owned"]).optional(),
   browserEndpoint: z.url().optional(),
   authenticationPolicyPath: z.string().min(1).optional(),
+  notificationConfigPath: z.string().min(1).refine(isAbsolute, "Use an absolute path").optional(),
   expectedConfirmation: z.string().min(1).optional(),
 }).superRefine((pkg, context) => {
   if (!pkg.browserRuntime && !pkg.browserEndpoint) {
