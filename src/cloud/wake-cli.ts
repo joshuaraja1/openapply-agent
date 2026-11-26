@@ -1,12 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { readPrivateFile } from "../storage/private-path.js";
 import { createNativeSecretStore } from "../storage/native-secret-store.js";
-import { cloudWakeConfigSchema, runCloudWakeOnce } from "./wake.js";
+import { cacheWakeSecret, cloudWakeConfigSchema, runCloudWakeOnce } from "./wake.js";
 
 const path = process.env.OPENAPPLY_CLOUD_WAKE_CONFIG;
 if (!path) throw new Error("Set OPENAPPLY_CLOUD_WAKE_CONFIG to a private cloud-wake configuration");
 const config = cloudWakeConfigSchema.parse(JSON.parse(await readPrivateFile(path)));
-const secrets = createNativeSecretStore();
+const secrets = cacheWakeSecret(createNativeSecretStore());
 const once = process.argv.includes("--once");
 do {
   try {

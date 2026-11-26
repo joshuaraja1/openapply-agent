@@ -20,6 +20,18 @@ export const cloudWakeConfigSchema = z.object({
   pollSeconds: z.number().int().min(30).max(300).default(60),
 }).strict();
 export type CloudWakeConfig = z.infer<typeof cloudWakeConfigSchema>;
+
+/** Avoid repeated macOS Keychain prompts during a long-running watcher process. */
+export function cacheWakeSecret(store: Pick<SecretStore, "get">): Pick<SecretStore, "get"> {
+  const values = new Map<string, string>();
+  return { get: async (reference) => {
+    const cached = values.get(reference);
+    if (cached) return cached;
+    const value = await store.get(reference);
+    if (value) values.set(reference, value);
+    return value;
+  } };
+}
 const tickSchema = z.object({ generation: z.number().int().nonnegative().safe(),
   issuedAt: z.iso.datetime() }).strict();
 const cursorSchema = z.object({ version: z.literal(1), generation: z.number().int().nonnegative().safe() }).strict();
@@ -46,7 +58,7 @@ export async function runAutopilotChild(queueConfigPath: string): Promise<void> 
 }
 
 /** A failed run leaves the cursor unchanged, so the next poll retries through existing checkpoints. */
-export async function runCloudWakeOnce(config: CloudWakeConfig, secrets: SecretStore,
+export async function runCloudWakeOnce(config: CloudWakeConfig, secrets: Pick<SecretStore, "get">,
   dependencies: { fetch?: typeof fetch; run?: (queueConfigPath: string) => Promise<void> } = {},
 ): Promise<"idle" | "ran"> {
   const parsed = cloudWakeConfigSchema.parse(config);

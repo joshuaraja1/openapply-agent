@@ -56,6 +56,11 @@ Create a private mode-0600 JSON file, for example
 Set `OPENAPPLY_CLOUD_WAKE_CONFIG` to that file and run `openapply cloud:watch
 --once` to check one tick, or `openapply cloud:watch` under a user-level process
 supervisor for continuous polling. Run one watcher per queue configuration.
+The watcher reads its OS-stored token once per process and keeps it in memory
+between polls, avoiding repeated Keychain prompts. Restart it after rotating
+the token. On macOS, a new or unsigned Node process may still request Keychain
+access at startup; do not grant permanent access to every Node script. Use a
+signed OpenApply app identity before relying on unattended login-time restart.
 The existing workflow lease rejects a concurrent application process. A
 failed child exits without advancing the cursor. A missing or backwards
 counter, bad token, non-HTTPS endpoint, redirect, or malformed response stops

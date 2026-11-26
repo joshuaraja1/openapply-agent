@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cloudWakeConfigSchema, runCloudWakeOnce } from "../src/cloud/wake.js";
+import { cacheWakeSecret, cloudWakeConfigSchema, runCloudWakeOnce } from "../src/cloud/wake.js";
 import type { SecretStore } from "../src/storage/contracts.js";
 
 const directories: string[] = [];
@@ -23,6 +23,15 @@ const response = (generation: number) => new Response(JSON.stringify({ generatio
   issuedAt: "2026-11-26T00:00:00.000Z" }), { status: 200 });
 
 describe("cloud wake client", () => {
+  it("reads the OS secret once across repeated polls", async () => {
+    const config = await fixture();
+    let keychainReads = 0;
+    const cached = cacheWakeSecret({ get: async () => { keychainReads++; return secret; } });
+    const deps = { fetch: async () => response(1), run: async () => {} };
+    expect(await runCloudWakeOnce(config, cached, deps)).toBe("ran");
+    expect(await runCloudWakeOnce(config, cached, deps)).toBe("idle");
+    expect(keychainReads).toBe(1);
+  });
   it("runs once per generation and stores the cursor only after success", async () => {
     const config = await fixture();
     let runs = 0;
