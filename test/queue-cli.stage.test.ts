@@ -46,7 +46,7 @@ afterEach(async () => {
   stageRoot = undefined;
 });
 
-it("runs the production queue CLI into an encrypted handoff and replays it once after restart", async () => {
+it("retries a queue-triggered handoff alert after restart without repeating the application", async () => {
   stageRoot = await mkdtemp(join(tmpdir(), "openapply-queue-cli-stage-"));
   stage.home = join(stageRoot, "synthetic-home");
   const privateRoot = join(stage.home, ".openapply-agent");
@@ -127,10 +127,12 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
     });
     return { checkpoint, artifact: { path: pkg.resumePdfPath } };
   });
-  const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
-    new Response('{"id":"synthetic"}', { status: 200 }));
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response("temporary provider failure", { status: 503 }))
+    .mockResolvedValue(new Response('{"id":"synthetic"}', { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
 
   // Legacy queue configuration defaults to deny, including an already queued
   // entry whose saved discovery source is enabled.
@@ -164,6 +166,7 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
   });
   expect(String(request?.body)).not.toContain(job.id);
   expect(String(request?.body)).not.toContain(job.applicationUrl);
+  expect(warnings).toHaveBeenCalledWith("Email handoff notification was unavailable");
   const encryptedPath = join(privateRoot, "applications.enc.json");
   expect(await readFile(encryptedPath, "utf8")).not.toContain(job.applicationUrl);
 
@@ -176,5 +179,15 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
   await import("../src/application/queue-cli.js");
   expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes).toEqual([]);
   expect(stage.runPackage).toHaveBeenCalledOnce();
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const retry = fetcher.mock.calls[1]![1] as RequestInit;
+  expect((retry.headers as Record<string, string>)["Idempotency-Key"])
+    .toBe((request?.headers as Record<string, string>)["Idempotency-Key"]);
+
+  // A further restart sees the durable sent marker and does not alert again.
+  await rmdir(join(privateRoot, "workflow.lock"));
+  vi.resetModules();
+  await import("../src/application/queue-cli.js");
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(stage.runPackage).toHaveBeenCalledOnce();
 }, process.platform === "win32" ? 120_000 : 30_000);

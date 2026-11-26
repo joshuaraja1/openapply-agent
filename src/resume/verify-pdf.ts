@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { CandidateProfile } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
@@ -9,7 +9,8 @@ import type { ResumeSource } from "./jake.js";
 import { inspectPdfPageImage } from "./visual-qa.js";
 
 const require = createRequire(import.meta.url);
-const standardFontDataUrl = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + sep;
+// PDF.js requires a literal forward slash suffix even for native Windows paths.
+const standardFontDataUrl = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + "/";
 
 export interface VerifiedResumeArtifact {
   jobId: string;

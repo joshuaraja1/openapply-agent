@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import { launchAgentPlist, scheduleConfigSchema } from "../src/scheduler/launchd.js";
 import { queueRunnerConfigSchema, setDiscoveryEnvironment } from "../src/application/queue-config.js";
 
@@ -9,7 +10,8 @@ const config = scheduleConfigSchema.parse({ version: 1, repositoryPath: "/privat
 describe("macOS background schedule", () => {
   it("escapes paths and runs the compiled sequential workflow", () => {
     const plist = launchAgentPlist(config, "/usr/local/bin/node", "/private/logs");
-    expect(plist).toContain("OpenApply &amp; Projects/dist/src/application/autopilot-cli.js");
+    expect(plist).toContain(join(config.repositoryPath,
+      "dist/src/application/autopilot-cli.js").replaceAll("&", "&amp;"));
     expect(plist).toContain("<integer>3600</integer>");
     expect(plist).toContain("OPENAPPLY_QUEUE_CONFIG");
     expect(plist).toContain("<key>RunAtLoad</key><true/>");
