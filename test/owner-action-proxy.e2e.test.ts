@@ -287,5 +287,47 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
           .toBeNull();
       } finally { await owner.close(); await runtime.close(); await rm(root, { recursive: true }); }
     }, 60_000);
+    it("does not accept a forged DOM receipt absent from the accepted POST response", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-owner-fake-receipt-"));
+      const runtime = await launchBrowser({ profileDirectory: join(root, "profile"),
+        headless: true, serviceWorkers: "block" });
+      const socketPath = join(root, "owner.sock");
+      const secret = randomBytes(32);
+      const generation = randomUUID();
+      const binding = { tabId: randomUUID(), claimId: randomUUID(),
+        jobId: "example:123456", officialUrl: "https://jobs.example.test/123456",
+        packageSha256: "a".repeat(64), artifactSha256: "b".repeat(64) };
+      let posts = 0;
+      await runtime.context.route("https://jobs.example.test/**", (route) => {
+        if (route.request().method() === "POST") {
+          posts += 1;
+          return route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Pending</title><p>Processing</p>" });
+        }
+        return route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Job</title>
+          <form action="/123456/submit" method="post"><input type="hidden" name="candidate" value="Fixture">
+          <button type="submit">Submit application</button></form>` });
+      });
+      const owner = await startOwnerInspectionService({ socketPath, secret, generation,
+        journalDirectory: root });
+      await owner.registerBrowser(binding, runtime, { company: "Example Inc", role: "Software Engineer",
+        phrase: "Application received", postUrl: "https://jobs.example.test/123456/submit",
+        postFields: { candidate: "Fixture" } });
+      const request = (action: string, extra = {}) => ({ version: 1, action,
+        requestId: randomUUID(), generation, ...binding, ...extra });
+      try {
+        const first = await worker({ socketPath, secret,
+          request: request("navigate-tab", { url: binding.officialUrl }) });
+        const ref = first.snapshot.controls.find((control) => control.name === "Submit application")!.ref;
+        expect((await submitWorker({ socketPath, secret,
+          request: request("submit-once", { ref }) })).outcome).toBe("uncertain");
+        expect(posts).toBe(1);
+        const page = runtime.context.pages().at(-1)!;
+        await page.locator("body").evaluate((body) => {
+          body.innerHTML = '<div role="status"><div>Application received</div><div>Example Inc — Software Engineer</div><div>123456</div></div>';
+        });
+        expect((await submitWorker({ socketPath, secret,
+          request: request("reconcile-submit") })).outcome).toBe("uncertain");
+      } finally { await owner.close(); await runtime.close(); await rm(root, { recursive: true }); }
+    }, 60_000);
   },
 );

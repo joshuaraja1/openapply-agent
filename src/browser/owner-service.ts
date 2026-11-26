@@ -3,6 +3,7 @@ import { createServer, createConnection, type Server } from "node:net";
 import { chmod, lstat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { DomUtils, parseDocument } from "htmlparser2";
 import { hasUnboundReceiptUrl } from "../application/requisition.js";
 import { MAX_OWNER_MESSAGE_BYTES, OwnerRequestVerifier, signOwnerRequest,
   type OwnerClaimBinding, type OwnerRequest } from "./owner-protocol.js";
@@ -82,6 +83,22 @@ async function ownerReceipt(page: Page, tab: RegisteredTab, intent: OwnerSubmitI
   const response = await accepted.response();
   if (!response || response.status() < 200 || response.status() >= 300
     || response.url() !== receipt.postUrl) return undefined;
+  if (!/^text\/html(?:;|$)/i.test(response.headers()["content-type"] ?? "")) return undefined;
+  const html = await response.text().catch(() => "");
+  if (html.length > 200_000) return undefined;
+  const document = parseDocument(html);
+  const serverBlocks = DomUtils.getElementsByTagName("*", document.children).filter((element) =>
+    element.attribs?.role === "status" || element.attribs?.role === "alert"
+    || element.attribs?.["data-testid"] === "application-confirmation");
+  if (!serverBlocks.some((element) => {
+    const text = DomUtils.getText(element);
+    const descendants = DomUtils.getElementsByTagName("*", [element])
+      .map((child) => DomUtils.getText(child).trim());
+    return !DomUtils.getElementsByTagName("script", [element]).length
+      && text.toLowerCase().includes(receipt.phrase.toLowerCase())
+      && descendants.some((line) => line.toLowerCase() === `${receipt.company} — ${receipt.role}`.toLowerCase())
+      && descendants.some((line) => exactToken(line, tab.binding.jobId.split(":").at(-1)!));
+  })) return undefined;
   const url = page.url();
   if (url === intent.preSubmitUrl || hasUnboundReceiptUrl(tab.binding.jobId, tab.binding.officialUrl, url)) {
     return undefined;
