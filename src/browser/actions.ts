@@ -181,7 +181,13 @@ export class AgentBrowser {
         await option.first().waitFor({ state: "visible", timeout: 3_000 });
         if (await option.count() !== 1) throw new Error("Combobox option is ambiguous");
         await option.click();
-        const selected = await handle.evaluate((element) =>
+        // Frameworks may replace the combobox on selection. Reacquire only
+        // the control that owns this listbox; a missing/duplicate owner is
+        // uncertain and must not trigger a second click.
+        const owner = page.locator(`[role="combobox"][aria-controls=${JSON.stringify(ownership[0])}], `
+          + `[role="combobox"][aria-owns=${JSON.stringify(ownership[0])}]`);
+        if (await owner.count() !== 1) throw new Error("Selection outcome uncertain; take a new snapshot");
+        const selected = await owner.evaluate((element) =>
           ["INPUT", "TEXTAREA"].includes(element.tagName)
             ? (element as HTMLInputElement).value
             : element.getAttribute("aria-valuetext") ?? element.textContent?.trim() ?? "");

@@ -38,6 +38,7 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
       combo.textContent = option.textContent;
       combo.setAttribute('aria-expanded', 'false');
       list.hidden = true;
+      if (window.rerenderCombo) combo.replaceWith(combo.cloneNode(true));
     });
   }
   root.querySelector('#next').addEventListener('click', () => {
@@ -47,6 +48,26 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
 </script>`;
 
 describe("owned browser accessible controls", () => {
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "verifies selection after the form replaces its combobox", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "openapply-controls-rerender-"));
+      const context = await chromium.launchPersistentContext(join(directory, "profile"), { headless: true });
+      try {
+        await context.route("https://jobs.example.com/**", (route) =>
+          route.fulfill({ contentType: "text/html", body: html }));
+        const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
+        const first = await browser.navigate("https://jobs.example.com/apply");
+        const page = context.pages().find((candidate) => candidate.url() === "https://jobs.example.com/apply")!;
+        await page.evaluate(() => { (window as Window & { rerenderCombo?: boolean }).rerenderCombo = true; });
+        const combo = first.controls.find((control) => control.name === "Work location")!;
+        const selected = await browser.act(combo.ref, "select", "Remote");
+        expect(selected.controls.find((control) => control.name === "Work location")?.value).toBe("Remote");
+      } finally {
+        await context.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }, 30_000,
+  );
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
     "includes open shadow challenge text and rejects an implicit submit button", async () => {
       const directory = await mkdtemp(join(tmpdir(), "openapply-controls-safety-"));
