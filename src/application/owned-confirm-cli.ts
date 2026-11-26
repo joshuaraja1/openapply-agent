@@ -9,9 +9,9 @@ import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
-import { confirmOwnedSubmission, isOwnedReceiptAttested } from "./owned-confirm.js";
+import { confirmOwnedSubmission } from "./owned-confirm.js";
+import { withOwnedReceiptPrompt } from "./owned-confirm-session.js";
 
-await holdWorkflowLease();
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to the original private application package");
 const pkg = await readApplicationPackage(packagePath);
@@ -32,18 +32,12 @@ const terminal = createInterface({ input: process.stdin, output: process.stdout 
 try {
   console.log(`Open the employer's application receipt or status for ${pkg.job.company} — ${pkg.job.title}`);
   console.log(`Use the browser window opened by OpenApply. The official application is ${pkg.job.applicationUrl}`);
-  console.log("Do not submit again. This command only inspects a page you open yourself.");
-  const answer = await terminal.question(`When the receipt is visible in that browser, type the exact job ID ${pkg.job.id}: `);
-  const accountAnswer = await terminal.question(
-    "Did you submit this application using your own signed-in employer account? Type YES or NO: ");
-  if (!isOwnedReceiptAttested(pkg.job.id, answer, accountAnswer)) {
-    throw new Error("Candidate account and submission attestation did not match");
-  }
-  const receiptUrl = await confirmOwnedSubmission(pkg, workflow, runtime.context,
-    packagePath, true);
+  console.log("Do not submit again. This command only inspects a page you open yourself. You have two minutes.");
+  const receiptUrl = await withOwnedReceiptPrompt(runtime, terminal, pkg.job.id, async () => {
+    await holdWorkflowLease();
+    return confirmOwnedSubmission(pkg, workflow, runtime.context, packagePath, true);
+  });
   console.log(JSON.stringify({ jobId: pkg.job.id, stage: "submitted", receiptUrl }));
 } finally {
-  terminal.close();
-  await runtime.close();
   sqlite?.close();
 }

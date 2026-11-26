@@ -136,6 +136,11 @@ phrase in one semantic receipt block. The receipt must be on a different path
 from the pre-submit page. If the employer portal does not
 show all that evidence, the application stays uncertain; inspect the employer
 portal or confirmation email outside OpenApply before deciding whether to retry.
+The prompt expires after two minutes and closes the browser; rerun the command
+when ready. The workflow lease is acquired only for the final state check and
+update. While this browser window is open, a scheduled queue that needs the
+same private profile may fail fast on the profile lock; it can retry after the
+verification window closes.
 
 For an owned-browser handoff, set `browserPageId` to `0` in the approved answers
 file. Resume with the same `OPENAPPLY_RESUME_JOB_ID` command. OpenApply reopens

@@ -99,6 +99,8 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("owned receipt recove
         .toContain("/receipt");
       expect((await workflow.current(job.id))?.stage).toBe("submitted");
       expect(submitCalls).toBe(1);
+      await expect(confirmOwnedSubmission(pkg, workflow, context, packagePath, true, verify))
+        .rejects.toThrow("No matching owned-browser");
     } finally {
       await context?.close();
       await rm(root, { recursive: true, force: true });
