@@ -1,5 +1,17 @@
 # Local state export and deletion
 
+The token-protected local setup screen also exposes these four actions under
+**Local state controls** when `OPENAPPLY_QUEUE_CONFIG` is set. It uses fixed
+private paths at `~/.openapply-agent/state-export.json` and
+`~/.openapply-agent/removed-state`; the browser cannot choose a filesystem
+path. Type the displayed phrase for each operation. Export is idempotent only
+when the contents match; it refuses to replace a different backup. Quarantine
+requires a current export. Stop all OpenApply workers first, including older
+versions that may not use the workflow lease. The screen shows whether the
+export and archive exist without returning their paths or contents over HTTP.
+Purging the archive leaves the JSON export, onboarding files, browser profile,
+artifacts, OS secrets, and account grants in place.
+
 `state:control` handles the application, quota, retry, posting-claim, and email-code ledgers, plus the configured discovery state and pending queue. It works with the active encrypted SQLite store or the legacy encrypted files. The export is **readable JSON containing private application data**. It does not contain the OS encryption key, saved browser cookies, account passwords, OAuth tokens, onboarding files, generated PDFs, or other files outside these state paths. Keep the export private; deleting application state does not delete those other data stores or revoke connected accounts.
 
 Stop scheduled and manual OpenApply workers before deletion or restore. Current-version commands hold the workflow lease, but older releases must also be stopped. Set `OPENAPPLY_QUEUE_CONFIG` to the private queue configuration, `OPENAPPLY_STATE_EXPORT` to a new absolute JSON path, and `OPENAPPLY_STATE_ARCHIVE` to a new absolute archive directory. The export and archive should be on a private filesystem. Do not put the export inside the archive.
