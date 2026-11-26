@@ -16,6 +16,7 @@ import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
 import { hasStableRequisitionPath, isOriginalRequisition } from "./requisition.js";
+import { applicationPackageFingerprint } from "./package-fingerprint.js";
 
 export const jobSchema = z.object({
   id: z.string().min(1), provider: z.enum(["greenhouse", "ashby", "workday", "lever", "smartrecruiters", "jsonld"]),
@@ -42,7 +43,7 @@ export const applicationPackageSchema = z.object({
   browserEndpoint: z.url().optional(),
   authenticationPolicyPath: z.string().min(1).optional(),
   notificationConfigPath: z.string().min(1).refine(isAbsolute, "Use an absolute path").optional(),
-  expectedConfirmation: z.string().min(1).optional(),
+  expectedConfirmation: z.string().trim().min(1).optional(),
 }).superRefine((pkg, context) => {
   if (!pkg.browserRuntime && !pkg.browserEndpoint) {
     context.addIssue({ code: "custom", message: "Application package must save a browser runtime or endpoint" });
@@ -486,7 +487,8 @@ export async function runApplicationPackage(
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
           pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
-          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined);
+          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
+          dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined);
         checkpoint = (await workflow.current(job.id))!;
       }
     }

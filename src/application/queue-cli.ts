@@ -9,6 +9,7 @@ import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
+import { readBundledJakeTemplate } from "../resume/bundled-template.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
@@ -31,6 +32,7 @@ import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
+import { recoverClaimedSubmission } from "./recover-submission.js";
 
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 await holdWorkflowLease();
@@ -68,7 +70,7 @@ const postingClaims = new PostingClaimLedger(sqlite?.store<PostingClaim>("postin
 const emailCode = authPolicy?.emailVerification.autoEnter
   ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
     ?? new EncryptedApplicationStateStore(join(root, "email-code-claims.enc.json"), key)) : undefined;
-const template = await readFile("templates/resume/main.tex", "utf8");
+const template = await readBundledJakeTemplate();
 // Replay pending alerts independently of today's queue: a source outage or
 // closed posting must not hide an already-saved human handoff.
 const checkpoints = sqlite
@@ -76,8 +78,15 @@ const checkpoints = sqlite
   : await new EncryptedApplicationStateStore<ApplicationCheckpoint>(
     join(root, "applications.enc.json"), key).snapshotRecords();
 for (const record of checkpoints) {
-  if (record.state?.stage === "waiting-human" && record.state.jobId === record.id) {
-    await notifyPendingHandoff(workflow, record.state, secrets, notificationConfig);
+  if (record.state?.stage === "submit-claimed" && record.state.jobId !== record.id) {
+    throw new Error("Interrupted submission record does not match its job ID");
+  }
+  if (record.state?.jobId === record.id) {
+    const saved = record.state.stage === "submit-claimed"
+      ? await recoverClaimedSubmission(workflow, record.state, root) : record.state;
+    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain") {
+      await notifyPendingHandoff(workflow, saved, secrets, notificationConfig);
+    }
   }
 }
 const eligible: DiscoveredJob[] = [];

@@ -156,6 +156,16 @@ It records submission only when the configured employer confirmation is visible
 on the approved host and your [attestation](examples/manual-confirmation-attestation.example.json)
 names that exact job, tab, and confirmation URL.
 
+For a submission that remains uncertain in the owned browser, use
+`OPENAPPLY_PACKAGE=<original-private-package-path> npm run application:verify-owned`.
+Open the exact employer receipt in the private browser window, type the job
+ID, and explicitly attest that you submitted it using your own account. The
+command inspects that page read-only and requires the saved package and résumé
+artifact plus a single job-bound receipt block on the original requisition
+path. It will not click Submit again.
+The prompt closes after two minutes. A scheduled queue may briefly fail on the
+private browser profile lock during that window and should retry afterward.
+
 ## Optional: set up BrowserOS neo
 
 [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) is the local,

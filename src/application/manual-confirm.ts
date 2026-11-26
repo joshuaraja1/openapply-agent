@@ -9,7 +9,7 @@ import { readPrivateFile } from "../storage/private-path.js";
 
 const attestationSchema = z.object({ version: z.literal(1), jobId: z.string().min(1),
   browserPageId: z.number().int().positive(), confirmationUrl: z.url(),
-  expectedConfirmation: z.string().min(1), attestCorrectJob: z.literal(true) });
+  expectedConfirmation: z.string().trim().min(1), attestCorrectJob: z.literal(true) });
 export type ManualConfirmationAttestation = z.infer<typeof attestationSchema>;
 
 export async function loadManualAttestation(path: string): Promise<ManualConfirmationAttestation> {

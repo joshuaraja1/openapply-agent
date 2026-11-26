@@ -83,6 +83,22 @@ record can cause a duplicate reminder after the provider's 24-hour idempotency
 window; it cannot cause another application submission.
 The [synthetic queue CLI staging check](staging-queue-cli.md) tests the command's
 encrypted handoff and restart behavior without an employer site or real email.
+If a run ends after claiming the final submission click, the next queue run
+first acquires the exclusive workflow lease, then marks that exact job
+`submission-uncertain` and attempts the configured generic attention alert.
+It never retries the click. A killed process may leave `workflow.lock`; follow the inactive-worker
+inspection in [the state guide](sqlite-state.md) before manually removing that
+lock and restarting. Check the employer confirmation before recording success.
+Current manual confirmation requires a saved BrowserOS tab identity. An owned-browser
+submission without that identity stays `submission-uncertain` until a separate
+verified recovery path is available; do not record success from the alert alone.
+Run `openapply application:review` (or `npm run application:review`) to open a
+private local list of every `submission-uncertain` application. This read-only
+screen shows the exact blocker, official posting, saved package path, and last
+browser URL when available. It requires no job ID from the generic alert and
+does not offer a submit or resume action. Check the employer portal or receipt
+for that exact job before recording a confirmed outcome; never repeat the final
+click just because the status is uncertain.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
@@ -104,6 +120,27 @@ the portal flow yourself. If you submit manually, run
 to verify the employer confirmation in that same tab before recording success.
 The attestation follows `examples/manual-confirmation-attestation.example.json`
 and is your explicit statement that the confirmation belongs to this job.
+
+If an owned-browser submission is `submission-uncertain`, OpenApply never retries
+the final click. The owned browser profile preserves sign-in state, but a closed
+Chromium context does not restore its receipt tab. To reconcile manually, run
+`OPENAPPLY_PACKAGE=<original-private-package-path> npm run application:verify-owned`.
+In the opened private browser, sign in if necessary and open the employer's
+application receipt or status for that exact job. Type the exact job ID and
+explicitly attest that you used your own employer account and submitted this
+application. OpenApply then reads the live page without clicking or
+navigating. It records `submitted` only if the saved package and verified résumé
+match the uncertain claim and one visible receipt on the original requisition
+path contains the company, role, exact requisition, and configured confirmation
+phrase in one semantic receipt block. The receipt must be on a different path
+from the pre-submit page. If the employer portal does not
+show all that evidence, the application stays uncertain; inspect the employer
+portal or confirmation email outside OpenApply before deciding whether to retry.
+The prompt expires after two minutes and closes the browser; rerun the command
+when ready. The workflow lease is acquired only for the final state check and
+update. While this browser window is open, a scheduled queue that needs the
+same private profile may fail fast on the profile lock; it can retry after the
+verification window closes.
 
 For an owned-browser handoff, set `browserPageId` to `0` in the approved answers
 file. Resume with the same `OPENAPPLY_RESUME_JOB_ID` command. OpenApply reopens

@@ -45,10 +45,18 @@ export interface ApplicationCheckpoint {
   browserEndpoint?: string;
   resumeUploaded?: boolean;
   packagePath?: string;
+  packageSha256?: string;
   handoffId?: string;
   desktopNotifiedFor?: string;
   emailNotifiedFor?: string;
   updatedAt: string;
+}
+
+/** An uncertain final click is a new alert even if an earlier human handoff was notified. */
+export function notificationIdentity(checkpoint: ApplicationCheckpoint): string {
+  return checkpoint.stage === "submission-uncertain"
+    ? `submission-uncertain:${checkpoint.updatedAt}`
+    : checkpoint.handoffId ?? checkpoint.updatedAt;
 }
 
 export class ApplicationWorkflow {
@@ -62,8 +70,8 @@ export class ApplicationWorkflow {
   async markNotification(jobId: string, channel: "desktop" | "email",
     expectedHandoffId: string, deliveryMarker = expectedHandoffId): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
-    if (!current || current.state.stage !== "waiting-human"
-      || (current.state.handoffId ?? current.state.updatedAt) !== expectedHandoffId) {
+    if (!current || !["waiting-human", "submission-uncertain"].includes(current.state.stage)
+      || notificationIdentity(current.state) !== expectedHandoffId) {
       throw new Error("Notification belongs to a different handoff checkpoint");
     }
     const field = channel === "desktop" ? "desktopNotifiedFor" : "emailNotifiedFor";
@@ -87,7 +95,7 @@ export class ApplicationWorkflow {
   async advance(
     jobId: string,
     stage: ApplicationStage,
-    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "browserPageUrl" | "browserGroupId" | "browserEndpoint" | "resumeUploaded" | "packagePath"> = {},
+    details: Pick<ApplicationCheckpoint, "artifactPath" | "artifactSha256" | "sourceFingerprint" | "confirmation" | "blocker" | "browserPageId" | "browserPageUrl" | "browserGroupId" | "browserEndpoint" | "resumeUploaded" | "packagePath" | "packageSha256"> = {},
   ): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
     if (!current) throw new Error(`Application ${jobId} does not exist`);
@@ -109,8 +117,12 @@ export class ApplicationWorkflow {
       || details.browserPageId < 1)) {
       throw new Error("Browser page ID belongs only to a handoff or claimed submission");
     }
-    if (details.packagePath && stage !== "waiting-human") {
-      throw new Error("Application package path belongs only to a human handoff");
+    if (details.packagePath && !["waiting-human", "submit-claimed"].includes(stage)) {
+      throw new Error("Application package path belongs only to a handoff or claimed submission");
+    }
+    if (details.packageSha256 && (stage !== "submit-claimed" || !/^[a-f0-9]{64}$/.test(details.packageSha256)
+      || !details.packagePath)) {
+      throw new Error("Application package fingerprint requires a claimed submission and package path");
     }
     if ((details.browserGroupId || details.browserEndpoint || details.browserPageUrl)
       && !["waiting-human", "submit-claimed"].includes(stage)) {

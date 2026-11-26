@@ -110,7 +110,10 @@ describe("human handoff email", () => {
       new Response(JSON.stringify({ id: "email_1" }), { status: 200 }));
     await sendHandoffEmail(config, checkpoint, secrets, fetcher as typeof fetch);
     await sendHandoffEmail(config, checkpoint, secrets, fetcher as typeof fetch);
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    await sendHandoffEmail(config, { ...checkpoint, stage: "submission-uncertain",
+      handoffId: "old-handoff", updatedAt: "2026-11-25T18:01:00.000Z" },
+    secrets, fetcher as typeof fetch);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     const [url, options] = fetcher.mock.calls[0]!;
     expect(url).toBe("https://api.resend.com/emails");
     const request = options as RequestInit;
@@ -118,10 +121,18 @@ describe("human handoff email", () => {
     expect((request.headers as Record<string, string>).Authorization).toBe("Bearer test-secret");
     expect((request.headers as Record<string, string>)["Idempotency-Key"])
       .toBe(((fetcher.mock.calls[1]![1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"]);
+    expect((request.headers as Record<string, string>)["Idempotency-Key"])
+      .not.toBe(((fetcher.mock.calls[2]![1] as RequestInit).headers as Record<string, string>)["Idempotency-Key"]);
     const body = JSON.stringify(JSON.parse(String(request.body)));
     expect(body).toContain("user@example.net");
+    const uncertainBody = String((fetcher.mock.calls[2]![1] as RequestInit).body);
+    expect(uncertainBody).toContain("inspect its status");
+    expect(uncertainBody).toContain("openapply application:review");
+    expect(uncertainBody).toContain("Do not submit again");
+    expect(uncertainBody).not.toContain("continue it");
     for (const privateValue of [checkpoint.jobId, checkpoint.officialUrl, checkpoint.blocker!]) {
       expect(body).not.toContain(privateValue);
+      expect(uncertainBody).not.toContain(privateValue);
     }
   });
 
