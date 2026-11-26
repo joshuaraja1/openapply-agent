@@ -10,6 +10,10 @@ export interface BillingReconcileRequest {
   eventId: string;
   customerId: string;
 }
+export interface UnresolvedChargeRequest {
+  eventId: string;
+  chargeId: string;
+}
 
 /** Verify the raw snapshot event before accepting any customer identifier. */
 export function verifiedBillingRequest(
@@ -17,12 +21,15 @@ export function verifiedBillingRequest(
   signature: string,
   endpointSecret: string,
   verifier: Pick<Stripe["webhooks"], "constructEvent">,
-): BillingReconcileRequest | undefined {
+): BillingReconcileRequest | UnresolvedChargeRequest | undefined {
   if (!signature || !endpointSecret) throw new Error("Stripe webhook signature configuration is missing");
   const event = verifier.constructEvent(rawBody, signature, endpointSecret);
   if (!billingEvents.has(event.type)) return undefined;
-  const object = event.data.object as { customer?: string | { id?: string } | null };
+  const object = event.data.object as { id?: string; customer?: string | { id?: string } | null };
   const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id;
+  if (event.type === "charge.refunded" && !customerId && event.id && object.id?.startsWith("ch_")) {
+    return { eventId: event.id, chargeId: object.id };
+  }
   if (!customerId || !customerId.startsWith("cus_") || !event.id) {
     throw new Error("Verified Stripe event has no customer identity");
   }
@@ -36,9 +43,16 @@ export async function acceptBillingWebhook(
   endpointSecret: string,
   verifier: Pick<Stripe["webhooks"], "constructEvent">,
   enqueueOnce: (request: BillingReconcileRequest) => Promise<"queued" | "duplicate">,
+  resolveChargeCustomer?: (chargeId: string) => Promise<string | undefined>,
 ): Promise<"queued" | "duplicate" | "ignored"> {
   const request = verifiedBillingRequest(rawBody, signature, endpointSecret, verifier);
-  return request ? enqueueOnce(request) : "ignored";
+  if (!request) return "ignored";
+  if ("customerId" in request) return enqueueOnce(request);
+  // No silent acknowledgement: the endpoint must retry/alert if Stripe cannot
+  // resolve the charge to a customer, rather than leaving paid access stale.
+  const customerId = await resolveChargeCustomer?.(request.chargeId);
+  if (!customerId?.startsWith("cus_")) throw new Error("Refund charge customer could not be resolved");
+  return enqueueOnce({ eventId: request.eventId, customerId });
 }
 
 export interface TrustedStripeBillingSnapshot {
@@ -69,14 +83,16 @@ export function projectPaidStripeAccess(
   });
 }
 
-/** Run requests serially per customer. Fetch current Stripe state, not event.data. */
+/** Run requests serially per customer. Replace the complete paid set, not one ID. */
 export async function reconcileBillingRequest(
   request: BillingReconcileRequest,
   ports: {
     loadBinding(customerId: string): Promise<{ subjectId: string; customerId: string } | undefined>;
-    loadCurrent(customerId: string): Promise<TrustedStripeBillingSnapshot>;
-    replaceSubscription(subjectId: string, subscriptionId: string,
-      entitlement: HostedEntitlement | undefined): Promise<void>;
+    /** Must return every current OpenApply subscription for this customer. */
+    loadCurrent(customerId: string): Promise<readonly TrustedStripeBillingSnapshot[]>;
+    /** Atomically replace only subscription-derived records; preserve free grants. */
+    replaceSubscriptions(subjectId: string,
+      entitlements: readonly Extract<HostedEntitlement, { kind: "subscription" }>[]): Promise<void>;
   },
 ): Promise<void> {
   const binding = await ports.loadBinding(request.customerId);
@@ -84,6 +100,13 @@ export async function reconcileBillingRequest(
     throw new Error("Stripe customer is not bound to the candidate");
   }
   const current = await ports.loadCurrent(request.customerId);
-  const entitlement = projectPaidStripeAccess(binding, current);
-  await ports.replaceSubscription(binding.subjectId, current.subscriptionId, entitlement);
+  const seen = new Set<string>();
+  const entitlements: Extract<HostedEntitlement, { kind: "subscription" }>[] = [];
+  for (const snapshot of current) {
+    if (seen.has(snapshot.subscriptionId)) throw new Error("Duplicate Stripe subscription in current state");
+    seen.add(snapshot.subscriptionId);
+    const entitlement = projectPaidStripeAccess(binding, snapshot);
+    if (entitlement?.kind === "subscription") entitlements.push(entitlement);
+  }
+  await ports.replaceSubscriptions(binding.subjectId, entitlements);
 }

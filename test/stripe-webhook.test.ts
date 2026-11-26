@@ -2,15 +2,16 @@ import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 import type { HostedEntitlement } from "../src/hosted/entitlement.js";
 import { requireHostedAccess } from "../src/hosted/entitlement.js";
-import { acceptBillingWebhook, projectPaidStripeAccess, reconcileBillingRequest, verifiedBillingRequest }
+import { acceptBillingWebhook, projectPaidStripeAccess, reconcileBillingRequest, verifiedBillingRequest,
+  type BillingReconcileRequest, type TrustedStripeBillingSnapshot }
   from "../src/hosted/stripe-webhook.js";
 
 const stripe = new Stripe("local-only-api-key");
 const signingSecret = "local-only-webhook-secret";
 
-function signedEvent(type: string, id: string, customer: unknown = "cus_test_1") {
+function signedEvent(type: string, id: string, customer: unknown = "cus_test_1", objectId = "obj_test_1") {
   const body = JSON.stringify({ id, object: "event", type, created: 1,
-    data: { object: { id: "obj_test_1", customer } } });
+    data: { object: { id: objectId, customer } } });
   const signature = stripe.webhooks.generateTestHeaderString({ payload: body, secret: signingSecret });
   return { body, signature };
 }
@@ -56,6 +57,19 @@ describe("Stripe billing event boundary", () => {
     expect(enqueue).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves a signed refund without a customer before enqueueing", async () => {
+    const { body, signature } = signedEvent("charge.refunded", "evt_refund", null, "ch_test_1");
+    expect(verifiedBillingRequest(body, signature, signingSecret, stripe.webhooks))
+      .toEqual({ eventId: "evt_refund", chargeId: "ch_test_1" });
+    const enqueue = vi.fn(async () => "queued" as const);
+    await expect(acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks, enqueue))
+      .rejects.toThrow("could not be resolved");
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(await acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks,
+      enqueue, async () => "cus_test_1")).toBe("queued");
+    expect(enqueue).toHaveBeenCalledWith({ eventId: "evt_refund", customerId: "cus_test_1" });
+  });
+
   it("projects only current settled and tenant-bound paid coverage", () => {
     const projected = projectPaidStripeAccess(binding, current);
     expect(requireHostedAccess("candidate-a", [projected],
@@ -75,25 +89,57 @@ describe("Stripe billing event boundary", () => {
     const newer = signedEvent("invoice.paid", "evt_newer");
     const older = signedEvent("invoice.payment_failed", "evt_older");
     const requests = [newer, older].map(({ body, signature }) =>
-      verifiedBillingRequest(body, signature, signingSecret, stripe.webhooks)!);
-    const writes: Array<[string, string, HostedEntitlement | undefined]> = [];
-    const ports = { loadBinding: vi.fn(async () => binding), loadCurrent: vi.fn(async () => current),
-      replaceSubscription: async (subjectId: string, subscriptionId: string,
-        entitlement: HostedEntitlement | undefined) => { writes.push([subjectId, subscriptionId, entitlement]); } };
+      verifiedBillingRequest(body, signature, signingSecret, stripe.webhooks) as BillingReconcileRequest);
+    const writes: Array<[string, readonly HostedEntitlement[]]> = [];
+    const ports = { loadBinding: vi.fn(async () => binding), loadCurrent: vi.fn(async () => [current]),
+      replaceSubscriptions: async (subjectId: string,
+        entitlements: readonly HostedEntitlement[]) => { writes.push([subjectId, entitlements]); } };
     for (const request of requests) await reconcileBillingRequest(request, ports);
     expect(ports.loadCurrent).toHaveBeenCalledTimes(2);
     expect(writes).toHaveLength(2);
     expect(writes[0]).toEqual(writes[1]);
-    expect(writes[1]?.[2]).toMatchObject({ settledInvoiceId: "in_test_1" });
+    expect(writes[1]?.[1]).toMatchObject([{ settledInvoiceId: "in_test_1" }]);
   });
 
   it("does not write when the customer binding belongs to another customer", async () => {
-    const replaceSubscription = vi.fn(async () => {});
+    const replaceSubscriptions = vi.fn(async () => {});
     await expect(reconcileBillingRequest({ eventId: "evt_test_5", customerId: "cus_test_1" }, {
       loadBinding: async () => ({ ...binding, customerId: "cus_other" }),
-      loadCurrent: async () => current,
-      replaceSubscription,
+      loadCurrent: async () => [current],
+      replaceSubscriptions,
     })).rejects.toThrow("not bound");
-    expect(replaceSubscription).not.toHaveBeenCalled();
+    expect(replaceSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("removes old paid access after a plan switch and later cancellation", async () => {
+    const paidById = new Map<string, HostedEntitlement>();
+    const grant = { kind: "free-grant", subjectId: binding.subjectId, grantId: "grant-test",
+      approvedBy: "admin-test", startsAt: "2026-12-01T00:00:00Z",
+      endsAt: "2027-01-01T00:00:00Z", revokedAt: null } as const;
+    let providerCurrent: TrustedStripeBillingSnapshot[] = [current];
+    const ports = { loadBinding: async () => binding, loadCurrent: async () => providerCurrent,
+      replaceSubscriptions: async (_subjectId: string, entitlements: readonly HostedEntitlement[]) => {
+        paidById.clear();
+        for (const entitlement of entitlements) {
+          if (entitlement.kind === "subscription") paidById.set(entitlement.subscriptionId, entitlement);
+        }
+      } };
+    const request = { eventId: "evt_switch", customerId: binding.customerId };
+    await reconcileBillingRequest(request, ports);
+    expect([...paidById.keys()]).toEqual([current.subscriptionId]);
+    const switched = { ...current, subscriptionId: "sub_test_2", settledInvoiceId: "in_test_2" };
+    providerCurrent = [switched];
+    await reconcileBillingRequest(request, ports);
+    expect([...paidById.keys()]).toEqual(["sub_test_2"]);
+    providerCurrent = [{ ...switched, paymentReversed: true }];
+    await reconcileBillingRequest(request, ports);
+    expect([...paidById.keys()]).toEqual([]);
+    providerCurrent = [{ ...switched, status: "canceled" as const }];
+    await reconcileBillingRequest(request, ports);
+    expect([...paidById.keys()]).toEqual([]);
+    expect(() => requireHostedAccess(binding.subjectId, [...paidById.values()],
+      new Date("2026-11-26T00:00:00Z"))).toThrow("Hosted access unavailable");
+    expect(requireHostedAccess(binding.subjectId, [grant],
+      new Date("2026-12-10T00:00:00Z")).kind).toBe("free-grant");
   });
 });
