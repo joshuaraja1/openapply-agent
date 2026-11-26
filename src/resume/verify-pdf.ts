@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { CandidateProfile } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
 import type { ResumeSource } from "./jake.js";
-import { inspectPdfPageImage } from "./visual-qa.js";
+import { inspectPdfPageImage, ResumeVisualReviewRequiredError } from "./visual-qa.js";
 
 const require = createRequire(import.meta.url);
-const standardFontDataUrl = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + sep;
+// PDF.js requires a literal forward slash suffix even for native Windows paths.
+const standardFontDataUrl = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + "/";
 
 export interface VerifiedResumeArtifact {
   jobId: string;
@@ -29,7 +30,7 @@ const maxTextItemsPerPage = 1_500;
 
 export function assertNoTextOverlap(boxes: TextBox[]): void {
   if (boxes.length > maxTextItemsPerPage) {
-    throw new Error("Résumé PDF has too many text items to verify safely");
+    throw new ResumeVisualReviewRequiredError("Résumé PDF has too many text items to verify safely");
   }
   for (let first = 0; first < boxes.length; first += 1) {
     const a = boxes[first]!;
@@ -38,7 +39,7 @@ export function assertNoTextOverlap(boxes: TextBox[]): void {
       const horizontal = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
       const vertical = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
       if (horizontal > 4 && vertical > Math.min(a.height, b.height) * 0.6) {
-        throw new Error("Résumé PDF contains overlapping text");
+        throw new ResumeVisualReviewRequiredError("Résumé PDF contains overlapping text");
       }
     }
   }
@@ -96,9 +97,9 @@ export async function verifyResumePdf(
         throw new Error("Résumé PDF page is not US Letter size");
       }
       const content = await page.getTextContent();
-      if (!content.items.length) throw new Error("Résumé PDF has no extractable text");
+      if (!content.items.length) throw new ResumeVisualReviewRequiredError("Résumé PDF has no extractable text");
       if (content.items.length > maxTextItemsPerPage) {
-        throw new Error("Résumé PDF has too many text items to verify safely");
+        throw new ResumeVisualReviewRequiredError("Résumé PDF has too many text items to verify safely");
       }
       const text = content.items.flatMap((item) => "str" in item ? [item.str] : []);
       pageTexts.push(text.join(" "));
@@ -110,15 +111,15 @@ export async function verifyResumePdf(
         const height = Math.abs(item.height);
         if (x < -2 || y < -2 || x + item.width > viewport.width + 2
           || y + height > viewport.height + 2) {
-          throw new Error("Résumé PDF contains text outside the page bounds");
+          throw new ResumeVisualReviewRequiredError("Résumé PDF contains text outside the page bounds");
         }
         if (item.width > 0 && height > 0) boxes.push({ x, y, width: item.width, height });
       }
       assertNoTextOverlap(boxes);
-      const image = await inspectPdfPageImage(page);
+      const image = await inspectPdfPageImage(page, boxes);
       // A short overflow onto page two can be legible yet still produce an unusable résumé.
       if (index === 2 && image.inkRows / image.height < 0.12) {
-        throw new Error("Résumé PDF has a mostly empty second page");
+        throw new ResumeVisualReviewRequiredError("Résumé PDF has a mostly empty second page");
       }
       const annotations = await page.getAnnotations();
       for (const annotation of annotations) {

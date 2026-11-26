@@ -38,6 +38,8 @@ export interface ApplicationCheckpoint {
   artifactSha256?: string;
   sourceFingerprint?: string;
   confirmation?: string;
+  /** One durable identity for the final-click attempt; retained through recovery. */
+  submissionClaimId?: string;
   blocker?: string;
   browserPageId?: number;
   browserPageUrl?: string;
@@ -50,6 +52,11 @@ export interface ApplicationCheckpoint {
   desktopNotifiedFor?: string;
   emailNotifiedFor?: string;
   updatedAt: string;
+}
+
+export const resumeVisualReviewPrefix = "Résumé PDF requires human visual review:";
+export function needsResumeVisualReview(checkpoint: ApplicationCheckpoint): boolean {
+  return checkpoint.stage === "blocked" && checkpoint.blocker?.startsWith(resumeVisualReviewPrefix) === true;
 }
 
 /** An uncertain final click is a new alert even if an earlier human handoff was notified. */
@@ -70,7 +77,8 @@ export class ApplicationWorkflow {
   async markNotification(jobId: string, channel: "desktop" | "email",
     expectedHandoffId: string, deliveryMarker = expectedHandoffId): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
-    if (!current || !["waiting-human", "submission-uncertain"].includes(current.state.stage)
+    if (!current || !(["waiting-human", "submission-uncertain"].includes(current.state.stage)
+      || needsResumeVisualReview(current.state))
       || notificationIdentity(current.state) !== expectedHandoffId) {
       throw new Error("Notification belongs to a different handoff checkpoint");
     }
@@ -148,6 +156,7 @@ export class ApplicationWorkflow {
       ...current.state,
       ...details,
       stage,
+      ...(stage === "submit-claimed" ? { submissionClaimId: randomUUID() } : {}),
       ...(stage === "waiting-human" ? { handoffId: randomUUID() } : {}),
       updatedAt: new Date().toISOString(),
     };
