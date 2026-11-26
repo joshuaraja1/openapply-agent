@@ -92,6 +92,13 @@ lock and restarting. Check the employer confirmation before recording success.
 Current manual confirmation requires a saved BrowserOS tab identity. An owned-browser
 submission without that identity stays `submission-uncertain` until a separate
 verified recovery path is available; do not record success from the alert alone.
+Run `openapply application:review` (or `npm run application:review`) to open a
+private local list of every `submission-uncertain` application. This read-only
+screen shows the exact blocker, official posting, saved package path, and last
+browser URL when available. It requires no job ID from the generic alert and
+does not offer a submit or resume action. Check the employer portal or receipt
+for that exact job before recording a confirmed outcome; never repeat the final
+click just because the status is uncertain.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
