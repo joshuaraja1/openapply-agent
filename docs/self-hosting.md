@@ -46,6 +46,29 @@ to the operating-system secret store, never to this repository or JSON files.
    submission only after reviewing the candidate's policy and testing the
    target portals.
 
+### Scheduled provider policy upgrade
+
+The scheduled `queue:run` command defaults to **no enabled providers**, including
+for existing queue files. An entry paused before dispatch stays queued, consumes
+no daily application slot or posting claim, and appears as `provider-paused`
+with a reason in the local run output. If the policy changes after an attempt
+is claimed but before browser activity, the daily slot and a newly created
+canonical claim are released so a rediscovered source ID can retry. A claim
+that existed before the run is preserved. If browser
+activity has begun, OpenApply pauses before the final click as `waiting-human` and keeps
+the existing quota reservation and checkpoint for safe recovery. A revocation
+detected after the durable final-click claim stays `submission-uncertain` with
+an explicit no-click blocker; it cannot be retried automatically.
+`source.enabled` controls discovery only; it
+does not authorize applications. After a provider passes the controlled and
+consented real-site gates in the [beta protocol](monitored-beta-protocol.md),
+add its exact name to `queueProviderAllowlist` in the private queue-runner JSON,
+for example `"queueProviderAllowlist": ["greenhouse"]`. Restart the scheduled
+runner after editing the policy. A policy change detected during a run pauses
+remaining queued jobs until restart. Removing a provider from the list pauses
+its already queued jobs as well. Direct `application:run` remains a separate
+manual path governed by its job-bound handoff and final-approval controls.
+
 The scheduled queue's established path uses BrowserOS neo. An owned-browser
 queue preview is tracked in the release PR stack; recovery from human handoffs
 still needs validation. The local setup editor covers private templates; account
