@@ -113,6 +113,42 @@ passes on real artifacts, a public release remains blocked. A Windows
 code-signing certificate or signing service is still needed; do not put its
 private material in repository files or CI logs.
 
+## macOS CLI PKG build
+
+On a macOS build machine with a standalone Node 22.13+ binary, build the
+portable tarball with `npm pack`, then run
+`npm run distribution:macos-pkg -- /absolute/OpenApply.tgz /absolute/new/OpenApply.pkg`.
+The build validates the tarball through the locked installer, bundles the CLI,
+its production dependencies, and the selected standalone Node binary under
+`/Applications/OpenApply`, and creates an `openapply` launcher there. Set
+`OPENAPPLY_MAC_NODE_BINARY` to the absolute path of a standalone Node binary
+if the build process uses a Homebrew Node linked to external libraries. The
+builder rejects such linked binaries so the installed CLI does not depend on
+Homebrew packages on a candidate's machine. It also requires the selected Node
+binary to have the build host's CPU architecture and imports all runtime/native
+dependencies with that copied Node before constructing the PKG.
+
+For a production build, set `OPENAPPLY_APPLE_TEAM_ID`,
+`OPENAPPLY_MAC_APP_IDENTITY` (Developer ID Application),
+`OPENAPPLY_MAC_INSTALLER_IDENTITY` (Developer ID Installer), and
+`OPENAPPLY_MAC_NOTARY_PROFILE` (an existing notarytool Keychain profile). The
+builder signs bundled native code with hardened runtime and timestamp, signs
+the PKG, requires Apple notarization to return `Accepted`, staples the ticket,
+and runs Gatekeeper assessment before moving the artifact to the requested
+output path. Credentials stay in the local Keychain; do not put them in the
+repository or command output. Run `distribution:verify-release` on the final
+PKG as part of a three-platform signed manifest before publishing it.
+
+`--unsigned-smoke` exists solely for local and CI package-structure tests.
+The macOS CI job builds a real unsigned fixture PKG and inspects its package
+identifier and payload; it does not sign or notarize a release. This PKG
+currently installs a CLI, not a graphical first-run application, and it does
+not bundle Chromium, register a scheduler, provide a safe updater or uninstall
+flow, or test installation on a clean candidate Mac. Issue #59 remains open
+until those tests and signed artifacts pass. Apple documents the Developer ID,
+hardened runtime, and notarization requirements in its
+[notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+
 ## Requirements for a safe updater
 
 An updater must stop scheduled discovery and application workers before
