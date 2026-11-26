@@ -2,11 +2,13 @@
 
 `handleQueuedApplication` is a staging boundary for one received `apply` SQS
 message. The message contains only opaque candidate and run IDs. A trusted
-authorizer checks that the run belongs to the candidate and still has consent
-before the bridge takes a lease or reads candidate data. A trusted run-record
-loader supplies the verified official requisition and encrypted profile
-artifact ID after a candidate lease is acquired. The bridge restores the
-profile to a private temporary path and removes it after the run.
+authorizer checks that the run belongs to the candidate before taking a lease.
+The bridge loads only run identity and the verified official requisition to
+check the durable submission status. A confirmed redelivery can be acknowledged
+even if consent has since been revoked, without loading or restoring a profile.
+For a new attempt, current consent is required before the profile artifact ID
+is loaded. The bridge restores the profile to a private temporary path and
+removes it after the run.
 
 The future SQS poller must extend message visibility while a task runs and
 must not treat `lease_busy` or `needs_reconciliation` as a successful delivery.
@@ -44,6 +46,6 @@ No real candidate vault writes are wired to an executable in this staging slice.
 The handler intentionally favors safety over automatic retry: a crash after
 intent but before a click may require a human/provider status check. A future
 worker must not infer that a click did not happen from a closed tab or timeout.
-Authorization is checked again after preparation, and the journal checks the
+Current consent is checked again after preparation, and the journal checks the
 stored consent version atomically when it writes intent. The separate second
 check improves response time to revocation but cannot replace that transaction.
