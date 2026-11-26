@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { applicationPackageSchema } from "../application/runner.js";
@@ -7,6 +6,7 @@ import { createApplicationHandoff } from "../application/handoff.js";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
 import type { DiscoveredJob } from "../types.js";
 import { createJakeResumeSource } from "./jake.js";
+import { readBundledJakeTemplate } from "./bundled-template.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "./overleaf.js";
 import { renderOwnedOverleafResume } from "./owned-overleaf.js";
 import { renderInputSchema } from "./render-input.js";
@@ -19,7 +19,7 @@ const input = renderInputSchema.parse(JSON.parse(await readPrivateFile(resolve(i
 const outputDirectory = resolve(input.outputDirectory);
 if (input.browserEndpoint) assertLocalBrowserEndpoint(input.browserEndpoint);
 const job = input.job as DiscoveredJob;
-const template = await readFile("templates/resume/main.tex", "utf8");
+const template = await readBundledJakeTemplate();
 const resumeSource = createJakeResumeSource(template, job, input.candidate);
 const connection = input.browserEndpoint ? await connectBrowserOs(input.browserEndpoint) : undefined;
 try {
