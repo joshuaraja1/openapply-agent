@@ -85,6 +85,8 @@ describe("staged SQLite migration", () => {
     } finally { await rm(f.root, { recursive: true, force: true }); }
   }, 30_000);
 
+  // Windows ACL verification launches PowerShell for each private path. These
+  // cases exceeded 30 seconds in the serial Windows CI smoke without assertion failures.
   it("requires an inactive run and rejects legacy state changed after staging", async () => {
     const f = await fixture();
     try {
@@ -96,7 +98,7 @@ describe("staged SQLite migration", () => {
         .rejects.toThrow("changed");
       expect(await readFile(f.databasePath)).toBeDefined();
     } finally { await rm(f.root, { recursive: true, force: true }); }
-  }, 30_000);
+  }, 120_000);
 
   it("removes only its newly published database when target verification fails", async () => {
     const f = await fixture();
@@ -114,5 +116,5 @@ describe("staged SQLite migration", () => {
       verificationFailure.path = "";
       await rm(f.root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });
