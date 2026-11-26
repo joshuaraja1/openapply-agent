@@ -16,6 +16,24 @@ interface OfficialLead { source: JobSource; postingId: string }
 const slug = /^[a-z0-9_-]{1,100}$/i;
 const posting = /^[a-z0-9-]{1,128}$/i;
 
+/** An API-provided apply URL must stay on the same ATS and posting as the board lead. */
+function matchesOfficialApplication(raw: string, source: JobSource, postingId: string): boolean {
+  try {
+    const url = new URL(raw);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const final = parts.at(-1);
+    if (final === (source.provider === "ashby" ? "application" : "apply")) {
+      parts.pop();
+      url.pathname = `/${parts.join("/")}`;
+    }
+    const official = officialSourceForLead(url.href);
+    return !!official && official.postingId === postingId
+      && official.source.provider === source.provider && official.source.company === source.company
+      && (source.provider !== "lever" || (official.source.provider === "lever"
+        && official.source.region === source.region));
+  } catch { return false; }
+}
+
 /** Only fixed ATS hosts can be promoted to employer postings. Board metadata is never trusted. */
 export function officialSourceForLead(rawUrl: string): OfficialLead | null {
   let url: URL;
@@ -68,7 +86,9 @@ export async function verifyOfficialBrowserLeads(leads: BrowserLead[], now = new
     const live = await fetcher(source, now);
     return group.flatMap(({ lead, postingId }) => {
       const job = live.find((item) => item.id === `${source.provider}:${source.company}:${postingId}`);
-      if (!job || !job.descriptionText.trim()) return [];
+      if (!job || job.provider !== source.provider || job.company !== source.company
+        || !job.descriptionText.trim()
+        || !matchesOfficialApplication(job.applicationUrl, source, postingId)) return [];
       const applicationHost = new URL(job.applicationUrl).hostname;
       return [{ lead, job, source: { ...source,
         allowedApplicationHosts: [...new Set([...source.allowedApplicationHosts, applicationHost])] } }];

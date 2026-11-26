@@ -46,6 +46,27 @@ describe("official browser lead verification", () => {
     expect(verified[0]?.source.allowedApplicationHosts).toContain("jobs.smartrecruiters.com");
   });
 
+  it("accepts provider-owned application paths bound to the exact posting", async () => {
+    for (const [url, applicationUrl, provider, company, id] of [
+      ["https://jobs.ashbyhq.com/acme/abc-123",
+        "https://jobs.ashbyhq.com/acme/abc-123/application", "ashby", "acme", "abc-123"],
+      ["https://jobs.lever.co/acme/abc-123",
+        "https://jobs.lever.co/acme/abc-123/apply", "lever", "acme", "abc-123"],
+      ["https://jobs.eu.lever.co/acme/abc-123",
+        "https://jobs.eu.lever.co/acme/abc-123/apply", "lever", "acme", "abc-123"],
+    ]) {
+      const result = await verifyOfficialBrowserLeads([{ ...lead, url: url! }], new Date(),
+        async () => [{ ...live, id: `${provider}:${company}:${id}`,
+          provider: provider as NormalizedJob["provider"], company: company!,
+          applicationUrl: applicationUrl! }]);
+      expect(result, url).toHaveLength(1);
+    }
+    expect(await verifyOfficialBrowserLeads([
+      { ...lead, url: "https://jobs.eu.lever.co/acme/abc-123" }], new Date(),
+    async () => [{ ...live, id: "lever:acme:abc-123", provider: "lever", company: "acme",
+      applicationUrl: "https://jobs.lever.co/acme/abc-123/apply" }])).toHaveLength(0);
+  });
+
   it("requires a matching live posting and deduplicates repeated leads", async () => {
     const fetcher = vi.fn(async () => [live]);
     const verified = await verifyOfficialBrowserLeads([lead, lead,
@@ -55,6 +76,36 @@ describe("official browser lead verification", () => {
     expect(verified).toHaveLength(1);
     expect(verified[0]?.job.id).toBe(live.id);
     expect(verified[0]?.source.allowedApplicationHosts).toContain("job-boards.greenhouse.io");
+  });
+
+  it("deduplicates the same official posting found through different board searches", async () => {
+    const variants: BrowserLead[] = [
+      { ...lead, sourceSearchUrl: "https://www.linkedin.com/jobs/search/" },
+      { ...lead, sourceSearchUrl: "https://jobright.ai/jobs/recommend",
+        url: "https://boards.greenhouse.io/example/jobs/1234?utm_source=jobright" },
+      { ...lead, sourceSearchUrl: "https://app.joinhandshake.com/stu/jobs" },
+    ];
+    const fetcher = vi.fn(async () => [live]);
+    const verified = await verifyOfficialBrowserLeads(variants, new Date(), fetcher);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(verified).toHaveLength(1);
+    expect(verified[0]?.job.id).toBe("greenhouse:example:1234");
+  });
+
+  it("rejects unsafe application destinations even when a matching ID appears in a provider result", async () => {
+    for (const applicationUrl of ["http://jobs.example.com/apply",
+      "https://127.0.0.1/apply", "https://localhost/apply",
+      "https://127.0.0.1.nip.io/apply", "https://evil.example.com/apply",
+      "https://jobs.example.com:8443/apply", "https://user:pass@jobs.example.com/apply",
+      "https://job-boards.greenhouse.io/example/jobs/5678",
+      "https://job-boards.greenhouse.io/another/jobs/1234"]) {
+      expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
+        [{ ...live, applicationUrl }])).toHaveLength(0);
+    }
+    expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
+      [{ ...live, provider: "ashby" }])).toHaveLength(0);
+    expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
+      [{ ...live, applicationUrl: `${link}?utm_source=board` }])).toHaveLength(1);
   });
 
   it("does not promote stale, incomplete, or failed provider results", async () => {
