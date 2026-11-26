@@ -23,4 +23,14 @@ describe("cloud run envelope", () => {
     expect(() => decodeCloudRunEnvelope(JSON.stringify({ ...message, resume: "private" }))).toThrow();
     expect(() => decodeCloudRunEnvelope("x".repeat(1025))).toThrow("oversized");
   });
+
+  it("canonicalizes UUID case before assigning FIFO and deduplication keys", () => {
+    const mixedCase = { ...message, candidateId: message.candidateId.toUpperCase(),
+      runId: message.runId.toUpperCase() };
+    const canonical = encodeCloudRunEnvelope(message);
+    const encoded = encodeCloudRunEnvelope(mixedCase);
+    expect(encoded.groupId).toBe(canonical.groupId);
+    expect(encoded.deduplicationId).toBe(canonical.deduplicationId);
+    expect(decodeCloudRunEnvelope(JSON.stringify(mixedCase))).toEqual(message);
+  });
 });

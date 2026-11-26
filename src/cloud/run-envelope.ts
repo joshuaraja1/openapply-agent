@@ -4,8 +4,8 @@ import { z } from "zod";
 /** SQS receives identifiers only. Candidate material is loaded after authorization and lease claim. */
 export const cloudRunEnvelopeSchema = z.strictObject({
   version: z.literal(1),
-  candidateId: z.uuid(),
-  runId: z.uuid(),
+  candidateId: z.uuid().transform((value) => value.toLowerCase()),
+  runId: z.uuid().transform((value) => value.toLowerCase()),
   kind: z.enum(["discover", "apply"]),
   scheduledAt: z.iso.datetime(),
 });
