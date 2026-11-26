@@ -9,8 +9,8 @@ import { installLockedTarball } from "./locked-tarball-install.mjs";
 const installPath = "/Applications/OpenApply";
 const packageId = "xyz.openapplyagent.cli";
 
-function command(program, args) {
-  const result = spawnSync(program, args, { encoding: "utf8", timeout: 600_000, maxBuffer: 1024 * 1024 });
+function command(program, args, options = {}) {
+  const result = spawnSync(program, args, { encoding: "utf8", timeout: 600_000, maxBuffer: 1024 * 1024, ...options });
   if (result.error || result.status !== 0) throw new Error(`${basename(program)} ${args[0]} failed: ${result.stderr || result.stdout || result.error?.message}`);
   return result.stdout;
 }
@@ -50,6 +50,9 @@ function standaloneNode(binary, run) {
   if (!libraries.length || libraries.some((path) => !path.startsWith("/System/Library/") && !path.startsWith("/usr/lib/"))) {
     throw new Error("Bundled Node has external dynamic libraries; use a standalone Node distribution");
   }
+  if (run(binary, ["-p", "process.arch"]).trim() !== process.arch) {
+    throw new Error("Bundled Node architecture differs from the installed native dependencies");
+  }
 }
 
 /** Build an owner-independent CLI PKG; unsigned mode exists only for structural CI smoke. */
@@ -85,14 +88,21 @@ export function buildMacOSPkg(tarballPath, outputPath, options = {}, run = comma
     chmodSync(node, 0o755);
     const launcher = join(appRoot, "bin", "openapply");
     writeFileSync(launcher, `#!/bin/sh\nset -eu\nexec "${installPath}/bin/node" "${installPath}/runtime/package/dist/src/product-cli.js" "$@"\n`, { mode: 0o755 });
-    run(node, [join(appRoot, "runtime", "package", "dist", "src", "product-cli.js"), "--help"]);
+    const runtimePackage = join(appRoot, "runtime", "package");
+    run(node, [join(runtimePackage, "dist", "src", "product-cli.js"), "--help"], { cwd: runtimePackage });
+    run(node, ["--input-type=module", "-e",
+      "await Promise.all(['playwright','@napi-rs/canvas','@napi-rs/keyring','@modelcontextprotocol/sdk/client/index.js'].map(name => import(name)))"],
+    { cwd: runtimePackage });
+    const scripts = join(scratch, "scripts");
+    mkdirSync(scripts, { mode: 0o700 });
+    writeFileSync(join(scripts, "preinstall"), `#!/bin/sh\nset -eu\nif [ -e "${installPath}" ] || [ -L "${installPath}" ]; then\n  echo 'OpenApply already exists; use a reviewed updater, not this clean-install package.' >&2\n  exit 1\nfi\n`, { mode: 0o755 });
     if (!options.unsignedSmoke) {
       for (const file of [...nativeFiles(join(appRoot, "runtime")), node]) {
         run("codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", options.appIdentity, file]);
         run("codesign", ["--verify", "--strict", "--verbose=2", file]);
       }
     }
-    run("pkgbuild", ["--root", payload, "--identifier", packageId, "--version", version,
+    run("pkgbuild", ["--root", payload, "--scripts", scripts, "--identifier", packageId, "--version", version,
       "--install-location", "/", "--ownership", "recommended", unsigned]);
     let artifact = unsigned;
     if (!options.unsignedSmoke) {

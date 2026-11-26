@@ -124,7 +124,9 @@ its production dependencies, and the selected standalone Node binary under
 `OPENAPPLY_MAC_NODE_BINARY` to the absolute path of a standalone Node binary
 if the build process uses a Homebrew Node linked to external libraries. The
 builder rejects such linked binaries so the installed CLI does not depend on
-Homebrew packages on a candidate's machine.
+Homebrew packages on a candidate's machine. It also requires the selected Node
+binary to have the build host's CPU architecture and imports all runtime/native
+dependencies with that copied Node before constructing the PKG.
 
 For a production build, set `OPENAPPLY_APPLE_TEAM_ID`,
 `OPENAPPLY_MAC_APP_IDENTITY` (Developer ID Application),
