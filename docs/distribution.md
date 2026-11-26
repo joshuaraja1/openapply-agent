@@ -67,6 +67,31 @@ installer now calls this locked path. The lock itself is inside an unsigned
 tarball, so this remains a controlled staging check, not a verified public
 release artifact.
 
+## Release signature preflight
+
+`npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem`
+fails unless an Ed25519-signed manifest names one macOS `.pkg`, one Windows
+`.msi`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
+that manifest. Keep the signing key outside the repository. Set
+`OPENAPPLY_RELEASE_KEY_SHA256` to the SHA-256 fingerprint of the trusted
+public-key PEM obtained through a separately trusted channel; the command
+refuses an absent or different key. The command then checks the native
+signature for **the current OS**: macOS requires a trusted-timestamp Developer
+ID Installer signature from `OPENAPPLY_APPLE_TEAM_ID`, a stapled notarization
+ticket, and Gatekeeper acceptance; Windows requires a valid Authenticode
+signature from `OPENAPPLY_WINDOWS_CERT_THUMBPRINT`. Linux relies on the signed
+manifest and artifact hash for this portable tarball. Run the command on all
+three operating systems before publishing anything. Synthetic CI fixtures
+exercise valid and rejected paths on all three platforms.
+
+This preflight does not build or sign the installers, authenticate the identity
+of a newly supplied public key, or publish a release. No production release key
+is registered, no native macOS/Windows installers are built, and no signed
+Linux distribution artifact is produced. Until those exist and verification
+passes on real artifacts, a public release remains blocked. A Windows
+code-signing certificate or signing service is still needed; do not put its
+private material in repository files or CI logs.
+
 ## Requirements for a safe updater
 
 An updater must stop scheduled discovery and application workers before
