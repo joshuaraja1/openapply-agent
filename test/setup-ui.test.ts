@@ -2,8 +2,9 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Script } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { startSetupUi } from "../src/setup/ui.js";
+import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
 describe("local first-run setup", () => {
   it("compiles only valid private structured evidence and preserves existing outputs", async () => {
@@ -97,11 +98,19 @@ describe("local first-run setup", () => {
       const html = await page.text();
       expect(html).toContain("Try a job match");
       expect(html).toContain("Check readiness");
+      expect(html).toContain("Check runtime setup");
+      expect(html).toContain("Check browser installation");
       const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
       expect(script).toBeTruthy();
       expect(() => new Script(script!)).not.toThrow();
       expect((await fetch(`${origin}/api/templates`)).status).toBe(403);
       expect((await fetch(`${origin}/api/readiness`)).status).toBe(403);
+      expect((await fetch(`${origin}/api/runtime-readiness`)).status).toBe(403);
+      expect((await fetch(`${origin}/api/browser-doctor`, { method: "POST" })).status).toBe(403);
+      const runtime = await fetch(`${origin}/api/runtime-readiness`, {
+        headers: { "x-openapply-token": token },
+      });
+      expect(await runtime.json()).toMatchObject({ queueConfig: "missing", browser: "missing" });
       const listing = await fetch(`${origin}/api/templates`, { headers: { "x-openapply-token": token } });
       const files = (await listing.json()) as { files: { name: string; content: string; sha256: string }[] };
       expect(files.files).toHaveLength(8);
@@ -123,5 +132,36 @@ describe("local first-run setup", () => {
       await ui.close();
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("runs the browser doctor only through an authorized local request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-setup-doctor-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
+    const configPath = join(root, "queue-config.json");
+    await writeFile(configPath, JSON.stringify({ version: 1, queuePath: join(root, "queue.json"),
+      candidatePath: join(root, "onboarding", "candidate-profile.json"),
+      preferencesPath: join(root, "onboarding", "search-preferences.json"),
+      discoveryInputPath: join(root, "sources.json"), discoveryStatePath: join(root, "state.json"),
+      browserRuntime: "owned", overleafProjectUrl: "https://www.overleaf.com/project/0123456789abcdef01234567",
+      outputDirectory: join(root, "artifacts") }), { mode: 0o600 });
+    if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
+    const doctor = vi.fn(async () => ({ status: "ready" as const, startupMs: 1, browserVersion: "test" }));
+    const ui = await startSetupUi({ destination: join(root, "onboarding"),
+      repositoryRoot: process.cwd(), queueConfigPath: configPath, browserDoctor: doctor,
+      browserProfileDirectory: join(root, "browser-profile") });
+    try {
+      const url = new URL(ui.url), token = url.searchParams.get("token")!;
+      const endpoint = `${url.origin}/api/browser-doctor`;
+      expect((await fetch(endpoint, { method: "POST", headers: {
+        origin: "https://attacker.example", "x-openapply-token": token,
+      } })).status).toBe(403);
+      expect(doctor).not.toHaveBeenCalled();
+      const result = await fetch(endpoint, { method: "POST", headers: {
+        origin: url.origin, "x-openapply-token": token,
+      } });
+      expect(result.status).toBe(200);
+      expect(await result.json()).toEqual({ browser: "ready" });
+      expect(doctor).toHaveBeenCalledWith(join(root, "browser-profile"));
+    } finally { await ui.close(); await rm(root, { recursive: true, force: true }); }
   });
 });
