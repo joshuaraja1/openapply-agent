@@ -143,7 +143,8 @@ PKG as part of a three-platform signed manifest before publishing it.
 The macOS CI job builds a real unsigned fixture PKG and inspects its package
 identifier and payload. The unsigned drill also expands the PKG into a
 disposable directory, runs its preinstall guard with that directory as the
-Installer destination volume, launches the packaged CLI with its bundled Node,
+Installer destination volume, rejects symlinks in the volume path or its
+`Applications` parent, launches the packaged CLI with its bundled Node,
 confirms a repeat install is refused without changing the runtime, and models
 manual removal and restoration while a separate private-state sentinel remains
 intact. Run it on macOS with a standalone Node 22.13+ binary:

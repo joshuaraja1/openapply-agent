@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -64,7 +64,7 @@ test("unsigned package drill preserves private data and refuses an unsafe upgrad
     const unpack = spawnSync("pkgutil", ["--expand-full", f.output, expanded], { encoding: "utf8" });
     assert.equal(unpack.status, 0, unpack.stderr);
 
-    const target = join(f.root, "disposable-volume");
+    const target = join(realpathSync(f.root), "disposable-volume");
     const app = join(target, "Applications", "OpenApply");
     const privateState = join(f.root, "candidate-home", "Library", "Application Support", "OpenApply", "state.db");
     mkdirSync(join(target, "Applications"), { recursive: true });
@@ -75,6 +75,19 @@ test("unsigned package drill preserves private data and refuses an unsafe upgrad
     assert.equal(guard(target).status, 0);
     assert.notEqual(guard("").status, 0);
     assert.notEqual(guard("relative-volume").status, 0);
+    const linkedVolume = join(realpathSync(f.root), "linked-volume");
+    symlinkSync(target, linkedVolume);
+    assert.match(guard(linkedVolume).stderr, /contains a symlink/);
+    const nestedLinkedVolume = join(linkedVolume, "nested");
+    mkdirSync(join(target, "nested"));
+    assert.match(guard(nestedLinkedVolume).stderr, /contains a symlink/);
+    const applications = join(target, "Applications");
+    const actualApplications = join(target, "actual-applications");
+    renameSync(applications, actualApplications);
+    symlinkSync(actualApplications, applications);
+    assert.match(guard(target).stderr, /Applications directory is a symlink/);
+    rmSync(applications);
+    renameSync(actualApplications, applications);
 
     cpSync(join(expanded, "Payload", "Applications", "OpenApply"), app, { recursive: true });
     const packagedNode = join(app, "bin", "node");
