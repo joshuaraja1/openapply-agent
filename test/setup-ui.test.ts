@@ -103,6 +103,7 @@ describe("local first-run setup", () => {
       expect(html).toContain("Check readiness");
       expect(html).toContain("Check runtime setup");
       expect(html).toContain("Check browser installation");
+      expect(html).toContain("Run setup dry run");
       const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
       expect(script).toBeTruthy();
       expect(() => new Script(script!)).not.toThrow();
@@ -110,6 +111,12 @@ describe("local first-run setup", () => {
       expect((await fetch(`${origin}/api/readiness`)).status).toBe(403);
       expect((await fetch(`${origin}/api/runtime-readiness`)).status).toBe(403);
       expect((await fetch(`${origin}/api/browser-doctor`, { method: "POST" })).status).toBe(403);
+      expect((await fetch(`${origin}/api/dry-run`, { method: "POST" })).status).toBe(403);
+      const dryRun = await fetch(`${origin}/api/dry-run`, { method: "POST",
+        headers: { "x-openapply-token": token, origin } });
+      expect(dryRun.status).toBe(200);
+      expect(await dryRun.json()).toMatchObject({ previewOnly: true,
+        readyForPrivatePreview: false, readyForLiveApplications: false });
       const runtime = await fetch(`${origin}/api/runtime-readiness`, {
         headers: { "x-openapply-token": token },
       });
@@ -128,6 +135,15 @@ describe("local first-run setup", () => {
         body: JSON.stringify(update) })).status).toBe(404);
       expect((await fetch(target, { method: "PUT", headers, body: JSON.stringify(update) })).status).toBe(200);
       expect((await fetch(target, { method: "PUT", headers, body: JSON.stringify(update) })).status).toBe(409);
+      const blankTarget = `${origin}/api/template/${files.files[1]!.name}`;
+      const blank = await fetch(blankTarget, { method: "PUT", headers,
+        body: JSON.stringify({ content: "A           B\n",
+          expectedSha256: files.files[1]!.sha256 }) });
+      expect((await blank.json()).complete).toBe(false);
+      const refreshed = await fetch(`${origin}/api/templates`, {
+        headers: { "x-openapply-token": token } });
+      const refreshedFiles = (await refreshed.json()) as { files: { complete: boolean }[] };
+      expect(refreshedFiles.files[1]!.complete).toBe(false);
       const path = join(root, "onboarding", first.name);
       expect(await readFile(path, "utf8")).toBe(update.content);
       if (process.platform !== "win32") expect((await stat(path)).mode & 0o077).toBe(0);
