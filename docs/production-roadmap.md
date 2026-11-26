@@ -2,6 +2,8 @@
 
 The remaining implementation sequence and measurable release gates are in
 [autonomy release requirements](autonomy-release-requirements.md).
+The dated [release evidence inventory](release-evidence-status.md) identifies
+which gates have controlled evidence and which still need live validation.
 
 ## Current implementation status
 

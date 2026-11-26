@@ -1,5 +1,8 @@
 # Autonomous product release requirements
 
+For the current evidence and missing release gates, see the
+[dated release inventory](release-evidence-status.md).
+
 This is the implementation contract for the remaining product work. The current
 CLI is a useful beta foundation, not an unattended consumer release. A supported
 run discovers official postings, creates a job-bound résumé, completes known
