@@ -30,6 +30,18 @@ describe("hosted entitlement gate", () => {
       .toBe(paid.endsAt);
   });
 
+  it("chooses the longest effective paid coverage across overlapping entitlements", () => {
+    const longSubscriptionShortCoverage = { ...paid, subscriptionId: "sub_long",
+      endsAt: "2027-02-01T00:00:00Z", paidThrough: "2026-11-27T00:00:00Z" };
+    const shorterSubscriptionLongCoverage = { ...paid, subscriptionId: "sub_covered",
+      endsAt: "2026-12-01T00:00:00Z", paidThrough: "2026-12-01T00:00:00Z" };
+    expect(requireHostedAccess("candidate-a", [longSubscriptionShortCoverage,
+      shorterSubscriptionLongCoverage], now)).toMatchObject({
+      sourceId: "sub_covered", accessUntil: "2026-12-01T00:00:00Z" });
+    expect(requireHostedAccess("candidate-a", [longSubscriptionShortCoverage, friend], now))
+      .toMatchObject({ sourceId: "grant-1", accessUntil: friend.endsAt });
+  });
+
   it("denies a missing, wrong-tenant, future, or expired record", () => {
     expect(() => requireHostedAccess("candidate-a", [], now)).toThrow("Hosted access unavailable");
     expect(() => requireHostedAccess("candidate-b", [paid], now)).toThrow("Hosted access unavailable");

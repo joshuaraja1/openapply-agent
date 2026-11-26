@@ -32,6 +32,11 @@ export interface HostedAccess {
   accessUntil: string;
 }
 
+function accessUntil(record: HostedEntitlement): string {
+  return record.kind === "subscription" && Date.parse(record.paidThrough) < Date.parse(record.endsAt)
+    ? record.paidThrough : record.endsAt;
+}
+
 /** The same gate must run before enqueue and again before starting browser work. */
 export function requireHostedAccess(
   subjectId: string,
@@ -49,11 +54,9 @@ export function requireHostedAccess(
     && (record.kind === "subscription" ? record.status === "active" :
       record.revokedAt === null));
   if (!eligible.length) throw new Error("Hosted access unavailable");
-  eligible.sort((a, b) => Date.parse(b.endsAt) - Date.parse(a.endsAt));
+  eligible.sort((a, b) => Date.parse(accessUntil(b)) - Date.parse(accessUntil(a)));
   const chosen = eligible[0]!;
-  const paidEnd = chosen.kind === "subscription" && Date.parse(chosen.paidThrough) < Date.parse(chosen.endsAt)
-    ? chosen.paidThrough : chosen.endsAt;
   return { kind: chosen.kind,
     sourceId: chosen.kind === "subscription" ? chosen.subscriptionId : chosen.grantId,
-    accessUntil: paidEnd };
+    accessUntil: accessUntil(chosen) };
 }
