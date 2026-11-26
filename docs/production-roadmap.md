@@ -26,8 +26,9 @@ and a local, job-bound handoff screen [#119](https://github.com/joshuaraja1/open
 are also draft work. The screen resumes an existing checkpoint after the user
 provides exact answers and authorizes continuation; it does not solve CAPTCHA
 or MFA on behalf of the user.
-Durable alert replay is under review in the next stacked change; notification
-delivery still needs a live sender account and monitored beta validation.
+Durable alert replay [#121](https://github.com/joshuaraja1/openapply-agent/pull/121)
+is also under review. Notification delivery still needs a live sender account
+and monitored beta validation.
 These changes are **drafts, not merged into `main`**. Their combined local tree
 passes tests, but independent reviews and live beta validation are pending.
 
