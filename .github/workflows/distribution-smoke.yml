@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   portable-package:
     name: Portable package (${{ matrix.os }})
@@ -26,3 +30,4 @@ jobs:
       - run: npm run distribution:smoke
       - run: npm run distribution:staging-smoke
       - run: npm run distribution:locked-smoke
+      - run: npm run distribution:release-gate-smoke

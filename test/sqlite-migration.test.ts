@@ -39,6 +39,9 @@ async function fixture() {
 }
 
 describe("staged SQLite migration", () => {
+  // Windows private-path checks launch PowerShell repeatedly during fixture setup
+  // and migration. Keep the shorter timeout on other platforms.
+  const migrationTimeout = process.platform === "win32" ? 120_000 : 30_000;
   it("copies all encrypted versions and tombstones, then rolls back without changing the live file", async () => {
     const f = await fixture();
     try {
@@ -62,7 +65,7 @@ describe("staged SQLite migration", () => {
       expect(await f.legacy.read("job:123")).toEqual({ version: 1,
         state: { stage: "applying", email: f.secret } });
     } finally { await rm(f.root, { recursive: true, force: true }); }
-  }, 30_000);
+  }, migrationTimeout);
 
   it("refuses duplicate targets, wrong keys, and a database modified after staging", async () => {
     const f = await fixture();
@@ -83,7 +86,7 @@ describe("staged SQLite migration", () => {
         .rejects.toThrow("changed");
       expect(await readFile(f.databasePath)).toBeDefined();
     } finally { await rm(f.root, { recursive: true, force: true }); }
-  }, 30_000);
+  }, migrationTimeout);
 
   // Windows ACL verification launches PowerShell for each private path. These
   // cases exceeded 30 seconds in the serial Windows CI smoke without assertion failures.

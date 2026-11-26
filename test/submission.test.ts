@@ -28,6 +28,25 @@ async function ready(jobId = "job", applicationUrl = "https://jobs.example.com/j
 }
 
 describe("submission verification", () => {
+  it("rechecks provider policy after durable claim and never clicks after revocation", async () => {
+    const { workflow } = await ready();
+    const submit = vi.fn(async () => "Thank you for applying");
+    const browser = { currentUrl: () => handoff.applicationUrl, submit };
+    let revoked = false;
+    const advance = workflow.advance.bind(workflow);
+    vi.spyOn(workflow, "advance").mockImplementation(async (jobId, stage, details) => {
+      const checkpoint = await advance(jobId, stage, details);
+      if (stage === "submit-claimed") revoked = true;
+      return checkpoint;
+    });
+    await submitApplication(workflow, browser, "job", "1:0", "Thank you for applying",
+      handoff, undefined, undefined, undefined, undefined,
+      async () => revoked ? "Provider revoked after claim" : undefined);
+    expect(submit).not.toHaveBeenCalled();
+    expect(await workflow.current("job")).toMatchObject({ stage: "submission-uncertain",
+      blocker: expect.stringContaining("no final click was attempted") });
+  });
+
   it("marks a generic thank-you receipt uncertain when it redirects to another requisition", async () => {
     const jobId = "greenhouse:example:123456";
     const applicationUrl = "https://jobs.example.com/apply/123456";

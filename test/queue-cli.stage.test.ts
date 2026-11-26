@@ -107,9 +107,11 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
     if (process.platform === "win32") await secureWindowsPrivatePath(path);
   }
   const configPath = join(stageRoot, "queue-config.json");
-  await writeFile(configPath, JSON.stringify({ version: 1, ...paths,
-    browserRuntime: "owned", overleafProjectUrl: "https://www.overleaf.com/project/000000000000000000000000",
-    outputDirectory: artifacts, expectedConfirmationByDomain: {} }), { mode: 0o600 });
+  const queueConfig = { version: 1, ...paths,
+    browserRuntime: "browseros", browserEndpoint: "http://127.0.0.1:9210/mcp",
+    overleafProjectUrl: "https://www.overleaf.com/project/000000000000000000000000",
+    outputDirectory: artifacts, expectedConfirmationByDomain: {} };
+  await writeFile(configPath, JSON.stringify(queueConfig), { mode: 0o600 });
   if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
   vi.stubEnv("OPENAPPLY_QUEUE_CONFIG", configPath);
   stage.render.mockResolvedValue({ path: join(artifacts, "synthetic.pdf"), pages: 1,
@@ -130,6 +132,23 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
   vi.stubGlobal("fetch", fetcher);
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
 
+  // Legacy queue configuration defaults to deny, including an already queued
+  // entry whose saved discovery source is enabled.
+  await import("../src/application/queue-cli.js");
+  expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes)
+    .toEqual([{ jobId: job.id, status: "provider-paused",
+      reason: expect.stringContaining("ashby") }]);
+  expect(stage.render).not.toHaveBeenCalled();
+  expect(stage.runPackage).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect((await readdir(artifacts)).filter((name) => name.startsWith("application-"))).toHaveLength(0);
+
+  await rmdir(join(privateRoot, "workflow.lock"));
+  await writeFile(configPath, JSON.stringify({ ...queueConfig, browserRuntime: "owned",
+    browserEndpoint: undefined, queueProviderAllowlist: ["ashby"] }),
+    { mode: 0o600 });
+  if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
+  vi.resetModules();
   await import("../src/application/queue-cli.js");
   expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes)
     .toEqual([{ jobId: job.id, status: "waiting-human" }]);

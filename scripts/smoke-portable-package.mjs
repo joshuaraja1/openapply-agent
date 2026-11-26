@@ -69,7 +69,10 @@ try {
       encoding: "utf8", maxBuffer: 1024 * 1024,
     });
     if (cli.error) throw cli.error;
-    if (cli.status !== 0 || !cli.stdout.includes("  autopilot")) {
+    const requiredCommands = ["autopilot", "queue:run", "application:run",
+      "resume:render", "secret:put", "oauth:connect"];
+    const listedCommands = new Set(cli.stdout.split("\n").map((line) => line.trim()));
+    if (cli.status !== 0 || requiredCommands.some((command) => !listedCommands.has(command))) {
       throw new Error(`Installed CLI failed: ${cli.stderr || cli.stdout}`);
     }
     return installed;
@@ -103,6 +106,21 @@ try {
   if (check.error) throw check.error;
   if (check.status !== 0 || check.stdout !== expectedHash) {
     throw new Error(`Installed resume template resolution failed outside the package: ${check.stderr || check.stdout}`);
+  }
+  const cleanEnvironment = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => !name.startsWith("OPENAPPLY_")));
+  for (const [command, expected] of [
+    ["secret:put", "Set OPENAPPLY_SECRET_REF"],
+    ["oauth:connect", "Set OPENAPPLY_AUTH_POLICY"],
+    ["resume:render", "Set OPENAPPLY_RENDER_INPUT"],
+  ]) {
+    const invoked = spawnSync(process.execPath,
+      [join(installed, "dist/src/product-cli.js"), command],
+      { cwd: foreignDirectory, encoding: "utf8", env: cleanEnvironment, maxBuffer: 1024 * 1024 });
+    if (invoked.error) throw invoked.error;
+    if (invoked.status === 0 || !(invoked.stderr + invoked.stdout).includes(expected)) {
+      throw new Error(`Installed ${command} did not reach its input validation`);
+    }
   }
   install(priorTarball, "0.0.0");
   console.log(`Portable package ${manifest.version} installs, upgrades, and rolls back on ${process.platform}`);
