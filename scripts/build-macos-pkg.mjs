@@ -95,7 +95,42 @@ export function buildMacOSPkg(tarballPath, outputPath, options = {}, run = comma
     { cwd: runtimePackage });
     const scripts = join(scratch, "scripts");
     mkdirSync(scripts, { mode: 0o700 });
-    writeFileSync(join(scripts, "preinstall"), `#!/bin/sh\nset -eu\nif [ -e "${installPath}" ] || [ -L "${installPath}" ]; then\n  echo 'OpenApply already exists; use a reviewed updater, not this clean-install package.' >&2\n  exit 1\nfi\n`, { mode: 0o755 });
+    writeFileSync(join(scripts, "preinstall"), `#!/bin/sh
+set -eu
+# Installer passes the destination volume as argument 3. Reject symlinked
+# ancestors before checking the install path on that volume.
+if [ "$#" -lt 3 ] || [ -z "$3" ]; then
+  echo 'Installer destination volume is missing.' >&2
+  exit 1
+fi
+case "$3" in
+  /*) target_volume="$3" ;;
+  *) echo 'Installer destination volume is invalid.' >&2; exit 1 ;;
+esac
+if [ ! -d "$target_volume" ]; then
+  echo 'Installer destination volume does not exist.' >&2
+  exit 1
+fi
+probe="$target_volume"
+while [ "$probe" != / ]; do
+  if [ -L "$probe" ]; then
+    echo 'Installer destination volume contains a symlink.' >&2
+    exit 1
+  fi
+  probe="\${probe%/*}"
+  [ -n "$probe" ] || probe=/
+done
+applications="\${target_volume%/}/Applications"
+if [ -L "$applications" ]; then
+  echo 'Installer Applications directory is a symlink.' >&2
+  exit 1
+fi
+target="\${target_volume%/}${installPath}"
+if [ -e "$target" ] || [ -L "$target" ]; then
+  echo 'OpenApply already exists; use a reviewed updater, not this clean-install package.' >&2
+  exit 1
+fi
+`, { mode: 0o755 });
     if (!options.unsignedSmoke) {
       for (const file of [...nativeFiles(join(appRoot, "runtime")), node]) {
         run("codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", options.appIdentity, file]);

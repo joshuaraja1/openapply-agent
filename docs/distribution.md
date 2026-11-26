@@ -141,10 +141,23 @@ PKG as part of a three-platform signed manifest before publishing it.
 
 `--unsigned-smoke` exists solely for local and CI package-structure tests.
 The macOS CI job builds a real unsigned fixture PKG and inspects its package
-identifier and payload; it does not sign or notarize a release. This PKG
-currently installs a CLI, not a graphical first-run application, and it does
-not bundle Chromium, register a scheduler, provide a safe updater or uninstall
-flow, or test installation on a clean candidate Mac. Issue #59 remains open
+identifier and payload. The unsigned drill also expands the PKG into a
+disposable directory, runs its preinstall guard with that directory as the
+Installer destination volume, rejects symlinks in the volume path or its
+`Applications` parent, launches the packaged CLI with its bundled Node,
+confirms a repeat install is refused without changing the runtime, and models
+manual removal and restoration while a separate private-state sentinel remains
+intact. Run it on macOS with a standalone Node 22.13+ binary:
+
+`OPENAPPLY_MAC_TEST_NODE=/absolute/path/to/node npm run distribution:macos-pkg-smoke`
+
+The drill does not invoke macOS Installer, write a system package receipt, test
+an actual upgrade or updater, sign or notarize an artifact, or validate
+Gatekeeper. A clean macOS VM install, upgrade, rollback, and uninstall test
+with the signed and notarized artifact is still required before release. This
+PKG currently installs a CLI, not a graphical first-run application, and it
+does not bundle Chromium, register a scheduler, or provide a safe updater or
+uninstall flow. Issue #59 remains open
 until those tests and signed artifacts pass. Apple documents the Developer ID,
 hardened runtime, and notarization requirements in its
 [notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
