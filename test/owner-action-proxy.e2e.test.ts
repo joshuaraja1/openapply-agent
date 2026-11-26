@@ -164,6 +164,9 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
       });
       const owner = await startOwnerInspectionService({ socketPath, secret, generation,
         journalDirectory: root });
+      await expect(owner.registerBrowser(binding, runtime, { company: "Example Inc",
+        role: "Software Engineer", phrase: "Application received",
+        postUrl: "https://jobs.example.test/other-job/submit" })).rejects.toThrow("exact receipt binding");
       await owner.registerBrowser(binding, runtime, { company: "Example Inc", role: "Software Engineer",
         phrase: "Application received", postUrl: "https://jobs.example.test/123456/submit" });
       const request = (action: string, extra = {}) => ({ version: 1, action,

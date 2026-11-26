@@ -239,7 +239,8 @@ export async function startOwnerInspectionService(input: {
       const officialOrigin = new URL(binding.officialUrl).origin;
       if (receipt && (!journal || !receipt.company.trim() || !receipt.role.trim()
         || !receipt.phrase.trim() || new URL(receipt.postUrl).origin !== officialOrigin
-        || new URL(receipt.postUrl).protocol !== "https:")) {
+        || new URL(receipt.postUrl).protocol !== "https:"
+        || hasUnboundReceiptUrl(binding.jobId, binding.officialUrl, receipt.postUrl))) {
         throw new Error("Owner submit staging requires a private journal and exact receipt binding");
       }
       const tab: RegisteredTab = { binding: { ...binding },
