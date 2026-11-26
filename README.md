@@ -11,6 +11,8 @@ owned-browser preview supports simple forms without a separate installation. Som
 portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
 The remaining PR sequence and release gates are in the
 [autonomy release requirements](docs/autonomy-release-requirements.md).
+The proposed hosted signup-to-submission journey and its implementation gates are
+in the [product flow design draft](docs/product-flow-v1.md).
 
 It does not include anyone's résumé, address, credentials, application history, or generated documents.
 
