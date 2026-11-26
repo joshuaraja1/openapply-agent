@@ -39,6 +39,30 @@ async function setupProfile(destination: string) {
   return { candidate: compileCandidateMarkdown(profile, work), preferences: compileSearchMarkdown(search) };
 }
 
+async function profileReadiness(destination: string): Promise<{ valid: boolean; compiled: boolean; current: boolean }> {
+  let candidate: unknown;
+  let preferences: unknown;
+  try {
+    ({ candidate, preferences } = await setupProfile(destination));
+  } catch {
+    return { valid: false, compiled: false, current: false };
+  }
+  try {
+    const [savedCandidate, savedPreferences] = await Promise.all([
+      readPrivateFile(join(destination, "candidate-profile.json")),
+      readPrivateFile(join(destination, "search-preferences.json")),
+    ]);
+    return { valid: true, compiled: true,
+      current: digest(savedCandidate) === digest(`${JSON.stringify(candidate, null, 2)}\n`)
+        && digest(savedPreferences) === digest(`${JSON.stringify(preferences, null, 2)}\n`) };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { valid: true, compiled: false, current: false };
+    }
+    throw error;
+  }
+}
+
 export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number }) {
   const destination = options.destination ?? join(userInfo().homedir, ".openapply-agent", "onboarding");
   await initializeUserWorkspace(destination, options.repositoryRoot);
@@ -68,6 +92,9 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
           return { name, content, sha256: digest(content), complete: !content.includes("{{") };
         }));
         return send(response, 200, { files });
+      }
+      if (url.pathname === "/api/readiness" && request.method === "GET") {
+        return send(response, 200, await profileReadiness(destination));
       }
       if (url.pathname === "/api/compile" && request.method === "POST") {
         const { candidate, preferences } = await setupProfile(destination);
@@ -185,7 +212,8 @@ textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offs
 <main><nav id="files" aria-label="Setup sections"></nav><section><div class="section-head"><h2 id="title">Loading setup</h2><div class="eyebrow" id="progress"></div></div>
 <p class="note">Complete each template with verified facts. The first three files supply résumé and matching data. Your answers stay in your private OpenApply folder.</p>
 <label for="editor" class="eyebrow">Template contents</label><textarea id="editor" spellcheck="false"></textarea>
-<div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><span id="message" role="status" aria-live="polite"></span></div>
+<div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><button class="compile" id="readiness-check">Check readiness</button><span id="message" role="status" aria-live="polite"></span></div>
+<p id="readiness" role="status" aria-live="polite">Profile readiness has not been checked.</p>
 <div class="preview"><h2>Try a job match</h2><p class="note">Paste a posting to check your saved evidence and search preferences. This local preview does not verify the employer posting, create a résumé, or apply.</p>
 <label for="preview-title">Job title</label><input id="preview-title" maxlength="200">
 <label for="preview-description">Job description</label><textarea id="preview-description" maxlength="100000"></textarea>
@@ -197,8 +225,10 @@ const labels=['Candidate profile','Work history','Search preferences','Source po
 function render(){const current=files[selected];document.getElementById('files').replaceChildren(...files.map((file,index)=>{const button=document.createElement('button');button.textContent=(index+1).toString().padStart(2,'0')+'  '+labels[index];button.setAttribute('aria-current',index===selected?'page':'false');button.onclick=()=>{if(editor.value!==files[selected].content&&!confirm('Discard unsaved changes?'))return;selected=index;render()};return button}));
 document.getElementById('title').textContent=labels[selected];document.getElementById('progress').textContent=files.filter(file=>file.complete).length+' / '+files.length+' sections without placeholders';editor.value=current.content;message.textContent=current.complete?'No placeholders detected':'Replace the {{PLACEHOLDER}} values before compiling your profile';}
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
+async function checkReadiness(){const output=document.getElementById('readiness');if(editor.value!==files[selected].content){output.textContent='Save this section before checking readiness.';return}output.textContent='Checking private profile…';try{const response=await fetch('/api/readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=!data.valid?'Complete and validate templates 01–03 before compiling.':!data.compiled?'Templates 01–03 are valid. Compile the profile to create private output files.':!data.current?'Compiled profile is stale. Move the old private output files aside, then compile again.':'Profile is compiled and current. Continue with source, browser, and account setup.'}catch(error){output.textContent=error.message}}
+document.getElementById('readiness-check').onclick=checkReadiness;
 document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately'}catch(error){message.textContent=error.message}};
-document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims'}catch(error){message.textContent=error.message}};
+document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('preview-run').onclick=async()=>{const result=document.getElementById('preview-result');if(editor.value!==files[selected].content){result.textContent='Save this section before previewing';return}result.textContent='Checking…';try{const response=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({title:document.getElementById('preview-title').value,description:document.getElementById('preview-description').value})});const data=await response.json();if(!response.ok)throw Error(data.error);const match=data.match;result.textContent=(match.eligible?'Potential match':'Needs review')+' · score '+match.score+'\\n'+match.reasons.join('\\n')+'\\nMatched skills: '+(match.matchedSkills.join(', ')||'none')+(match.reviewFlags.length?'\\nReview: '+match.reviewFlags.join('; '):'')}catch(error){result.textContent=error.message}};
 load().catch(error=>{message.textContent=error.message});
 </script></html>`;
