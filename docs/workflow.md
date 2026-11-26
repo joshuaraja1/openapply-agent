@@ -3,6 +3,9 @@
 ## 1. Prepare private inputs
 
 Copy `templates/user/` outside the repository, complete every relevant placeholder, and convert the approved facts into a private candidate JSON file matching `candidateProfileSchema`.
+Automatic matching requires at least one skill shared by the job and an
+approved work-history claim. A skills inventory entry without an evidenced
+claim does not make a role eligible for unattended application.
 
 ## 2. Configure sources
 
@@ -27,7 +30,35 @@ OPENAPPLY_PREFERENCES=/private/search-preferences.json \
 npm start
 ```
 
-The queue prioritizes the configured freshness window and falls back only when it is empty. Persistent first-seen state prevents old Greenhouse roles from being misrepresented as newly published.
+The queue puts roles with a verified posting time within the preferred window
+first. Newly observed roles without a posting date follow, then older active
+roles backfill the remaining capacity. The example has no age cutoff; set
+`maximumFreshnessHours` to a number if the candidate wants one. First-seen
+time is never described as a verified posting time. The daily cap and
+deduplication still apply.
+
+Each scheduled discovery refreshes pending jobs against the current official
+source response and ranks the whole queue again. A job that disappeared from
+a successfully refreshed official source is removed from that run's queue. A
+source outage retains its pending jobs with `sourceVerification: unavailable`;
+the runner skips them until a later successful fetch verifies them again. A
+dropped job is also retained as unavailable when the configured per-source limit
+truncates the official response, because its absence cannot prove closure. A
+dropped queue entry remains eligible for rediscovery if it reappears. The encrypted application checkpoint
+still prevents a confirmed submission from being repeated. Discovery keeps all
+eligible active jobs in the ranked queue; the application runner enforces the
+daily cap after skipping jobs with terminal or waiting checkpoints, so those
+jobs cannot consume every queue slot ahead of usable backfill.
+SmartRecruiters discovery follows the public posting API's offset pagination
+and fetches each posting's detail; an incomplete page or failed detail fetch
+pauses that source instead of treating omitted jobs as closed.
+Workday discovery also follows offset pages. A repeated posting or an early
+empty page fails the source so pending applications pause safely.
+Relative Workday posting labels retain a conservative age bound. They are not
+reported as exact posting timestamps; older labels cannot enter the recent tier.
+If the queue file is lost, discovery can reconstruct it from current official
+postings: `reportedAt` means queued, while encrypted application checkpoints
+prevent a completed or uncertain submission from being repeated.
 
 ## 4. Tailor and verify
 

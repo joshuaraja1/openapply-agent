@@ -55,70 +55,15 @@ export class NeoApplicationBrowser {
   pageId(): number | undefined { return this.page; }
   groupId(): string | undefined { return this.group; }
 
-  async register(email: string, password: string): Promise<BrowserSnapshot> {
-    if (this.page === undefined || !this.latest || !email || !password) {
-      throw new Error("BrowserOS registration page is unavailable");
-    }
-    const fields = this.registrationFields(this.latest);
-    success(await this.client.callTool({ name: "act", arguments: {
-      page: this.page, kind: "fill", sensitive: true, diff: "none", fields: [
-        { ref: fields.email.ref, value: email },
-        { ref: fields.password.ref, value: password },
-        { ref: fields.confirmation.ref, value: password },
-      ],
-    } }), "registration fill");
-    const filled = await this.snapshot();
-    const updated = this.registrationFields(filled);
-    if (updated.email.value !== email) {
-      throw new Error("Registration form changed during credential fill");
-    }
-    success(await this.client.callTool({ name: "act", arguments: {
-      page: this.page, kind: "click", ref: updated.submit.ref, diff: "none",
-    } }), "registration submission");
-    return this.snapshot();
+  // BrowserOS snapshots cannot prove that password inputs and the submit
+  // control share a same-origin POST form. Let a human sign in or register in
+  // the persistent browser; application recovery resumes afterward.
+  async register(_email: string, _password: string): Promise<BrowserSnapshot> {
+    throw new Error("BrowserOS account registration requires human completion");
   }
 
-  private registrationFields(snapshot: BrowserSnapshot & { visibleText: string }) {
-    const controls = snapshot.controls;
-    const field = (name: RegExp) => controls.filter((control) => control.tag === "input"
-      && name.test(control.name.trim()));
-    const email = field(/^(email|email address|e-mail)$/i);
-    const password = field(/^(password|create password)$/i);
-    const confirmation = field(/^(confirm password|password confirmation|re-enter password)$/i);
-    const submit = controls.filter((control) => control.tag === "button"
-      && /^(create account|sign up|register)$/i.test(control.name.trim()));
-    if (email.length !== 1 || password.length !== 1 || confirmation.length !== 1 || submit.length !== 1
-      || /\b(captcha|verify you are human|security question|i agree|by (?:creating|registering|signing up|clicking)\b.{0,160}\b(?:agree|accept)|agree to (?:the )?(?:terms|privacy)|accept (?:the )?(?:terms|privacy))\b/i
-        .test(snapshot.visibleText)
-      || controls.some((control) => control.required
-        && ![...email, ...password, ...confirmation].includes(control) && control.tag !== "button")) {
-      throw new Error("Registration form requires human review");
-    }
-    return { email: email[0]!, password: password[0]!, confirmation: confirmation[0]!, submit: submit[0]! };
-  }
-
-  async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
-    if (this.page === undefined || !this.latest || !email || !password
-      || !this.latest.controls.some((control) => /^(password|account password)$/i.test(control.name.trim()))
-      || this.latest.controls.filter((control) => control.tag === "button"
-        && /^(sign in|log in|login)$/i.test(control.name.trim())).length !== 1) {
-      throw new Error("BrowserOS did not identify a portal login form");
-    }
-    const credentialResult = await this.client.callTool({ name: "credentials", arguments: {
-      action: "fill", page: this.page, username: email, password,
-    } });
-    if (credentialResult.isError
-      || (credentialResult.structuredContent as { source?: unknown } | undefined)?.source !== "provided") {
-      throw new Error("BrowserOS did not confirm portal credential fill");
-    }
-    const filled = await this.snapshot();
-    const signIn = filled.controls.filter((control) => control.tag === "button"
-      && /^(sign in|log in|login)$/i.test(control.name.trim()));
-    if (signIn.length !== 1) throw new Error("Portal sign-in control is ambiguous");
-    success(await this.client.callTool({ name: "act", arguments: {
-      page: this.page, kind: "click", ref: signIn[0]!.ref, diff: "none",
-    } }), "sign-in");
-    return this.snapshot();
+  async authenticate(_email: string, _password: string): Promise<BrowserSnapshot> {
+    throw new Error("BrowserOS portal sign-in requires human completion");
   }
 
   private async listedGroup(pageId: number): Promise<string> {
@@ -213,6 +158,9 @@ export class NeoApplicationBrowser {
 
   async fillBatch(actions: FormAction[]): Promise<BrowserSnapshot> {
     if (this.page === undefined || !this.latest) throw new Error("Application page is not open");
+    if (actions.some((action) => action.action === "select")) {
+      throw new Error("BrowserOS cannot verify select options on this page");
+    }
     const before = this.latest;
     const fills = actions.filter((action) => action.action === "fill").map((action) => {
       const control = before.controls.find((entry) => entry.name === action.name

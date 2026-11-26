@@ -5,8 +5,9 @@ OpenApply Agent is a privacy-first, human-in-the-loop workflow for discovering f
 The scheduled runner can submit supported applications when the user's private
 policy authorizes it and records them as submitted only after employer
 confirmation. This repository is still a
-development project, not a packaged autonomous consumer app. Queued runs depend
-on a separately installed BrowserOS neo and a signed-in Overleaf project; some
+development project, not a packaged autonomous consumer app. Queued runs need
+a signed-in Overleaf project. The BrowserOS queue is the established path; an
+owned-browser preview supports simple forms without a separate installation. Some
 portals and questions require human completion. See the [production roadmap](docs/production-roadmap.md).
 The remaining PR sequence and release gates are in the
 [autonomy release requirements](docs/autonomy-release-requirements.md).
@@ -28,11 +29,11 @@ The default resume layout is the MIT-licensed [Jake Gutierrez LaTeX template](te
 
 ## Development
 
-Requires Node.js 22.13 or later. BrowserOS neo supplies one persistent signed-in
-profile for job-board discovery, Overleaf rendering, and queued applications.
-The single-job runner also uses BrowserOS when its private package contains a
-local endpoint. A separate persistent Chromium fallback remains available for
-packages without that endpoint. Public ATS discovery needs no browser.
+Requires Node.js 22.13 or later. The owned persistent Chromium profile supports
+signed-in discovery, Overleaf rendering, and individual applications. BrowserOS
+neo is an optional adapter and the established scheduled-queue path. The owned
+scheduled-queue preview is tracked in the release PR stack. Public ATS discovery
+needs no browser.
 
 ```bash
 git clone https://github.com/joshuaraja1/openapply-agent.git
@@ -43,9 +44,21 @@ npm run browser:install
 npm run browser:doctor
 ```
 
+### Portable CLI package preview
+
+Maintainers can build a local package with `npm pack` and install the resulting
+tarball with `npm install -g ./openapply-agent-0.1.0.tgz`. It contains the
+compiled CLI and public templates; private candidate data is excluded. Run
+`openapply setup` for the private first-run editor, then
+`openapply browser:install` and `openapply browser:open` to prepare the owned
+browser. `openapply autopilot` uses the private queue configuration described
+in [the queue guide](docs/queue-runner.md). `openapply --help` lists the other
+commands. This package is a development preview, not a signed installer or a
+public-release claim.
+
 ## Quick start
 
-1. Copy `templates/user/` to a private directory and complete the Markdown files, including the structured JSON blocks in files 01–03. Run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON.
+1. Run `npm run setup:ui` to edit private user templates in a local browser, or use `npm run setup:init` and edit the Markdown files directly. Complete the structured JSON blocks in files 01–03, then click **Compile profile** or run [`profile:compile`](templates/user/README.md) to create private candidate and preference JSON. See [self-hosting](docs/self-hosting.md) for your own accounts and optional OAuth client ID.
 2. Copy the remaining JSON files in `examples/` and replace the examples with private, verified data.
 3. Enable official ATS feeds or public career pages in your discovery input.
 4. Run the workflow:
@@ -64,6 +77,14 @@ To process that queue sequentially with a restart-safe daily cap, use
 role-specific PDF in Overleaf, creates a private application package, fills
 supported fields, and records the resulting checkpoint.
 
+Existing private discovery, queue, and application state can be moved to one
+local encrypted SQLite file without a hosted database. Stop the scheduled
+workers, set `OPENAPPLY_QUEUE_CONFIG`, then run
+`npm run state:cutover -- --confirm-inactive`. The command preserves the old
+files. To export current state back before disabling SQLite, stop the workers
+and run `npm run state:cutover -- --rollback --confirm-inactive`. See the
+[migration and recovery guide](docs/sqlite-state.md) before using either command.
+
 For a single application, create private render input containing the selected
 `job`, its configured official `source`, `candidate`, browser settings,
 Overleaf project URL, and a private output directory. Generate the tailored
@@ -77,8 +98,8 @@ To render with OpenApply's owned Chromium profile, set `"browserRuntime": "owned
 and remove `browserEndpoint` from the private input. Sign in to Overleaf in that
 profile using `npm run browser:open` first. The generated package stays bound
 to the owned runtime; `application:run` uses the same profile and rejects a
-BrowserOS endpoint for that package. The scheduled queue still uses BrowserOS
-until owned application recovery and handoffs pass their release gates.
+BrowserOS endpoint for that package. The scheduled queue can also select the
+owned browser, but owned application recovery and handoffs remain release gates.
 `expectedConfirmation` must match an employer confirmation after submission;
 without it, the runner pauses for a human instead of reporting success.
 
@@ -97,9 +118,11 @@ Service respectively, and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
 stops on unknown required answers, submits only when the handoff mode
 authorizes it, and records submission only after a new employer confirmation
-is found. Opt-in exact-domain
-account creation and scoped email-code entry are available with a private auth
-policy and consented mailbox. Provider-specific adapters and automated
+is found. Opt-in exact-domain account creation is limited to verified
+same-origin POST forms in the owned browser. BrowserOS neo pauses for human
+sign-in or account creation; existing signed-in sessions continue automatically.
+Scoped email-code entry is available with a private auth policy and consented
+mailbox. Provider-specific adapters and automated
 page-image inspection are pending; review the
 rendered PDF before enabling unattended submission.
 
@@ -116,19 +139,27 @@ after fixing the blocker. For an unknown required answer, provide a private
 [`OPENAPPLY_APPROVED_ANSWERS` file](examples/human-answer-approval.example.json)
 that names the exact job, tab, field, and value. The runner attaches to the
 saved tab and rechecks the official posting and résumé before continuing.
+The installed CLI also offers `OPENAPPLY_JOB_ID=<job-id> openapply handoff`:
+its private local screen accepts the exact answer and resumes the saved
+application after the candidate authorizes continuation.
+For the owned runtime, `OPENAPPLY_RESUME_JOB_ID` reopens the original requisition
+in the same private browser profile and refills the verified résumé. An approved
+answers file uses `browserPageId: 0`; its job ID and exact field labels still
+have to match. A challenge that does not preserve its completion in the browser
+profile can pause again and needs manual handling.
 If you manually finish a CAPTCHA or MFA and submit in that tab, use
 `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> OPENAPPLY_CONFIRMATION_ATTESTATION=<private-attestation-file> npm run application:run`.
 It records submission only when the configured employer confirmation is visible
 on the approved host and your [attestation](examples/manual-confirmation-attestation.example.json)
 names that exact job, tab, and confirmation URL.
 
-## Set up BrowserOS neo
+## Optional: set up BrowserOS neo
 
 [BrowserOS neo](https://github.com/browseros-ai/BrowserOS) is the local,
 open-source browser used for websites that require a real signed-in session.
-OpenApply does not receive or store your browser passwords. BrowserOS neo must
-be installed, running, and connected before OpenApply can use LinkedIn,
-Jobright, Handshake, Overleaf, or an employer's application portal.
+OpenApply does not receive or store your browser passwords. Install BrowserOS
+neo only if you select its browser runtime; the owned profile instructions below
+work without a separate BrowserOS installation.
 
 ### 1. Install and start BrowserOS neo
 
@@ -151,7 +182,7 @@ or sign in manually to each required service inside BrowserOS neo. At minimum,
 verify the relevant job boards and Overleaf. Employer portals may still require
 their own account, MFA, or one-time code. Configure which email each site should
 use and whether account creation is allowed in the private authentication policy.
-Enter actual passwords only through the local onboarding UI so they are stored in
+Enter actual passwords through `npm run secret:put` using stdin so they are stored in
 the operating-system secret store. Never place account passwords,
 session cookies, MFA secrets, or recovery codes in this repository or its JSON
 configuration files.
@@ -212,6 +243,20 @@ npm run browser:discover
 
 This produces a deduplicated lead queue. It intentionally does not treat aggregator metadata as authoritative; validate each lead against the employer's official posting before tailoring or applying.
 
+If that lead file contains direct Greenhouse, Ashby, or Lever posting URLs, include it in the next discovery run:
+
+```bash
+OPENAPPLY_INPUT=/private/discovery-input.json \
+OPENAPPLY_CANDIDATE=/private/candidate-profile.json \
+OPENAPPLY_PREFERENCES=/private/search-preferences.json \
+OPENAPPLY_BROWSER_LEADS=/private/browser-leads.json \
+npm start
+```
+
+OpenApply checks each direct ATS URL against the provider's live postings. A missing or incomplete posting does not enter the queue. LinkedIn, Jobright, and Handshake listing pages remain leads until a direct official posting URL is resolved; this command does not infer an employer posting from the board's title or date.
+
+For each enabled board search, discovery also reads up to 20 listing detail pages and collects direct Greenhouse, Ashby, or Lever links exposed there. Set `maxBoardDetails` in the private browser-search file to change that bound (0–100). Detail pages without a visible direct ATS link remain unverified leads. This scan visits the signed-in board pages, so its speed depends on those sites.
+
 ### Preview: owned browser for signed-in discovery
 
 The local Chromium profile can collect job links without a separate BrowserOS neo installation. Install its browser binary, then open the profile and sign in manually to the job boards you use:
@@ -223,7 +268,7 @@ npm run browser:open
 
 Close the browser window or press Ctrl+C in the terminal after signing in. Copy `examples/browser-searches.json` to a private file, set `"runtime": "owned"`, and enable your searches. Then run the `browser:discover` command above with that private file. The profile is stored at `~/.openapply-agent/browser-profile`; only one OpenApply process can use it at a time. Complete CAPTCHA, MFA, and account recovery yourself. Discovery visits only the HTTPS origins of enabled searches and exports listing link labels and URLs to the lead file; it does not export cookies, passwords, or full page text. If a board redirects sign-in to another origin, use `browser:open` to finish sign-in first.
 
-Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. This preview covers discovery only. Application forms and Overleaf rendering still use the BrowserOS neo connector until the owned-browser adapter passes the same release gates.
+Generic discovery accepts job-looking paths on the configured search origin. Some sites use unusual paths and will need a dedicated source adapter. The owned profile supports Overleaf rendering and individual application forms; its scheduled queue is a preview. Account creation and human-handoff recovery still need the release tests in the roadmap.
 
 ## Supported discovery sources
 

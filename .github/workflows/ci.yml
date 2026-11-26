@@ -21,7 +21,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run browser:doctor
-      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts
+      - run: npm run browser:benchmark -- 30
+      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/provider-portal.e2e.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts
         env:
           OPENAPPLY_BROWSER_E2E: "1"
 
@@ -35,7 +36,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -- --run test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts
+      # Each file launches OS ACL checks; serial files avoid competing PowerShell processes.
+      - run: npm test -- --no-file-parallelism test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/application-package-file.test.ts test/setup-init.test.ts test/discovery-output.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts test/sqlite-migration.test.ts test/sqlite-runtime.test.ts
 
   verify:
     name: verify (Node ${{ matrix.node }})
@@ -52,6 +54,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Check portable package contents
+        if: matrix.node == 22
+        run: |
+          npm pack --dry-run --json > package-manifest.json
+          node scripts/assert-package.mjs package-manifest.json
       - name: Check committed artifacts and private data
         shell: bash
         run: |

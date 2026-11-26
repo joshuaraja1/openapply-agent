@@ -71,6 +71,9 @@ Put conflicting, outdated, unverified, or disallowed claims here. The workflow m
 Put every résumé fact you authorize in this JSON block. Each claim needs a
 source, an evidence location, a status, and allowed uses. Keep unsupported
 claims in `quarantinedClaims` instead of promoting them.
+For unattended job matching, attach each usable skill to a verified or
+user-confirmed claim and include `matching` in that claim's `allowedUses`.
+The top-level skills inventory alone does not establish experience with a tool.
 
 ```openapply-history-json
 {

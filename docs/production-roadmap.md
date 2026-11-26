@@ -5,26 +5,27 @@ The remaining implementation sequence and measurable release gates are in
 
 ## Current implementation status
 
-The repository has a scheduled discovery-to-application CLI, official-source
-validation, evidence-backed Jake résumé generation, Overleaf PDF compilation,
-encrypted local state with macOS Keychain or Linux Secret Service keys, a Windows
-Credential Manager backend for secrets, a persistent BrowserOS neo adapter,
-guarded form filling and submission confirmation, scoped mailbox OAuth and
-email-code entry, exact-domain login and account creation, and same-tab human
-recovery. These paths have automated tests and the merged changes passed Bugbot,
-security review, CI, and CodeQL.
+The beta release candidate combines scheduled discovery and guarded applications,
+official-source checks, evidence-backed Jake résumés, Overleaf compilation,
+encrypted SQLite state, an owned-browser queue, a private first-run editor, and
+job-bound human handoffs. Email alerts replay after a crash; a local screen
+accepts candidate answers and passes them to the resumed process without a
+plaintext answer file. BrowserOS credential pages pause for human sign-in;
+owned-browser credential entry requires a verified same-origin HTTPS POST form.
 
-The product promise below is **not yet a release claim**. The scheduled queue
-still requires separately installed BrowserOS neo; the single-job path can
-select an owned browser for Overleaf and simple application forms. The browser
-is not bundled into an app, and owned human handoff recovery is incomplete.
-Greenhouse and Ashby have a small set of exact identity-field aliases;
-complete provider-specific application adapters, automated visual PDF inspection
-beyond text geometry checks, remaining Windows BrowserOS artifact, application
-package, and state-key gates,
-first-run user UI,
-signed installer/updater, and live provider beta validation remain open. The
-general-availability gates in this document have not been met.
+Node 22/24 verification, controlled Chromium provider tests, Windows private
+storage smoke, secret scanning, dependency audit, and CodeQL run in CI. A
+controlled two-step Chromium test verifies a browser restart, fresh résumé
+upload, approved answer, and confirmed submission. One operator email alert
+was delivered through Resend's testing sender; delivery from the product's own
+domain and to beta candidates remains unverified.
+
+**This is a beta foundation, not an unattended public release.** Complete the
+first-run and exception flow, signed installers and updater with rollback,
+real-site provider validation, a monitored consented beta, measured completion
+and latency targets, and an independent security assessment before general
+availability. The browser is not yet bundled into a consumer app. The 99%
+completion aspiration must be measured rather than advertised as a fact.
 
 ## Product promise
 
@@ -60,12 +61,15 @@ The application state machine is durable and idempotent:
 
 ```text
 discovered -> validated -> matched -> tailored -> rendered -> applying
-  -> waiting-email-code | waiting-human
-  -> submitted | blocked | skipped | failed-retryable
+  -> waiting-human | submit-claimed | blocked
+submit-claimed -> submitted | submission-uncertain
+waiting-human -> applying | submitted | blocked
 ```
 
-Every transition records its input fingerprint and outcome so a crash or restart
-does not duplicate an application or repeat a submission.
+The rendered checkpoint stores the résumé and source fingerprints. The submit
+claim is stored before the click; an uncertain click is never retried
+automatically. Complete crash/restart and cross-source deduplication tests are
+still release gates.
 
 ## Pull-request plan
 

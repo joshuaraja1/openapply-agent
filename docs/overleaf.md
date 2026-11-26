@@ -11,13 +11,15 @@ posting, generation stops.
 `verifyResumePdf` accepts a downloaded PDF only when its source fingerprint,
 embedded render token, approved claim text, candidate name, company, role title,
 active email link, page size, text extraction, page bounds, and significant text
-overlap checks pass. It records
+overlap checks pass. It also rasterizes every page and rejects blank output,
+excessive ink, and content within five points of the paper edge. It records
 the exact PDF hash for the application checkpoint. The embedded browser uploads
 the verified bytes only after checking that hash again. `resume:render` now
 fills the source editor in a private Overleaf project through BrowserOS neo,
 recompiles, downloads the PDF, and verifies it before writing a private
-application package. Automated page-image inspection is still pending; visually
-review the rendered PDF before enabling unattended submission.
+application package. The raster gate catches visual defects missed by text
+extraction, but it does not yet judge typography, section spacing, or contrast.
+Visually review those qualities before enabling unattended submission.
 
 ## One-time setup
 

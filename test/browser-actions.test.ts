@@ -29,10 +29,10 @@ function fixture(fieldName = "email", fieldType: string | null = null, text = ""
     goto: vi.fn(async () => {}),
     evaluate: vi.fn(async () => ({ text: text.slice(0, 50_000), overflow: text.length > 50_000 })),
     locator: () => ({ elementHandles: async () => [handle] }),
-    getByText: () => ({
+    getByText: () => ({ filter: () => ({
       count: async () => confirmationVisible ? 1 : 0,
       first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }),
-    }),
+    }) }),
   };
   const context = {
     route: vi.fn(async () => {}),
@@ -115,6 +115,71 @@ describe("agent browser controls", () => {
         expect(planApplicationForm(snapshot,
           { identity: { fullName: "Test Candidate" } } as CandidateProfile, "/private/resume.pdf").blockers)
           .toContain("Human verification is present on the application page");
+      } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
+    }, 30_000,
+  );
+
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "fills only exact owned-browser account forms and rejects challenge text", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-account-form-"));
+      const context = await chromium.launchPersistentContext(join(root, "profile"), { headless: true });
+      try {
+        await context.route("https://jobs.example.com/**", async (route) => {
+          const path = new URL(route.request().url()).pathname;
+          const body = path === "/register" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<label>Confirm password<input name="confirm" type="password"></label>'
+            + '<button>Create account</button></form>'
+            : path === "/login" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<button>Sign in</button></form>'
+            : path === "/challenge" ? '<form><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label>'
+            + '<button>Sign in</button><p>Verify you are human</p></form>'
+            : path === "/unsafe-get" ? '<form action="/home" method="get"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
+            : path === "/unsafe-offsite" ? '<form action="https://other.example/collect" method="post">'
+            + '<label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
+            : path === "/no-form" ? '<label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button>'
+            : path === "/split-form" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<button>Sign in</button></form><form action="https://other.example/collect" method="post">'
+            + '<label>Password<input name="password" type="password"></label></form>'
+            : path === "/plain-password" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="text"></label><button>Sign in</button></form>'
+            : "<h1>Account ready</h1>";
+          await route.fulfill({ contentType: "text/html", body });
+        });
+        const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
+        await browser.navigate("https://jobs.example.com/register");
+        expect((await browser.register("candidate@example.com", "private-password")).url)
+          .toBe("https://jobs.example.com/home");
+        await browser.navigate("https://jobs.example.com/login");
+        expect((await browser.authenticate("candidate@example.com", "private-password")).url)
+          .toBe("https://jobs.example.com/home");
+        await browser.navigate("https://jobs.example.com/challenge");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("human review");
+        await browser.navigate("https://jobs.example.com/unsafe-get");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("unsafe submission destination");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/unsafe-offsite");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("unsafe submission destination");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/no-form");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("human review");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/split-form");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("another form");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/plain-password");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("not protected inputs");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
     }, 30_000,
   );

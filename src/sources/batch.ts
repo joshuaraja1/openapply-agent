@@ -10,9 +10,10 @@ export interface SourceFailure {
 export interface SourceBatchResult {
   jobs: NormalizedJob[];
   failures: SourceFailure[];
+  incomplete: JobSource[];
 }
 
-type SourceFetcher = (source: JobSource, now: Date) => Promise<NormalizedJob[]>;
+type SourceFetcher = (source: JobSource, now: Date, maxJobs: number) => Promise<NormalizedJob[]>;
 
 export async function fetchSourceBatch(
   sources: JobSource[],
@@ -22,17 +23,20 @@ export async function fetchSourceBatch(
 ): Promise<SourceBatchResult> {
   const enabledSources = sources.filter((source) => source.enabled);
   const settled = await Promise.allSettled(
-    enabledSources.map(async (source) => ({
-      source,
-      jobs: (await fetcher(source, now)).slice(0, maxJobsPerSource),
-    })),
+    enabledSources.map(async (source) => {
+      const fetched = await fetcher(source, now, maxJobsPerSource);
+      return { source, jobs: fetched.slice(0, maxJobsPerSource),
+        truncated: fetched.length > maxJobsPerSource };
+    }),
   );
   const jobs: NormalizedJob[] = [];
   const failures: SourceFailure[] = [];
+  const incomplete: JobSource[] = [];
 
   for (const result of settled) {
     if (result.status === "fulfilled") {
       jobs.push(...result.value.jobs);
+      if (result.value.truncated) incomplete.push(result.value.source);
       continue;
     }
     const index = settled.indexOf(result);
@@ -45,5 +49,5 @@ export async function fetchSourceBatch(
     }
   }
 
-  return { jobs, failures };
+  return { jobs, failures, incomplete };
 }

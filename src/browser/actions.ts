@@ -84,7 +84,9 @@ export class AgentBrowser {
       const role = await handle.getAttribute("role");
       const metadata = await handle.evaluate((element) => {
         const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-        const label = field.labels?.[0]?.textContent?.trim();
+        const labelNode = field.labels?.[0]?.cloneNode(true) as HTMLElement | undefined;
+        labelNode?.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
+        const label = labelNode?.textContent?.trim();
         return {
           label: label ?? field.getAttribute("aria-label") ?? field.getAttribute("placeholder")
             ?? field.getAttribute("name") ?? field.textContent ?? "",
@@ -145,6 +147,90 @@ export class AgentBrowser {
     return this.snapshot();
   }
 
+  private accountForm(snapshot: BrowserSnapshot, kind: "login" | "registration") {
+    const controls = snapshot.controls;
+    const one = (pattern: RegExp) => {
+      const matches = controls.filter((control) => control.tag === "input" && pattern.test(control.name.trim()));
+      if (matches.length !== 1) throw new Error("Portal credential form is ambiguous");
+      return matches[0]!;
+    };
+    const email = one(/^(email|email address|e-mail)$/i);
+    const password = one(kind === "registration" ? /^(password|create password)$/i
+      : /^(password|account password)$/i);
+    const confirmation = kind === "registration"
+      ? one(/^(confirm password|password confirmation|re-enter password)$/i) : undefined;
+    if (password.type !== "password" || (confirmation && confirmation.type !== "password")) {
+      throw new Error("Portal password fields are not protected inputs");
+    }
+    const submit = controls.filter((control) => control.tag === "button"
+      && (kind === "registration" ? /^(create account|sign up|register)$/i
+        : /^(sign in|log in|login)$/i).test(control.name.trim()));
+    if (submit.length !== 1 || /\b(captcha|verify you are human|security question|i agree|by (?:creating|registering|signing up|clicking)\b.{0,160}\b(?:agree|accept)|agree to (?:the )?(?:terms|privacy)|accept (?:the )?(?:terms|privacy))\b/i
+      .test(snapshot.visibleText ?? "") || controls.some((control) => control.required
+        && control.tag !== "button" && ![email, password, confirmation].includes(control))) {
+      throw new Error("Portal credential form requires human review");
+    }
+    return { email, password, confirmation, submit: submit[0]! };
+  }
+
+  private async assertCredentialFormTarget(
+    ref: string, fields: readonly BrowserControl[],
+  ): Promise<ElementHandle<HTMLElement>> {
+    const handle = this.controls.get(ref);
+    if (!handle || !(await handle.evaluate((element) => element.isConnected))) {
+      throw new Error("Portal credential submit control changed");
+    }
+    const formTarget = await handle.evaluate((element) => {
+      const form = (element as HTMLButtonElement).form;
+      return form ? { method: form.method.toLowerCase(), action: form.action } : null;
+    });
+    // Script-only login flows do not expose a destination that can be checked.
+    if (!formTarget) throw new Error("Portal credential form requires human review");
+    const destination = new URL(formTarget.action);
+    const current = new URL(this.currentUrl());
+    if (formTarget.method !== "post" || destination.protocol !== "https:"
+      || destination.username || destination.password || destination.origin !== current.origin) {
+      throw new Error("Portal credential form has an unsafe submission destination");
+    }
+    for (const field of fields) {
+      const input = this.controls.get(field.ref);
+      if (!input || !(await input.evaluate((element, button) =>
+        (element as HTMLInputElement).form === (button as HTMLButtonElement).form, handle))) {
+        throw new Error("Portal credential fields belong to another form");
+      }
+    }
+    return handle;
+  }
+
+  private async submitAccountForm(kind: "login" | "registration", email: string, password: string) {
+    if (!email || !password) throw new Error("Portal credentials are unavailable");
+    let snapshot = await this.snapshot();
+    const initial = this.accountForm(snapshot, kind);
+    await this.assertCredentialFormTarget(initial.submit.ref,
+      [initial.email, initial.password, ...(initial.confirmation ? [initial.confirmation] : [])]);
+    for (const field of ["email", "password", ...(kind === "registration" ? ["confirmation"] as const : [])] as const) {
+      const controls = this.accountForm(snapshot, kind);
+      snapshot = await this.act(controls[field]!.ref, "fill", field === "email" ? email : password);
+    }
+    const controls = this.accountForm(snapshot, kind);
+    if (controls.email.value !== email) throw new Error("Portal credential form changed during fill");
+    const handle = await this.assertCredentialFormTarget(controls.submit.ref,
+      [controls.email, controls.password, ...(controls.confirmation ? [controls.confirmation] : [])]);
+    this.controls.clear();
+    this.generation += 1;
+    await handle.click();
+    this.assertAllowedPage();
+    return this.snapshot();
+  }
+
+  async authenticate(email: string, password: string): Promise<BrowserSnapshot> {
+    return this.submitAccountForm("login", email, password);
+  }
+
+  async register(email: string, password: string): Promise<BrowserSnapshot> {
+    return this.submitAccountForm("registration", email, password);
+  }
+
   async submit(ref: string, expectedConfirmation: string): Promise<string> {
     if (!expectedConfirmation.trim()) throw new Error("Expected employer confirmation is required");
     const page = this.requirePage();
@@ -158,7 +244,7 @@ export class AgentBrowser {
     if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
       throw new Error("Selected control is not a submit action");
     }
-    if (await page.getByText(expectedConfirmation, { exact: false }).count()) {
+    if (await page.getByText(expectedConfirmation, { exact: false }).filter({ visible: true }).count()) {
       throw new Error("Confirmation was already visible before submission");
     }
     const existingPages = new Set(this.context.pages());
@@ -166,7 +252,8 @@ export class AgentBrowser {
     const popup = this.context.pages().find((candidate) => !existingPages.has(candidate) && !candidate.isClosed());
     if (popup) this.page = popup;
     this.assertAllowedPage();
-    const confirmation = this.requirePage().getByText(expectedConfirmation, { exact: false }).first();
+    const confirmation = this.requirePage().getByText(expectedConfirmation, { exact: false })
+      .filter({ visible: true }).first();
     await confirmation.waitFor({ timeout: 10000 });
     return (await confirmation.innerText()).trim();
   }

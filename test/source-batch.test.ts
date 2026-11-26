@@ -37,6 +37,7 @@ describe("source batch fetching", () => {
     const result = await fetchSourceBatch(sources, 1, new Date("2026-01-01T00:00:00Z"), fetcher);
 
     expect(result.jobs).toEqual([job]);
+    expect(result.incomplete).toEqual([sources[0]]);
     expect(result.failures).toEqual([expect.objectContaining({
       source: expect.objectContaining({ company: "Broken" }),
       message: "HTTP 503",

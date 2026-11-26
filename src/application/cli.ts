@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../browser/client.js";
@@ -6,18 +5,25 @@ import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { EmailCodeEntry } from "../auth/email-entry.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
-import { loadApprovedHumanAnswers } from "./human-answers.js";
+import { loadApprovedHumanAnswers, loadApprovedHumanAnswersFromStream } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
+import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
-import { applicationPackageSchema, approvedDestinationHost, runApplicationPackage } from "./runner.js";
+import { approvedDestinationHost, runApplicationPackage } from "./runner.js";
+import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
+import { loadHandoffNotificationConfig, notificationConfigPathForPackage,
+  notifyPendingHandoff } from "./notification.js";
+
+await holdWorkflowLease();
 
 const packagePath = process.env.OPENAPPLY_PACKAGE;
 if (!packagePath) throw new Error("Set OPENAPPLY_PACKAGE to a private application package JSON file");
-const pkg = applicationPackageSchema.parse(JSON.parse(await readFile(packagePath, "utf8")));
+const pkg = await readApplicationPackage(packagePath);
 const approvedJobId = process.env.OPENAPPLY_APPROVE_JOB_ID;
 if (approvedJobId && approvedJobId !== pkg.job.id) throw new Error("Approval job ID does not match the package");
 const resumedJobId = process.env.OPENAPPLY_RESUME_JOB_ID;
@@ -35,13 +41,21 @@ const statePath = join(home, "applications.enc.json");
 const profileDirectory = join(home, "browser-profile");
 const secrets = createNativeSecretStore();
 const key = await getOrCreateStateKey(secrets, stateKeyReference());
-const store = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
+const sqlite = await openActiveSqliteRuntime(key);
+const store = sqlite?.store<ApplicationCheckpoint>("applications")
+  ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
 const workflow = new ApplicationWorkflow(store);
 const answerPath = process.env.OPENAPPLY_APPROVED_ANSWERS;
-if (answerPath && !resumedJobId) throw new Error("Approved answers require an explicit human resume");
+const answerFromStdin = process.env.OPENAPPLY_APPROVED_ANSWERS_STDIN === "1";
+if ((answerPath || answerFromStdin) && !resumedJobId) {
+  throw new Error("Approved answers require an explicit human resume");
+}
+if (answerPath && answerFromStdin) throw new Error("Use one approved-answer channel per run");
 const pending = resumedJobId ? await workflow.current(resumedJobId) : undefined;
-const humanAnswerApproval = answerPath
-  ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
+const humanAnswerApproval = answerFromStdin
+  ? await loadApprovedHumanAnswersFromStream(process.stdin, resumedJobId!, pending?.browserPageId ?? 0)
+  : answerPath
+    ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
 const endpoint = savedBrowserEndpoint(pkg, process.env.OPENAPPLY_BROWSER_ENDPOINT);
 if (endpoint) assertLocalBrowserEndpoint(endpoint);
 if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
@@ -52,8 +66,8 @@ const authPolicy = runtimePackage.authenticationPolicyPath
   ? await loadAuthenticationPolicy(runtimePackage.authenticationPolicyPath) : undefined;
 const account = authPolicy ? accountForUrl(authPolicy, pkg.job.applicationUrl) : undefined;
 const emailCode = authPolicy?.emailVerification.autoEnter
-  ? new EmailCodeEntry(authPolicy, secrets, new EncryptedApplicationStateStore(
-    join(home, "email-code-claims.enc.json"), key)) : undefined;
+  ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
+    ?? new EncryptedApplicationStateStore(join(home, "email-code-claims.enc.json"), key)) : undefined;
 const connection = endpoint ? await connectBrowserOs(endpoint) : undefined;
 try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
@@ -77,7 +91,14 @@ try {
     });
   console.log(JSON.stringify({ jobId: pkg.job.id, stage: result.checkpoint.stage,
     blocker: result.checkpoint.blocker ?? null }));
+  if (result.checkpoint.stage === "waiting-human") {
+    const configPath = notificationConfigPathForPackage(runtimePackage,
+      process.env.OPENAPPLY_NOTIFICATION_CONFIG);
+    const config = configPath ? await loadHandoffNotificationConfig(configPath) : undefined;
+    await notifyPendingHandoff(workflow, result.checkpoint, secrets, config);
+  }
   }
 } finally {
   await connection?.close();
+  sqlite?.close();
 }

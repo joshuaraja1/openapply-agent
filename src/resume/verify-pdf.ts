@@ -6,6 +6,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { CandidateProfile } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
 import type { ResumeSource } from "./jake.js";
+import { inspectPdfPageImage } from "./visual-qa.js";
 
 const require = createRequire(import.meta.url);
 const standardFontDataUrl = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts") + sep;
@@ -114,6 +115,7 @@ export async function verifyResumePdf(
         if (item.width > 0 && height > 0) boxes.push({ x, y, width: item.width, height });
       }
       assertNoTextOverlap(boxes);
+      await inspectPdfPageImage(page);
       const annotations = await page.getAnnotations();
       for (const annotation of annotations) {
         if (annotation.subtype !== "Link") continue;

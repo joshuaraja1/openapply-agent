@@ -37,7 +37,7 @@ describe("ATS adapters", () => {
     expect(job?.compensation).toBe("$120,000-$150,000");
   });
 
-  it("converts relative Workday dates", () => {
+  it("keeps relative Workday ages without inventing an exact posting time", () => {
     const [job] = parseWorkdayJobs({ jobPostings: [{
       title: "Data Engineer",
       externalPath: "/job/Example_R-123",
@@ -49,7 +49,8 @@ describe("ATS adapters", () => {
       site: "Careers",
       company: "Example",
     }, new Date("2026-01-10T12:00:00Z"));
-    expect(job?.sourcePublishedAt).toBe("2026-01-09T12:00:00.000Z");
+    expect(job?.sourcePublishedAt).toBeNull();
+    expect(job?.sourceAgeLowerBoundDays).toBe(1);
   });
 
   it("normalizes Lever jobs", () => {

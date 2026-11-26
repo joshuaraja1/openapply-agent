@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { discoveryInputSchema } from "../src/config.js";
-import { evaluateJob, markJobsReported, selectFreshnessTier } from "../src/discovery.js";
+import { evaluateJob, freshnessPriority, markJobsReported, selectFreshnessTier } from "../src/discovery.js";
 import type { DiscoveryState, NormalizedJob } from "../src/types.js";
 
 const input = discoveryInputSchema.parse({
@@ -32,11 +32,61 @@ describe("job discovery policy", () => {
     expect(result).toMatchObject({ isNew: true, isFresh: true, matchedKeywords: ["software"] });
   });
 
-  it("uses the fallback tier only when the preferred tier is empty", () => {
+  it("classifies older postings as fallback when no recent posting exists", () => {
     const evaluated = evaluateJob(job, input, { jobs: {} }, new Date("2026-01-12T10:00:00Z"));
     expect(evaluated).not.toBeNull();
     expect(selectFreshnessTier([evaluated!], 24, 168, new Date("2026-01-12T10:00:00Z")).tier)
       .toBe("fallback");
+  });
+
+  it("keeps older active postings as backfill even when recent jobs exist", () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const recent = evaluateJob({ ...job, id: "recent", sourcePublishedAt: "2026-01-15T08:00:00Z" },
+      input, { jobs: {} }, now)!;
+    const weekOld = evaluateJob({ ...job, id: "week", sourcePublishedAt: "2026-01-08T10:00:00Z" },
+      input, { jobs: {} }, now)!;
+    const twoWeeksOld = evaluateJob({ ...job, id: "two-weeks", sourcePublishedAt: "2026-01-01T10:00:00Z" },
+      input, { jobs: {} }, now)!;
+    const selected = selectFreshnessTier([twoWeeksOld, weekOld, recent], 48, null, now);
+    expect(selected.tier).toBe("mixed");
+    expect(selected.jobs.map((entry) => entry.id)).toEqual(["recent", "week", "two-weeks"]);
+    expect(weekOld.isFresh).toBe(false);
+    expect(selectFreshnessTier([twoWeeksOld, weekOld, recent], 48, 168, now).jobs.map((entry) => entry.id))
+      .toEqual(["recent", "week"]);
+  });
+
+  it("does not claim an undated newly observed role was posted recently", () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const undated = evaluateJob({ ...job, id: "undated", sourcePublishedAt: null },
+      input, { jobs: {} }, now)!;
+    const dated = evaluateJob({ ...job, id: "dated", sourcePublishedAt: "2026-01-15T09:00:00Z" },
+      input, { jobs: {} }, now)!;
+    expect(undated.isFresh).toBe(false);
+    expect(undated.freshnessBasis).toBe("first-seen");
+    expect(selectFreshnessTier([undated], 48, null, now).tier).toBe("observed");
+    expect(freshnessPriority(dated, 48, now)).toBeLessThan(freshnessPriority(undated, 48, now));
+    const future = evaluateJob({ ...job, id: "future", sourcePublishedAt: "2026-01-16T09:00:00Z" },
+      input, { jobs: {} }, now)!;
+    expect(future.isFresh).toBe(false);
+    expect(freshnessPriority(future, 48, now)).toBe(2);
+  });
+
+  it("does not rank a 30-plus-day Workday job as a fresh observation", () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const old = evaluateJob({ ...job, id: "workday-old", sourcePublishedAt: null,
+      sourceAgeLowerBoundDays: 30 }, input, { jobs: {} }, now)!;
+    expect(old.freshnessBasis).toBe("first-seen");
+    expect(old.isFresh).toBe(false);
+    expect(freshnessPriority(old, 48, now)).toBe(3);
+    expect(selectFreshnessTier([old], 48, 336, now).jobs).toEqual([]);
+  });
+
+  it("allows no age cutoff by default and a configured cutoff when requested", () => {
+    expect(input.maximumFreshnessHours).toBeNull();
+    expect(discoveryInputSchema.parse({ sources: input.sources,
+      preferredFreshnessHours: 48, maximumFreshnessHours: 336 }).maximumFreshnessHours).toBe(336);
+    expect(() => discoveryInputSchema.parse({ sources: input.sources,
+      preferredFreshnessHours: 48, maximumFreshnessHours: 24 })).toThrow();
   });
 
   it("marks queued jobs so later runs can deduplicate them", () => {

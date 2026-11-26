@@ -39,7 +39,8 @@ function browserFixture(extraRequired = false) {
   const handles = fields.map((field) => ({
     isVisible: async () => true,
     evaluate: async (callback: (node: object) => unknown) => callback({ tagName: field.tag,
-      labels: [{ textContent: field.name }], textContent: field.name, isConnected: true,
+      labels: [{ textContent: field.name, cloneNode: () => ({ textContent: field.name,
+        querySelectorAll: () => [] }) }], textContent: field.name, isConnected: true,
       matches: () => field.required, getAttribute: (key: string) => key === "name" ? field.name : null }),
     getAttribute: async (key: string) => key === "name" ? field.name : key === "type" ? field.type : null,
     innerText: async () => field.name,
@@ -51,13 +52,52 @@ function browserFixture(extraRequired = false) {
   const page = { url: () => job.applicationUrl, title: async () => "Apply", goto: async () => {},
     evaluate: async () => ({ text: "Example Co Software Engineer application", overflow: false }),
     locator: () => ({ elementHandles: async () => handles }),
-    getByText: () => ({ count: async () => confirmationVisible ? 1 : 0,
-      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) };
+    getByText: () => ({ filter: () => ({ count: async () => confirmationVisible ? 1 : 0,
+      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) }) };
   const context = { route: async () => {}, newPage: async () => page, pages: () => [page] } as unknown as BrowserContext;
   return { context, close: vi.fn(async () => {}), fields, uploaded };
 }
 
 describe("application runner", () => {
+  it("resumes an owned-browser handoff on the verified requisition with a job-bound approved answer", async () => {
+    const salary = { ref: "salary", tag: "input", role: "textbox", name: "Salary expectation",
+      type: "text", value: "", required: true, options: [] };
+    const resume = { ref: "resume", tag: "input", role: "button", name: "Resume",
+      type: "file", value: null, required: true, options: [] };
+    const submitControl = { ref: "submit", tag: "button", role: "button", name: "Submit application",
+      type: "submit", value: null, required: false, options: [] };
+    const page = { url: job.applicationUrl, title: "Apply", controls: [salary, resume, submitControl] };
+    const filled = { ...page, controls: [{ ...salary, value: "125000" }, resume, submitControl] };
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+      resumePdfPath: "/tmp/owned-resume.pdf", expectedConfirmation: "Thank you for applying" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const navigate = vi.fn(async () => page);
+    const submit = vi.fn(async () => "Thank you for applying");
+    const fillBatch = vi.fn(async () => filled);
+    const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+      pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+      verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate, fillBatch, act: async () => filled, submit }, close: async () => {} }) };
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint).toMatchObject({ stage: "waiting-human", browserPageUrl: job.applicationUrl });
+    expect(submit).not.toHaveBeenCalled();
+    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      ...options, resumedJobId: "another-job" })).rejects.toThrow("matching pending browser handoff");
+    const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      ...options, resumedJobId: job.id,
+      humanAnswerApproval: { jobId: job.id, browserPageId: 0, approveFinalSubmission: true,
+        answers: new Map([["Salary expectation", "125000"]]) },
+    });
+    expect(resumed.checkpoint.stage).toBe("submitted");
+    expect(navigate).toHaveBeenCalledTimes(2);
+    expect(fillBatch).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: "Salary expectation", value: "125000" })]));
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("signs into an exact-domain portal using an OS-stored password", async () => {
     const boundJob = { ...job, id: "greenhouse:example:123456",
       applicationUrl: "https://jobs.example.com/apply/123456" };
@@ -177,21 +217,25 @@ describe("application runner", () => {
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     let currentUrl = job.applicationUrl;
     const attach = vi.fn(async () => { currentUrl = application.url; return application; });
+    const authenticate = vi.fn(async () => { throw new Error("identity provider redirect"); });
+    const get = vi.fn(async () => "private-password");
     const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
       pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
       fillBatch: async () => application, submit: async () => "Thank you for applying",
-      authenticate: async () => { throw new Error("identity provider redirect"); } };
+      authenticate };
     const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
       verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
       account: { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
         passwordSecretRef: "keychain://example", allowAccountCreation: false },
-      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      secretStore: { get, put: async () => {}, delete: async () => {} },
       browserFactory: async () => ({ browser, close: async () => {} }) };
-    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", options))
-      .rejects.toThrow("identity provider redirect");
-    expect(await workflow.current(job.id)).toMatchObject({ stage: "waiting-human",
-      blocker: "Portal sign-in needs human completion", browserPageUrl: job.applicationUrl });
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint.stage).toBe("waiting-human");
+    expect(pending.checkpoint.blocker).toContain("Portal sign-in needs human completion");
+    expect(pending.checkpoint.browserPageUrl).toBe(job.applicationUrl);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
     const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
       { ...options, resumedJobId: job.id });
     expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
@@ -788,51 +832,55 @@ describe("application runner", () => {
     const verify = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
     const register = vi.fn(async () => application);
+    const get = vi.fn(async () => "private-password");
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
-    const advance = vi.spyOn(workflow, "advance");
     const options = { verify, validateOfficial: async () => true, account,
-      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      secretStore: { get, put: async () => {}, delete: async () => {} },
       browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
         navigate: async () => registration, pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
         register, act: async () => application, fillBatch: async () => application,
         submit: async () => "Thank you for applying" }, close: async () => {} }),
     };
     const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
-    expect(result.checkpoint.stage).toBe("submitted");
-    expect(register).toHaveBeenCalledWith("test@example.com", "private-password");
-    expect(advance).toHaveBeenCalledWith(job.id, "waiting-human", expect.objectContaining({
-      blocker: "Account registration may need human completion", browserPageId: 7 }));
-    const failedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
-    const failed = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
-      ...options, browserFactory: async () => ({ browser: {
-        ...(await options.browserFactory()).browser,
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("Account registration requires human completion");
+    expect(register).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(result.checkpoint.browserPageId).toBe(7);
+    expect(result.checkpoint.browserPageUrl).toBe(job.applicationUrl);
+
+    const ownedPkg = applicationPackageSchema.parse({ ...pkg, browserEndpoint: undefined,
+      browserRuntime: "owned" });
+    const ownedRegister = vi.fn(async () => application);
+    const ownedOptions = { ...options, browserFactory: async () => ({ browser: {
+      currentUrl: () => job.applicationUrl, navigate: async () => registration,
+      register: ownedRegister, act: async () => application, fillBatch: async () => application,
+      submit: async () => "Thank you for applying",
+    }, close: async () => {} }) };
+    const ownedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const ownedResult = await runApplicationPackage(ownedPkg, ownedWorkflow, "/tmp/profile", ownedOptions);
+    expect(ownedResult.checkpoint.stage).toBe("submitted");
+    expect(ownedRegister).toHaveBeenCalledOnce();
+
+    const interrupted = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const uncertain = await runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", {
+      ...ownedOptions, browserFactory: async () => ({ browser: {
+        ...(await ownedOptions.browserFactory()).browser,
         register: async () => { throw new Error("registration uncertain"); },
       }, close: async () => {} }),
     });
-    expect(failed.checkpoint.stage).toBe("waiting-human");
-    await expect(runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", options))
+    expect(uncertain.checkpoint).toMatchObject({ stage: "waiting-human",
+      blocker: "Account registration may need human completion", browserPageUrl: job.applicationUrl });
+    expect(uncertain.checkpoint.browserPageId).toBeUndefined();
+    await expect(runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", ownedOptions))
       .rejects.toThrow("inspect or resume");
-    const resumedWrong = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
-      ...options, resumedJobId: job.id, browserFactory: async () => ({ browser: {
-        ...(await options.browserFactory()).browser,
-        attach: async () => ({ ...application, url: "https://jobs.example.com/other",
-          visibleText: "Unrelated account dashboard" }),
+    const resumed = await runApplicationPackage(ownedPkg, interrupted, "/tmp/profile", {
+      ...ownedOptions, resumedJobId: job.id,
+      browserFactory: async () => ({ browser: {
+        ...(await ownedOptions.browserFactory()).browser, navigate: async () => application,
       }, close: async () => {} }),
     });
-    expect(resumedWrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
-    const mismatched = await runApplicationPackage(pkg,
-      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
-        ...options, account: { ...account, email: "different@example.com" },
-      });
-    expect(mismatched.checkpoint.blocker).toContain("differs from the candidate email");
-    expect(register).toHaveBeenCalledOnce();
-    const unrelated = await runApplicationPackage(pkg,
-      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
-        ...options, browserFactory: async () => ({ browser: {
-          ...(await options.browserFactory()).browser,
-          register: async () => ({ ...application, visibleText: "Account dashboard" }),
-        }, close: async () => {} }),
-      });
-    expect(unrelated.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    expect(resumed.checkpoint.stage).toBe("submitted");
+    expect(ownedRegister).toHaveBeenCalledOnce();
   });
 });

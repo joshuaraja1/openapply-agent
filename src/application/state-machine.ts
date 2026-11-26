@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ApplicationStateStore } from "../storage/contracts.js";
 
 export type ApplicationStage =
@@ -44,6 +45,9 @@ export interface ApplicationCheckpoint {
   browserEndpoint?: string;
   resumeUploaded?: boolean;
   packagePath?: string;
+  handoffId?: string;
+  desktopNotifiedFor?: string;
+  emailNotifiedFor?: string;
   updatedAt: string;
 }
 
@@ -52,6 +56,23 @@ export class ApplicationWorkflow {
 
   async current(jobId: string): Promise<ApplicationCheckpoint | undefined> {
     return (await this.store.read(jobId))?.state;
+  }
+
+  /** Record delivery without changing the application stage or handoff identity. */
+  async markNotification(jobId: string, channel: "desktop" | "email",
+    expectedHandoffId: string, deliveryMarker = expectedHandoffId): Promise<ApplicationCheckpoint> {
+    const current = await this.store.read(jobId);
+    if (!current || current.state.stage !== "waiting-human"
+      || (current.state.handoffId ?? current.state.updatedAt) !== expectedHandoffId) {
+      throw new Error("Notification belongs to a different handoff checkpoint");
+    }
+    const field = channel === "desktop" ? "desktopNotifiedFor" : "emailNotifiedFor";
+    if (current.state[field] === deliveryMarker) return current.state;
+    const checkpoint = { ...current.state, [field]: deliveryMarker };
+    if (!await this.store.compareAndSwap(jobId, current.version, checkpoint)) {
+      throw new Error("Notification checkpoint changed concurrently");
+    }
+    return checkpoint;
   }
 
   async create(jobId: string, officialUrl: string): Promise<ApplicationCheckpoint> {
@@ -115,6 +136,7 @@ export class ApplicationWorkflow {
       ...current.state,
       ...details,
       stage,
+      ...(stage === "waiting-human" ? { handoffId: randomUUID() } : {}),
       updatedAt: new Date().toISOString(),
     };
     if (stage === "applying") delete checkpoint.blocker;

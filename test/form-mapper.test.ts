@@ -29,6 +29,42 @@ function snapshot(...controls: BrowserSnapshot["controls"]): BrowserSnapshot {
 }
 
 describe("deterministic application field mapping", () => {
+  it("selects only explicit U.S. authorization answers with exact options", async () => {
+    const authorization = { ref: "1", tag: "select", role: null,
+      name: "Are you legally authorized to work in the United States?", type: null,
+      value: null, required: true, options: ["Select", "Yes", "No"] };
+    const sponsorship = { ...authorization, ref: "2",
+      name: "Will you now or in the future require visa sponsorship to work in the United States?" };
+    const initial = snapshot(authorization, sponsorship);
+    const plan = planApplicationForm(initial, candidate, "/tmp/resume.pdf", { allowMissingResume: true });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.actions.map(({ action, value }) => [action, value])).toEqual([
+      ["select", "Yes"], ["select", "No"],
+    ]);
+    const browser = { act: vi.fn().mockResolvedValue(initial) };
+    const result = await fillApplicationForm(browser as never, initial, candidate, "/tmp/resume.pdf",
+      { allowMissingResume: true });
+    expect(result.blockers).toEqual([]);
+    expect(browser.act.mock.calls.map((call) => call.slice(0, 3))).toEqual([
+      ["1", "select", "Yes"], ["2", "select", "No"],
+    ]);
+  });
+
+  it("pauses for ambiguous authorization wording or option labels", () => {
+    const select = { ref: "1", tag: "select", role: null, type: null,
+      value: null, required: true, options: ["Yes", "No"] };
+    for (const control of [
+      { ...select, name: "Visa sponsorship" },
+      { ...select, name: "Are you legally authorized to work in the United States?",
+        options: ["Yes, with restrictions", "No"] },
+      { ...select, name: "Are you legally authorized to work in the United States?",
+        options: ["Yes", "Yes", "No"] },
+    ]) {
+      expect(planApplicationForm(snapshot(control), candidate, "/tmp/resume.pdf",
+        { allowMissingResume: true }).blockers).toContain(`Required field needs an answer: ${control.name}`);
+    }
+  });
+
   it("maps exact Greenhouse and Ashby identity aliases only for their provider", () => {
     const greenhouse = snapshot(field("1", "LinkedIn Profile URL"),
       field("2", "GitHub Profile"), field("3", "Resume", "file"));
@@ -48,6 +84,23 @@ describe("deterministic application field mapping", () => {
       ]);
   });
 
+  it("maps only exact identity aliases on Lever, SmartRecruiters, and Workday", () => {
+    const cases = [
+      { provider: "lever" as const, label: "LinkedIn URL", expected: "https://linkedin.com/in/test" },
+      { provider: "smartrecruiters" as const, label: "Mobile Phone", expected: "555-0100" },
+      { provider: "workday" as const, label: "Primary Email", expected: "test@example.com" },
+    ];
+    for (const { provider, label, expected } of cases) {
+      const plan = planApplicationForm(snapshot(field("1", label), field("2", "Visa sponsorship")),
+        candidate, "/tmp/resume.pdf", { provider, allowMissingResume: true });
+      expect(plan.actions).toContainEqual(expect.objectContaining({ name: label, value: expected }));
+      expect(plan.blockers).toContain("Required field needs an answer: Visa sponsorship");
+    }
+    const unknown = planApplicationForm(snapshot(field("1", "Primary Email")),
+      candidate, "/tmp/resume.pdf", { provider: "lever", allowMissingResume: true });
+    expect(unknown.blockers).toContain("Required field needs an answer: Primary Email");
+  });
+
   it("does not answer sensitive or ambiguous provider questions", () => {
     const plan = planApplicationForm(snapshot(field("1", "Visa sponsorship"),
       field("2", "Your race"), field("3", "LinkedIn Profile"), field("4", "Resume", "file")),
@@ -55,6 +108,15 @@ describe("deterministic application field mapping", () => {
     expect(plan.blockers).toContain("Required field needs an answer: Visa sponsorship");
     expect(plan.blockers).toContain("Required field needs an answer: Your race");
     expect(plan.actions.map(({ name }) => name)).toEqual(["LinkedIn Profile", "Resume"]);
+  });
+  it("fills only an exact approved plain-text answer after a handoff", () => {
+    const plan = planApplicationForm(snapshot(field("1", "Salary expectation"),
+      field("2", "Your race")), candidate, "/tmp/resume.pdf", {
+      approvedHumanAnswers: new Map([["Salary expectation", "125000"], ["Your race", "Prefer not to say"]]),
+      allowMissingResume: true,
+    });
+    expect(plan.actions).toContainEqual(expect.objectContaining({ name: "Salary expectation", value: "125000" }));
+    expect(plan.blockers).toContain("Required field needs an answer: Your race");
   });
   it("maps only supported identity fields and a resume", () => {
     const plan = planApplicationForm(snapshot(
@@ -126,6 +188,10 @@ describe("deterministic application field mapping", () => {
         response.writeHead(200, { "content-type": "text/html" });
         response.end(`<form><label for="first">First name</label><input id="first" required>
           <label for="email">Email</label><input id="email" type="email" required>
+          <label for="authorized">Are you legally authorized to work in the United States?</label>
+          <select id="authorized" required><option value="">Choose</option><option>Yes</option><option>No</option></select>
+          <label for="sponsorship">Will you now or in the future require visa sponsorship to work in the United States?</label>
+          <select id="sponsorship" required><option value="">Choose</option><option>Yes</option><option>No</option></select>
           <label for="reason">Why this company?</label><textarea id="reason"></textarea>
           <label for="resume">Resume</label><input id="resume" type="file" required></form>`);
       });
@@ -146,6 +212,8 @@ describe("deterministic application field mapping", () => {
           const page = runtime.context.pages().at(-1)!;
           expect(await page.locator("#first").inputValue()).toBe("Test");
           expect(await page.locator("#email").inputValue()).toBe("test@example.com");
+          expect(await page.locator("#authorized").inputValue()).toBe("Yes");
+          expect(await page.locator("#sponsorship").inputValue()).toBe("No");
           expect(await page.locator("#reason").inputValue()).toBe("");
           expect(await page.locator("#resume").evaluate((element) => (element as HTMLInputElement).files?.[0]?.name)).toBe("resume.pdf");
           await writeFile(resumePath, "%PDF-1.4\nchanged\n%%EOF\n");
