@@ -1,0 +1,41 @@
+name: Cross-platform browser benchmark
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Browser benchmark (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+      - run: npx playwright install chromium
+        if: runner.os != 'Linux'
+      - run: npm run build
+      - run: node --test scripts/assert-browser-benchmark.test.mjs
+      - name: Measure synthetic browser overhead
+        shell: bash
+        run: node dist/src/browser/benchmark-cli.js 30 > browser-benchmark.json
+      - run: node scripts/assert-browser-benchmark.mjs browser-benchmark.json 30 "$RUNNER_OS"
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-benchmark-${{ matrix.os }}
+          path: browser-benchmark.json
+          if-no-files-found: error
