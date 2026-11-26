@@ -93,35 +93,42 @@ function startClaim(root, key) {
 }
 
 async function measureRecovery() {
-  // A Windows custom workflow root requires a private parent. The shared system
-  // temp directory is intentionally rejected by the production lease guard.
+  // A Windows custom workflow root requires a protected parent. LOCALAPPDATA
+  // itself may inherit ACLs on hosted runners, so create and secure one child.
   const base = process.platform === "win32" ? process.env.LOCALAPPDATA : tmpdir();
   if (!base) throw new Error("Windows queue benchmark requires LOCALAPPDATA");
-  const root = await mkdtemp(join(base, "openapply-recovery-benchmark-"));
-  let holder;
+  const privateParent = process.platform === "win32"
+    ? await mkdtemp(join(base, "openapply-recovery-private-")) : undefined;
   try {
-    if (process.platform === "win32") await secureWindowsPrivatePath(root);
-    const key = randomBytes(32).toString("hex");
-    holder = startClaim(root, key);
-    await holder.ready;
-    const probe = await runChild("probe", root, key);
-    const activeWorkerFenced = probe.code !== 0 && probe.stderr.includes("Another workflow is active");
-    if (!activeWorkerFenced) throw new Error("A second worker was not fenced by the active lease");
-    const terminatedByParent = holder.worker.kill("SIGKILL");
-    await holder.closed;
-    if (!terminatedByParent) throw new Error("Claim worker did not terminate");
-    // This fixture has proved the child exited. Production requires operator inspection
-    // before clearing a stale workflow lock after an unclean exit.
-    await rmdir(join(root, "workflow.lock"));
-    const recovered = await runChild("recover", root, key);
-    if (recovered.code !== 0) throw new Error(`Recovery worker failed: ${recovered.stderr}`);
-    return { ...JSON.parse(recovered.stdout), processRestartMs: recovered.elapsedMs,
-      separateProcess: true, terminatedByParent, activeWorkerFenced,
-      staleLockClearedAfterExit: true };
+    if (privateParent) await secureWindowsPrivatePath(privateParent);
+    const root = await mkdtemp(join(privateParent ?? base, "openapply-recovery-benchmark-"));
+    let holder;
+    try {
+      if (process.platform === "win32") await secureWindowsPrivatePath(root);
+      const key = randomBytes(32).toString("hex");
+      holder = startClaim(root, key);
+      await holder.ready;
+      const probe = await runChild("probe", root, key);
+      const activeWorkerFenced = probe.code !== 0 && probe.stderr.includes("Another workflow is active");
+      if (!activeWorkerFenced) throw new Error("A second worker was not fenced by the active lease");
+      const terminatedByParent = holder.worker.kill("SIGKILL");
+      await holder.closed;
+      if (!terminatedByParent) throw new Error("Claim worker did not terminate");
+      // This fixture has proved the child exited. Production requires operator inspection
+      // before clearing a stale workflow lock after an unclean exit.
+      await rmdir(join(root, "workflow.lock"));
+      const recovered = await runChild("recover", root, key);
+      if (recovered.code !== 0) throw new Error(`Recovery worker failed: ${recovered.stderr}`);
+      return { ...JSON.parse(recovered.stdout), processRestartMs: recovered.elapsedMs,
+        separateProcess: true, terminatedByParent, activeWorkerFenced,
+        staleLockClearedAfterExit: true };
+    } finally {
+      holder?.worker.kill("SIGKILL");
+      if (holder) await holder.closed;
+      await rm(root, { recursive: true, force: true });
+    }
   } finally {
-    holder?.worker.kill("SIGKILL");
-    if (holder) await holder.closed;
-    await rm(root, { recursive: true, force: true });
+    if (privateParent) await rm(privateParent, { recursive: true, force: true });
   }
 }
 
