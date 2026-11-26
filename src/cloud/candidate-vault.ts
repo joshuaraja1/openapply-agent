@@ -24,7 +24,8 @@ export interface DataKeyPort {
 }
 
 export interface ArtifactStorePort {
-  put(key: string, body: Uint8Array): Promise<void>;
+  /** Atomic create; reject if this artifact ID already has a current object. */
+  putCreateOnly(key: string, body: Uint8Array): Promise<void>;
   get(key: string): Promise<Uint8Array>;
   /** Permanently remove all versions, including delete markers, under this prefix. */
   purgeVersions(prefix: string, exactKey: boolean): Promise<void>;
@@ -88,7 +89,7 @@ export class CandidateVault {
         tag: cipher.getAuthTag().toString("base64"),
         ciphertext: ciphertext.toString("base64"),
       }));
-      await this.objects.put(artifactObjectKey(candidateId, artifactId), body);
+      await this.objects.putCreateOnly(artifactObjectKey(candidateId, artifactId), body);
     } finally {
       dataKey.plaintext.fill(0);
     }

@@ -35,10 +35,10 @@ export class S3ArtifactStore implements ArtifactStorePort {
     if (!bucket) throw new Error("A private S3 bucket name is required");
   }
 
-  async put(key: string, body: Uint8Array): Promise<void> {
+  async putCreateOnly(key: string, body: Uint8Array): Promise<void> {
     await this.client.send(new PutObjectCommand({
       Bucket: this.bucket, Key: key, Body: body, ContentType: "application/vnd.openapply.encrypted+json",
-      ServerSideEncryption: "AES256",
+      ServerSideEncryption: "AES256", IfNoneMatch: "*",
     }));
   }
 

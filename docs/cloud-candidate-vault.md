@@ -8,6 +8,12 @@ KMS before sending it to the private, versioned S3 bucket in the cloud control
 plane. The KMS encryption context and AES authenticated data bind the key and
 ciphertext to the lowercase candidate UUID and artifact UUID. S3 keys are
 derived from validated UUIDs; caller-supplied paths are never accepted.
+An artifact UUID is create-only while the S3 key exists: a conditional write
+rejects a second current object. A changed résumé or browser profile needs a
+fresh artifact UUID and a durable journal update pointing to it. S3 allows a
+new conditional write after a delete marker, so the durable journal must also
+reject reuse of an artifact UUID after deletion before this is used for
+immutable receipt evidence.
 
 Construct the vault with `KmsDataKeys(KMSClient, key ARN)` and
 `S3ArtifactStore(S3Client, private bucket name)`. Supply a task role that has
