@@ -33,7 +33,7 @@ type OwnerReply = z.infer<typeof ownerReply>;
 type RegisteredTab = { binding: OwnerClaimBinding; inspect: () => Promise<{
   url: string; title: string; visibleText: string;
 }>; browser?: Pick<AgentBrowser, "navigate" | "snapshot">;
-  navigationAttempted?: boolean };
+  navigationAttempted?: boolean; initialDocumentRequested?: boolean };
 
 function replyMac(reply: OwnerReply, secret: Buffer): string {
   return createHmac("sha256", secret).update(JSON.stringify(reply)).digest("hex");
@@ -82,7 +82,8 @@ async function runBrowserAction(tab: RegisteredTab,
 export async function startOwnerInspectionService(input: {
   socketPath: string; secret: Buffer; generation: string;
 }): Promise<{ register(binding: OwnerClaimBinding, inspect: RegisteredTab["inspect"]): void;
-  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime): Promise<void>;
+  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime,
+    readOnlyGetUrls?: readonly string[]): Promise<void>;
   close(): Promise<void> }> {
   if (process.platform === "win32") {
     throw new Error("Windows owner pipe ACL has not been validated; owner service is disabled");
@@ -157,7 +158,7 @@ export async function startOwnerInspectionService(input: {
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
       tabs.set(binding.tabId, { binding: { ...binding }, inspect });
     },
-    async registerBrowser(binding, runtime) {
+    async registerBrowser(binding, runtime, readOnlyGetUrls = []) {
       signOwnerRequest({ version: 1, action: "inspect-tab", requestId: randomUUID(),
         generation: input.generation, ...binding }, input.secret);
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
@@ -167,14 +168,36 @@ export async function startOwnerInspectionService(input: {
       const context = runtime.context;
       assertServiceWorkersBlocked(context);
       if (context.serviceWorkers().length) throw new Error("Active service workers are not allowed");
-      const officialOrigin = new URL(binding.officialUrl).origin;
+      // launchBrowser closes its initial blank page. Any page created since
+      // then could have live requests or sockets that routing cannot revoke.
+      if (context.pages().length > 0 || context.backgroundPages().length > 0) {
+        await runtime.close();
+        throw new Error("Browser-owner context contained a preexisting page; start a fresh owner generation");
+      }
+      const official = new URL(binding.officialUrl);
+      const approvedReadOnlyUrls = new Set(readOnlyGetUrls.map((value) => {
+        const url = new URL(value);
+        if (url.protocol !== "https:" || url.origin !== official.origin || url.hash
+          || url.username || url.password || url.href === official.href) {
+          throw new Error("Browser-owner read-only URL is not an exact approved employer URL");
+        }
+        return url.href;
+      }));
+      const tab: RegisteredTab = { binding: { ...binding },
+        inspect: async () => { throw new Error("Browser tab has not been initialized"); } };
       // The owner must launch this context with serviceWorkers: "block". This
-      // route prevents page JavaScript from submitting by POST while workers
-      // have only navigation/snapshot access.
+      // route allows only the first posting document and explicitly reviewed
+      // read-only GET URLs. HTTP method alone cannot identify a safe request.
       await context.route("**/*", async (route) => {
         const request = route.request();
         const destination = new URL(request.url());
-        if (!["GET", "HEAD"].includes(request.method()) || destination.origin !== officialOrigin) {
+        const initialDocument = tab.navigationAttempted && !tab.initialDocumentRequested
+          && request.method() === "GET" && request.isNavigationRequest()
+          && request.resourceType() === "document" && destination.href === official.href;
+        if (initialDocument) tab.initialDocumentRequested = true;
+        const reviewedRead = ["GET", "HEAD"].includes(request.method())
+          && approvedReadOnlyUrls.has(destination.href);
+        if (!initialDocument && !reviewedRead) {
           await route.abort("blockedbyclient");
           return;
         }
@@ -182,12 +205,13 @@ export async function startOwnerInspectionService(input: {
       });
       await context.routeWebSocket("**/*", (route) => route.close({ code: 1008 }));
       const browser = new AgentBrowser(context, new Set([new URL(binding.officialUrl).hostname]));
-      tabs.set(binding.tabId, { binding: { ...binding }, browser,
-        inspect: async () => {
+      tab.browser = browser;
+      tab.inspect = async () => {
           const snapshot = await browser.snapshot();
           return { url: snapshot.url, title: snapshot.title,
             visibleText: snapshot.visibleText ?? "" };
-        } });
+        };
+      tabs.set(binding.tabId, tab);
     },
     async close() {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

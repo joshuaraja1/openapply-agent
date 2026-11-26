@@ -165,6 +165,22 @@ export async function launchBrowser(options: BrowserLaunchOptions): Promise<Brow
     await release();
     throw error;
   }
+  if (options.serviceWorkers === "block") {
+    try {
+      // A persistent profile can restore a page before the owner installs its
+      // request gate. Never return that context as a claim-capable owner.
+      const startupPages = context.pages();
+      const restored = startupPages.some((page) => page.url() !== "about:blank")
+        || context.backgroundPages().length > 0;
+      await Promise.all(startupPages.map((page) => page.close()));
+      if (restored || context.pages().length > 0) {
+        throw new Error("Browser-owner profile restored a page before request controls were installed");
+      }
+    } catch (error) {
+      try { await context.close(); } finally { await release(); }
+      throw error;
+    }
+  }
   let closed = false;
   if (options.serviceWorkers === "block") blockedServiceWorkerContexts.add(context);
   return {

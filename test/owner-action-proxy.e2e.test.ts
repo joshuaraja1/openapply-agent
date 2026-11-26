@@ -43,9 +43,14 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
       const binding = { tabId, claimId: randomUUID(), jobId: "example:123", officialUrl,
         packageSha256: "a".repeat(64), artifactSha256: "b".repeat(64) };
       let postReached = 0;
+      let getSubmitReached = 0;
+      let reviewedReadReached = 0;
       await runtime.context.route("https://jobs.example.test/**", (route) => {
         if (route.request().method() === "POST") postReached += 1;
-        if (new URL(route.request().url()).pathname === "/sw.js") {
+        const path = new URL(route.request().url()).pathname;
+        if (path === "/submit") getSubmitReached += 1;
+        if (path === "/safe-read") reviewedReadReached += 1;
+        if (path === "/sw.js") {
           return route.fulfill({ contentType: "text/javascript", body: "self.addEventListener('fetch', () => {})" });
         }
         return route.fulfill({
@@ -56,6 +61,8 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
           <button type="submit" onclick="window.finalClicks=(window.finalClicks||0)+1">Submit application</button>
           <p id="step">Step one</p></main>
           <script>fetch('/submit', {method:'POST'}).catch(() => {window.postBlocked=true});
+            fetch('/submit?candidate=Fixture').catch(() => {window.getSubmitBlocked=true});
+            fetch('/safe-read').then(() => {window.safeRead=true});
             navigator.serviceWorker.register('/sw.js').finally(() => {window.swAttempted=true});
             const ws = new WebSocket('wss://jobs.example.test/socket');
             ws.onclose = () => {window.wsClosed=true}</script>`,
@@ -68,7 +75,7 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
       } finally {
         await unguarded.close();
       }
-      await owner.registerBrowser(binding, runtime);
+      await owner.registerBrowser(binding, runtime, ["https://jobs.example.test/safe-read"]);
       const request = (action: "navigate-tab" | "snapshot-tab", extra = {}) => ({
         version: 1, action, requestId: randomUUID(), generation, ...binding, ...extra,
       });
@@ -76,9 +83,13 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
         const first = await worker({ socketPath, secret, request: request("navigate-tab", { url: officialUrl }) });
         const page = runtime.context.pages().at(-1)!;
         await page.waitForFunction(() => (window as Window & { postBlocked?: boolean }).postBlocked === true);
+        await page.waitForFunction(() => (window as Window & { getSubmitBlocked?: boolean }).getSubmitBlocked === true);
+        await page.waitForFunction(() => (window as Window & { safeRead?: boolean }).safeRead === true);
         await page.waitForFunction(() => (window as Window & { swAttempted?: boolean }).swAttempted === true);
         await page.waitForFunction(() => (window as Window & { wsClosed?: boolean }).wsClosed === true);
         expect(postReached).toBe(0);
+        expect(getSubmitReached).toBe(0);
+        expect(reviewedReadReached).toBe(1);
         expect(runtime.context.serviceWorkers()).toHaveLength(0);
         expect(first.tabId).toBe(tabId);
         expect(first.generation).toBe(generation);
@@ -114,6 +125,38 @@ describe.skipIf(process.platform === "win32" || process.env.OPENAPPLY_BROWSER_E2
         await expect(worker({ socketPath, secret,
           request: { ...request("snapshot-tab"), action: "submit-tab", ref: submit.ref } })).rejects.toThrow();
         expect(await page.evaluate(() => (window as Window & { finalClicks?: number }).finalClicks ?? 0)).toBe(0);
+      } finally {
+        await owner.close();
+        await runtime.close();
+        await rm(root, { recursive: true });
+      }
+    }, 60_000);
+    it("rejects a restored page with a preexisting socket before binding a claim", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-owner-restored-"));
+      const runtime = await launchBrowser({ profileDirectory: join(root, "profile"),
+        headless: true, serviceWorkers: "block" });
+      const socketPath = join(root, "owner.sock");
+      const secret = randomBytes(32);
+      const generation = randomUUID();
+      const binding = { tabId: randomUUID(), claimId: randomUUID(), jobId: "example:123",
+        officialUrl, packageSha256: "a".repeat(64), artifactSha256: "b".repeat(64) };
+      let socketOpened = false;
+      await runtime.context.route("https://jobs.example.test/**", (route) => route.fulfill({
+        contentType: "text/html", body: "<title>Restored job</title><h1>Restored job</h1>",
+      }));
+      await runtime.context.routeWebSocket("wss://jobs.example.test/socket", () => {
+        socketOpened = true;
+      });
+      const preexistingPage = await runtime.context.newPage();
+      await preexistingPage.goto(officialUrl);
+      await preexistingPage.evaluate(() => { new WebSocket("wss://jobs.example.test/socket"); });
+      await expect.poll(() => socketOpened).toBe(true);
+      const owner = await startOwnerInspectionService({ socketPath, secret, generation });
+      try {
+        await expect(owner.registerBrowser(binding, runtime)).rejects.toThrow("preexisting page");
+        expect(preexistingPage.isClosed()).toBe(true);
+        await expect(worker({ socketPath, secret, request: { version: 1, action: "navigate-tab",
+          requestId: randomUUID(), generation, ...binding, url: officialUrl } })).rejects.toThrow();
       } finally {
         await owner.close();
         await runtime.close();
