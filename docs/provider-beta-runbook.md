@@ -6,13 +6,13 @@ This runbook implements the per-provider part of the [monitored beta protocol](m
 
 | Provider | Controlled evidence | Missing before unattended beta |
 | --- | --- | --- |
-| Greenhouse | Two-step Chromium success, unknown field, wrong requisition, conditional field, validation, and identity drift in `test/provider-portal.e2e.test.ts`; 100 form-mapping contract cases in `test/provider-form-matrix.test.ts` | 100 **complete** controlled application runs, consented real-site smoke, independent review, runtime provider gate |
+| Greenhouse | Two-step Chromium success, unknown field, wrong requisition, conditional field, validation, and identity drift in `test/provider-portal.e2e.test.ts`; 100 form-mapping contract cases in `test/provider-form-matrix.test.ts` | 100 **complete** controlled application runs, consented real-site smoke, independent review, provider-specific runtime enablement evidence |
 | Ashby | Same shared Chromium scenarios and 100 form-mapping contract cases | Same gates as Greenhouse |
-| Lever | Shared scenarios plus conditional, validation, identity drift, wrong receipt, and receipt URL drift in draft #165 | Merge/review #165, 100 complete runs, real-site smoke, runtime provider gate |
-| SmartRecruiters | Shared scenarios plus conditional, validation, identity drift, wrong receipt, and receipt URL drift in draft #168; BrowserOS conditional-upload and wrong-receipt checks | Merge/review #168, 100 complete runs, real-site smoke, runtime provider gate |
-| Workday | Shared scenarios plus three-step upload, step-two conditional and validation, wrong requisition, generic/wrong receipt, and receipt URL drift in draft #169; BrowserOS conditional-upload and wrong-receipt checks | Merge/review #169, 100 complete runs, real-site smoke, runtime provider gate |
+| Lever | Shared scenarios plus conditional, validation, identity drift, wrong receipt, and receipt URL drift in merged #165 | 100 complete runs, real-site smoke, provider-specific runtime enablement evidence |
+| SmartRecruiters | Shared scenarios plus conditional, validation, identity drift, wrong receipt, and receipt URL drift in merged #168; BrowserOS conditional-upload and wrong-receipt checks | 100 complete runs, real-site smoke, provider-specific runtime enablement evidence |
+| Workday | Shared scenarios plus three-step upload, step-two conditional and validation, wrong requisition, generic/wrong receipt, and receipt URL drift in merged #169; BrowserOS conditional-upload and wrong-receipt checks | 100 complete runs, real-site smoke, provider-specific runtime enablement evidence |
 
-The 100 Greenhouse and Ashby contract cases exercise form mapping. They are **not** 100 browser-completed applications. None of these rows has a recorded consented real-site smoke. `source.enabled` stops discovery from a configured source, but an already queued entry can carry its own source; it is not an unattended execution gate. Until a runtime provider allowlist is enforced at dispatch, stop the scheduler and queue runner to disable a provider. All providers remain **off for unattended beta** in this matrix.
+The 100 Greenhouse and Ashby contract cases exercise form mapping. They are **not** 100 browser-completed applications. None of these rows has a recorded consented real-site smoke. The runtime provider gate was added in merged #166, but an allowlisted provider still needs the entry evidence below before unattended beta. All providers remain **off for unattended beta** in this matrix.
 
 ## Per-provider entry decision
 
