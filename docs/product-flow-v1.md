@@ -7,8 +7,9 @@ usable without a paid account; hosted access is a separate entitlement.
 ## Candidate journey
 
 1. **Account and access.** A user creates an account, verifies their email, and
-   chooses a hosted plan or an explicitly granted free access period. The server
-   records the payment provider's customer and subscription IDs, never card data.
+   chooses a hosted plan or an explicitly granted free access period. Stripe is
+   the planned hosted billing provider. The server records Stripe customer and
+   subscription IDs, never card data.
    A verified billing webhook updates a local entitlement record. The server
    checks that record before accepting a new run and again before a worker starts.
    Expiry stops new work; an already claimed submission follows its recovery
@@ -129,7 +130,7 @@ rules. Do not silently switch the candidate's selected resume layout.
 
 ## Reviewable implementation sequence
 
-1. Hosted account and entitlement contract with webhook tests and free grants.
+1. Hosted account and Stripe entitlement contract with webhook tests and free grants.
 2. Guided intake, document upload, structured fact review, and Markdown export.
 3. Cloud discovery index and candidate ranking with freshness and deduplication.
 4. PDF compiler benchmark and selected production renderer with visual checks.
