@@ -46,6 +46,13 @@ jobs:
           $msi = Join-Path $env:RUNNER_TEMP 'OpenApply-unsigned.msi'
           & ./installers/windows/build.ps1 -PayloadRoot $payload -OutputPath $msi -Version '0.1.0'
           $installed = Join-Path $env:LOCALAPPDATA 'OpenApply\runtime'
+          $machine = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", 'ALLUSERS=1', '/qn', '/norestart') -Wait -PassThru
+          if ($machine.ExitCode -eq 0 -or (Test-Path -LiteralPath (Join-Path $installed 'node.exe'))) {
+            throw 'Machine-scope install was not rejected'
+          }
+          $private = Join-Path $env:LOCALAPPDATA 'OpenApply\candidate-state-sentinel.txt'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $private) -Force | Out-Null
+          Set-Content -LiteralPath $private -Value 'private-state-must-remain'
           $log = Join-Path $env:RUNNER_TEMP 'openapply-msi-install.log'
           $process = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "MSI install failed ($($process.ExitCode)); see installer log" }
@@ -55,3 +62,6 @@ jobs:
           $process = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "MSI uninstall failed ($($process.ExitCode))" }
           if (Test-Path -LiteralPath (Join-Path $installed 'node.exe')) { throw 'Runtime remained after uninstall' }
+          if ((Get-Content -LiteralPath $private -Raw).Trim() -ne 'private-state-must-remain') {
+            throw 'Uninstall changed candidate state outside the runtime folder'
+          }

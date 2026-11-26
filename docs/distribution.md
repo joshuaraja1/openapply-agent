@@ -115,9 +115,11 @@ private material in repository files or CI logs.
 
 ## Windows MSI staging build
 
-The Windows staging workflow builds a per-user-default MSI from the locked
+The Windows staging workflow builds a per-user-only MSI from the locked
 portable runtime and a bundled `node.exe`, installs it on an ephemeral Windows
-runner, starts the installed CLI, and uninstalls it. It uses WiX 5.0.2, pinned
+runner, starts the installed CLI, and uninstalls it. The smoke rejects a forced
+machine-scope install and confirms uninstall preserves a private-state sentinel
+outside the runtime folder. It uses WiX 5.0.2, pinned
 to avoid an unreviewed toolchain change. The MSI is **unsigned**, and the
 workflow does not publish it. To reproduce locally, install WiX 5.0.2, create
 a locked runtime payload with `npm run distribution:locked-install --
@@ -132,7 +134,8 @@ signed result against the requested thumbprint. No signing key is stored here.
 This staging MSI does not implement an updater, signed release, browser
 provisioning, scheduler registration, or rollback across incompatible state
 schemas. Those remain release gates. WiX 5 uses an older .NET 6 build runtime;
-before production packaging, upgrade the toolchain and review its terms.
+both are out of support. The toolchain is for staging only; upgrade and review
+the terms before production packaging.
 WiX's [maintenance-fee policy](https://docs.firegiant.com/wix/osmf/) applies
 from version 6 and has a revenue threshold. The Windows signing certificate
 or signing service is still needed.

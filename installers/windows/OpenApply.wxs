@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Id="OpenApply.Agent" Name="OpenApply" Manufacturer="OpenApply"
-           Version="$(var.AppVersion)" Scope="perUserOrMachine">
+           Version="$(var.AppVersion)" Scope="perUser">
+    <Launch Condition="NOT ALLUSERS" Message="OpenApply installs only for the current user." />
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="OpenApplyFolder" Name="OpenApply">
         <Directory Id="INSTALLFOLDER" Name="runtime" />
