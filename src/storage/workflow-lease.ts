@@ -8,6 +8,13 @@ import { secureWindowsPrivatePath } from "./windows-acl.js";
 const defaultRoot = join(userInfo().homedir, ".openapply-agent");
 let heldPath: string | undefined;
 
+/** Recovery may inspect an interrupted final click only under this process's exclusive workflow lease. */
+export function assertWorkflowLeaseHeld(root = defaultRoot): void {
+  if (heldPath !== join(resolve(root), "workflow.lock")) {
+    throw new Error("Submission recovery requires the exclusive workflow lease");
+  }
+}
+
 /** Hold a process-wide lease across every workflow command, including cutover. */
 export async function holdWorkflowLease(root = defaultRoot): Promise<void> {
   const path = join(resolve(root), "workflow.lock");

@@ -51,6 +51,13 @@ export interface ApplicationCheckpoint {
   updatedAt: string;
 }
 
+/** An uncertain final click is a new alert even if an earlier human handoff was notified. */
+export function notificationIdentity(checkpoint: ApplicationCheckpoint): string {
+  return checkpoint.stage === "submission-uncertain"
+    ? `submission-uncertain:${checkpoint.updatedAt}`
+    : checkpoint.handoffId ?? checkpoint.updatedAt;
+}
+
 export class ApplicationWorkflow {
   constructor(private readonly store: ApplicationStateStore<ApplicationCheckpoint>) {}
 
@@ -62,8 +69,8 @@ export class ApplicationWorkflow {
   async markNotification(jobId: string, channel: "desktop" | "email",
     expectedHandoffId: string, deliveryMarker = expectedHandoffId): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
-    if (!current || current.state.stage !== "waiting-human"
-      || (current.state.handoffId ?? current.state.updatedAt) !== expectedHandoffId) {
+    if (!current || !["waiting-human", "submission-uncertain"].includes(current.state.stage)
+      || notificationIdentity(current.state) !== expectedHandoffId) {
       throw new Error("Notification belongs to a different handoff checkpoint");
     }
     const field = channel === "desktop" ? "desktopNotifiedFor" : "emailNotifiedFor";

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { SecretStore } from "../storage/contracts.js";
 import { readPrivateFile } from "../storage/private-path.js";
-import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { ApplicationWorkflow, notificationIdentity, type ApplicationCheckpoint } from "./state-machine.js";
 
 const exec = promisify(execFile);
 const secretRef = z.string().regex(
@@ -48,11 +48,11 @@ export async function assertAutonomousNotificationReady(requireFinalApproval: bo
 /** Generic text only: job titles, answers, URLs, and candidate details stay on the device. */
 export async function sendHandoffEmail(config: HandoffNotificationConfig, checkpoint: ApplicationCheckpoint,
   secrets: SecretStore, fetcher: typeof fetch = fetch): Promise<void> {
-  if (!config.email || checkpoint.stage !== "waiting-human") return;
+  if (!config.email || !["waiting-human", "submission-uncertain"].includes(checkpoint.stage)) return;
   const key = await secrets.get(config.email.apiKeySecretRef);
   if (!key) throw new Error("Notification sending key is unavailable in the OS secret store");
   const idempotency = createHash("sha256")
-    .update(`${checkpoint.jobId}\0${checkpoint.handoffId ?? checkpoint.updatedAt}\0${config.email.to}`)
+    .update(`${checkpoint.jobId}\0${notificationIdentity(checkpoint)}\0${config.email.to}`)
     .digest("hex");
   const response = await fetcher("https://api.resend.com/emails", {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
@@ -60,7 +60,9 @@ export async function sendHandoffEmail(config: HandoffNotificationConfig, checkp
       "Idempotency-Key": `openapply-handoff-${idempotency}` },
     body: JSON.stringify({ from: config.email.from, to: [config.email.to],
       subject: "OpenApply needs your attention",
-      text: "An application is paused. Open OpenApply on your device to review and continue it." }),
+      text: checkpoint.stage === "submission-uncertain"
+        ? "An application needs review. Open OpenApply on your device to inspect its status."
+        : "An application is paused. Open OpenApply on your device to review and continue it." }),
   });
   if (!response.ok) throw new Error(`Handoff email failed with HTTP ${response.status}`);
 }
@@ -77,8 +79,8 @@ export async function notifyPendingHandoff(workflow: ApplicationWorkflow,
   config?: HandoffNotificationConfig,
   options: { desktopEnabled?: boolean; desktop?: () => Promise<void>;
     email?: typeof sendHandoffEmail } = {}): Promise<void> {
-  if (checkpoint.stage !== "waiting-human") return;
-  const handoffId = checkpoint.handoffId ?? checkpoint.updatedAt;
+  if (!["waiting-human", "submission-uncertain"].includes(checkpoint.stage)) return;
+  const handoffId = notificationIdentity(checkpoint);
   const desktopEnabled = options.desktopEnabled ?? process.platform === "darwin";
   if (desktopEnabled && checkpoint.desktopNotifiedFor !== handoffId) {
     try {

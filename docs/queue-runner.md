@@ -83,6 +83,12 @@ record can cause a duplicate reminder after the provider's 24-hour idempotency
 window; it cannot cause another application submission.
 The [synthetic queue CLI staging check](staging-queue-cli.md) tests the command's
 encrypted handoff and restart behavior without an employer site or real email.
+If a run ends after claiming the final submission click, the next queue run
+first acquires the exclusive workflow lease, then marks that exact job
+`submission-uncertain` and attempts the configured generic attention alert.
+It never retries the click. A killed process may leave `workflow.lock`; follow the inactive-worker
+inspection in [the state guide](sqlite-state.md) before manually removing that
+lock and restarting. Check the employer confirmation before recording success.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
