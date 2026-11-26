@@ -231,6 +231,18 @@ export class NeoApplicationBrowser {
     if (!waited.startsWith("matched")) throw new Error("Employer confirmation was not found");
     const after = await this.snapshot();
     if (!after.visibleText.includes(expectedConfirmation)) throw new Error("Employer confirmation was not visible");
-    return expectedConfirmation;
+    const receipts = after.visibleText.split("\n").filter((line) => line.includes(expectedConfirmation));
+    if (receipts.length !== 1 || receipts[0]!.length > 2_000) {
+      throw new Error("Employer confirmation text is ambiguous");
+    }
+    return receipts[0]!.trim();
+  }
+
+  async receiptContext(): Promise<string> {
+    if (!this.latest) throw new Error("Employer receipt is not open");
+    if (this.latest.visibleText.length > 8_000) {
+      throw new Error("Employer receipt text exceeds the verification limit");
+    }
+    return this.latest.visibleText;
   }
 }

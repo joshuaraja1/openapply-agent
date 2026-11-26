@@ -499,7 +499,8 @@ export async function runApplicationPackage(
             continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
             dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined,
             dependencies.beforeFinalSubmit
-              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined);
+              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined,
+            { company: job.company, title: job.title });
           checkpoint = (await workflow.current(job.id))!;
         }
       }
