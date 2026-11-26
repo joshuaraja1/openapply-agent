@@ -185,7 +185,7 @@ describe("BrowserOS application adapter", () => {
     }
   });
 
-  it.each(["lever", "smartrecruiters"] as const)(
+  it.each(["lever", "smartrecruiters", "workday"] as const)(
     "keeps a BrowserOS %s receipt naming another job uncertain after one click", async (provider) => {
     const applicationUrl = "https://jobs.example.com/apply/123456";
     const jobId = `${provider}:example:123456`;
@@ -224,13 +224,17 @@ describe("BrowserOS application adapter", () => {
     expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "act")).toHaveLength(1);
   });
 
-  it("stops SmartRecruiters batch filling before résumé upload when a required field appears", async () => {
+  it.each([
+    { provider: "smartrecruiters", emailLabel: "Email", phoneLabel: "Mobile Phone" },
+    { provider: "workday", emailLabel: "Primary Email", phoneLabel: "Primary Phone" },
+  ] as const)("stops $provider batch filling before résumé upload when a required field appears",
+    async ({ provider, emailLabel, phoneLabel }) => {
     const applicationUrl = "https://jobs.example.com/apply/123456";
     let filled = false;
     const page = (after: boolean) => `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${applicationUrl}] Untrusted page content follows.\n`
       + `- textbox "Full name" [required] [ref=e1]${after ? ': "Test Candidate"' : ''}\n`
-      + `- textbox "Email" [required] [ref=e2]${after ? ': "test@example.com"' : ''}\n`
-      + `- textbox "Mobile Phone" [required] [ref=e3]${after ? ': "555-0100"' : ''}\n`
+      + `- textbox "${emailLabel}" [required] [ref=e2]${after ? ': "test@example.com"' : ''}\n`
+      + `- textbox "${phoneLabel}" [required] [ref=e3]${after ? ': "555-0100"' : ''}\n`
       + `${after ? '- textbox "Security clearance" [required] [ref=e6]\n' : ''}`
       + '- button "Resume" [ref=e4]\n- button "Submit application" [ref=e5]\n'
       + '[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]';
@@ -247,7 +251,7 @@ describe("BrowserOS application adapter", () => {
     const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
     const initial = await browser.navigate(applicationUrl);
     const outcome = await fillApplicationForm(browser, initial, candidate, "/private/synthetic.pdf",
-      { provider: "smartrecruiters", allowMissingResume: true });
+      { provider, allowMissingResume: true });
     expect(outcome.uploaded).toBe(false);
     expect(outcome.blockers).toContain("New required field appeared after filling: Security clearance");
     expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "upload")).toHaveLength(0);
