@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Id="OpenApply.Agent" Name="OpenApply" Manufacturer="OpenApply"
+  <Package Name="OpenApply" Manufacturer="OpenApply"
+           UpgradeCode="{A7809083-29D7-4B9A-A536-A729D7964D4C}"
            Version="$(var.AppVersion)" Scope="perUser">
     <Launch Condition="NOT ALLUSERS" Message="OpenApply installs only for the current user." />
     <StandardDirectory Id="LocalAppDataFolder">
