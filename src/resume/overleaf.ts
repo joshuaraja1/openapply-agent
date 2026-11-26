@@ -106,13 +106,37 @@ export async function renderOverleafResume(
     requireSuccess(await client.callTool({ name: "act", arguments: {
       page, kind: "fill", ref: editorRef, value: source.latex, sensitive: true, diff: "none",
     } }), "source update");
+    const compileReady = requireSuccess(await client.callTool({ name: "wait", arguments: {
+      page, for: "selector", value: '.compile-button[data-ol-loading="false"]', timeout: 30000,
+    } }), "compile readiness");
+    if (!compileReady.startsWith("matched")) throw new Error("Overleaf Recompile control did not become ready");
     const afterEdit = requireSuccess(await client.callTool({ name: "snapshot", arguments: {
       page, mode: "interactive", depth: 3,
     } }), "compile snapshot");
     const compileRef = controlRef(afterEdit, "button", "Recompile");
+    // Observe the next compile before clicking. Waiting only for an idle
+    // button can match its previous idle state and download a stale PDF.
+    requireSuccess(await client.callTool({ name: "evaluate_in_page", arguments: { page, code: `
+      const button = document.querySelector('.compile-button');
+      if (!button) throw new Error('Overleaf compile control is unavailable');
+      button.removeAttribute('data-openapply-compile-started');
+      const observer = new MutationObserver((changes) => {
+        if (changes.some((change) => change.oldValue === 'true')
+          || button.getAttribute('data-ol-loading') === 'true') {
+          button.setAttribute('data-openapply-compile-started', 'true');
+          observer.disconnect();
+        }
+      });
+      observer.observe(button, { attributes: true, attributeFilter: ['data-ol-loading'], attributeOldValue: true });
+      return 'armed';
+    ` } }), "compile observation");
     requireSuccess(await client.callTool({ name: "act", arguments: {
       page, kind: "click", ref: compileRef, diff: "none",
     } }), "compile");
+    const started = requireSuccess(await client.callTool({ name: "wait", arguments: {
+      page, for: "selector", value: '.compile-button[data-openapply-compile-started="true"]', timeout: 5000,
+    } }), "compile start wait");
+    if (!started.startsWith("matched")) throw new Error("Overleaf compilation did not start");
     const wait = requireSuccess(await client.callTool({ name: "wait", arguments: {
       page, for: "selector", value: '.compile-button[data-ol-loading="false"]', timeout: 30000,
     } }), "compile wait");
