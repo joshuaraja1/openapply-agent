@@ -39,7 +39,7 @@ export function installLockedTarball(tarballPath, destination) {
     validateRuntimeLock(pkg, lock);
     copyFileSync(lockFile, join(packageRoot, "package-lock.json"));
     run(process.execPath, [npmCli, "ci", "--prefix", packageRoot, "--omit=dev",
-      "--ignore-scripts", "--no-audit", "--no-fund"]);
+      "--ignore-scripts", "--no-audit", "--no-fund", "--fetch-retries=0"]);
     const cli = join(packageRoot, "dist", "src", "product-cli.js");
     if (!run(process.execPath, [cli, "--help"]).includes("  autopilot")) {
       throw new Error("Locked OpenApply CLI did not start");
