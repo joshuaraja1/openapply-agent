@@ -101,8 +101,6 @@ Resources:
         CpuArchitecture: X86_64
       Cpu: '1024'
       Memory: '4096'
-      EphemeralStorage:
-        SizeInGiB: 21
       ExecutionRoleArn: !GetAtt BrowserExecutionRole.Arn
       # Deliberately omit TaskRoleArn: the container cannot access AWS candidate state.
       ContainerDefinitions:
