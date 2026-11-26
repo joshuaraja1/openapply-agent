@@ -3,7 +3,6 @@ import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { officialJobKey, type OfficialJobIdentity, type SubmissionStatus } from "./durable-journal.js";
 
 export interface CloudRunRecord {
-  profileArtifactId: string;
   /** Version of the candidate's durable, server-side consent grant for this run. */
   consentVersion: number;
   job: OfficialJobIdentity;
@@ -22,8 +21,10 @@ export interface PreparedApplication {
 
 export interface CloudRunPorts {
   authorization: {
-    /** Verify this run belongs to this candidate and has current application consent. */
-    authorize(candidateId: string, runId: string): Promise<boolean>;
+    /** Ownership remains checkable after consent is revoked, for safe queue cleanup. */
+    ownsRun(candidateId: string, runId: string): Promise<boolean>;
+    /** Consent is required for a new attempt; journal also checks it atomically at intent. */
+    hasCurrentConsent(candidateId: string, runId: string): Promise<boolean>;
   };
   journal: {
     acquireLease(candidateId: string, runId: string): Promise<string | null>;
@@ -40,8 +41,9 @@ export interface CloudRunPorts {
       receipt: { artifactId: string; sha256: string }): Promise<boolean>;
   };
   runRecords: {
-    /** Must authorize both IDs and return a verified official requisition. */
-    load(candidateId: string, runId: string): Promise<CloudRunRecord>;
+    /** Metadata only: no candidate profile bytes or artifact ID for confirmed redelivery. */
+    loadIdentity(candidateId: string, runId: string): Promise<CloudRunRecord>;
+    loadProfileArtifactId(candidateId: string, runId: string): Promise<string>;
   };
   vault: {
     restoreToPrivateTemp(candidateId: string, artifactId: string): Promise<{
@@ -79,7 +81,7 @@ export async function handleQueuedApplication(
   if (!message.receiptHandle) throw new Error("SQS receipt handle is required");
   const run = decodeCloudRunEnvelope(message.body);
   if (run.kind !== "apply") throw new Error("Discovery messages cannot enter the application handler");
-  if (!await ports.authorization.authorize(run.candidateId, run.runId)) return "unauthorized";
+  if (!await ports.authorization.ownsRun(run.candidateId, run.runId)) return "unauthorized";
   const token = await ports.journal.acquireLease(run.candidateId, run.runId);
   if (!token) return "lease_busy";
 
@@ -87,23 +89,25 @@ export async function handleQueuedApplication(
   let cleanupComplete = true;
 
   try {
-    const record = await ports.runRecords.load(run.candidateId, run.runId);
-    if (!Number.isSafeInteger(record.consentVersion) || record.consentVersion < 1) {
-      throw new Error("Run has no valid durable consent version");
-    }
+    const record = await ports.runRecords.loadIdentity(run.candidateId, run.runId);
     const { status } = await ports.journal.readSubmission(run.candidateId, record.job);
     if (status === "confirmed") {
       shouldAck = true;
       return "already_confirmed";
     }
     if (status === "needs_reconciliation") return "needs_reconciliation";
+    if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
+    if (!Number.isSafeInteger(record.consentVersion) || record.consentVersion < 1) {
+      throw new Error("Run has no valid durable consent version");
+    }
 
-    const profile = await ports.vault.restoreToPrivateTemp(run.candidateId, record.profileArtifactId);
+    const profileArtifactId = await ports.runRecords.loadProfileArtifactId(run.candidateId, run.runId);
+    const profile = await ports.vault.restoreToPrivateTemp(run.candidateId, profileArtifactId);
     cleanupComplete = false;
     try {
       const prepared = await ports.application.prepare(profile.path, record.job);
       if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
-      if (!await ports.authorization.authorize(run.candidateId, run.runId)) return "unauthorized";
+      if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
       const artifactId = await ports.journal.beginSubmission(
         run.candidateId, token, run.runId, record.consentVersion, record.job);
       if (!artifactId) {

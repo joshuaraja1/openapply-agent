@@ -25,7 +25,8 @@ function harness() {
   let intentWriteSucceeds = true;
   let confirmSucceeds = true;
   let storedArtifactId: string | undefined;
-  let authorized = true;
+  let owned = true;
+  let currentConsent = true;
   let revokeDuringPrepare = false;
   let consentGranted = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
@@ -35,7 +36,10 @@ function harness() {
   let ackThrows = false;
   let cleanupThrows = false;
   const ports: CloudRunPorts = {
-    authorization: { async authorize() { events.push("authorize"); return authorized; } },
+    authorization: {
+      async ownsRun() { events.push("owns-run"); return owned; },
+      async hasCurrentConsent() { events.push("has-consent"); return currentConsent; },
+    },
     journal: {
       async acquireLease() { events.push("lease"); return busy ? null : "lease-token"; },
       async renewLease() { events.push("renew"); return leaseRenewalSucceeds; },
@@ -60,7 +64,8 @@ function harness() {
       },
     },
     runRecords: {
-      async load() { events.push("load"); return { profileArtifactId: runId, consentVersion: 1, job }; },
+      async loadIdentity() { events.push("load-identity"); return { consentVersion: 1, job }; },
+      async loadProfileArtifactId() { events.push("load-profile-id"); return runId; },
     },
     vault: {
       async restoreToPrivateTemp() {
@@ -76,7 +81,7 @@ function harness() {
       async prepare() {
         events.push("prepare");
         if (prepareThrows) throw new Error("preflight failed");
-        if (revokeDuringPrepare) authorized = false;
+        if (revokeDuringPrepare) currentConsent = false;
         return { async submitOnce() {
           if (failsBeforeClick) throw new Error("browser closed before click");
           events.push("click");
@@ -97,7 +102,8 @@ function harness() {
     setLeaseRenewalSucceeds(value: boolean) { leaseRenewalSucceeds = value; },
     setIntentWriteSucceeds(value: boolean) { intentWriteSucceeds = value; },
     setConfirmSucceeds(value: boolean) { confirmSucceeds = value; },
-    setAuthorized(value: boolean) { authorized = value; },
+    setOwned(value: boolean) { owned = value; },
+    setCurrentConsent(value: boolean) { currentConsent = value; },
     setRevokeDuringPrepare(value: boolean) { revokeDuringPrepare = value; },
     setConsentGranted(value: boolean) { consentGranted = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
@@ -137,7 +143,7 @@ describe("cloud queued application bridge", () => {
     const h = harness();
     h.setBusy(true);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("lease_busy");
-    expect(h.events).toEqual(["authorize", "lease"]);
+    expect(h.events).toEqual(["owns-run", "lease"]);
   });
 
   it("never writes intent or clicks when the candidate lease was lost during preparation", async () => {
@@ -232,6 +238,33 @@ describe("cloud queued application bridge", () => {
     expect(h.events).not.toContain("click");
   });
 
+  it("acks a confirmed redelivery after consent revocation without loading profile data", async () => {
+    const h = harness();
+    h.setAckThrows(true);
+    await expect(handleQueuedApplication(message(), h.ports)).rejects.toThrow("SQS delete failed");
+    h.setAckThrows(false);
+    h.setCurrentConsent(false);
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("already_confirmed");
+    expect(h.events).toContain("owns-run");
+    expect(h.events).toContain("ack");
+    expect(h.events).not.toContain("has-consent");
+    expect(h.events).not.toContain("load-profile-id");
+    expect(h.events).not.toContain("restore");
+    expect(h.events).not.toContain("click");
+  });
+
+  it("blocks a new attempt when consent was revoked before profile access", async () => {
+    const h = harness();
+    h.setCurrentConsent(false);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("unauthorized");
+    expect(h.events).toContain("owns-run");
+    expect(h.events).not.toContain("load-profile-id");
+    expect(h.events).not.toContain("restore");
+    expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("ack");
+  });
+
   it("does not acknowledge before private profile cleanup and lease release", async () => {
     const h = harness();
     expect(await handleQueuedApplication(message(), h.ports)).toBe("confirmed");
@@ -266,9 +299,9 @@ describe("cloud queued application bridge", () => {
 
   it("denies a run for another candidate before lease or vault access", async () => {
     const h = harness();
-    h.setAuthorized(false);
+    h.setOwned(false);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("unauthorized");
-    expect(h.events).toEqual(["authorize"]);
+    expect(h.events).toEqual(["owns-run"]);
   });
 
   it("never emits candidate data through console logging", async () => {
