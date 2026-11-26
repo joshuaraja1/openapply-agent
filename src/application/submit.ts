@@ -18,6 +18,7 @@ export async function submitApplication(
   handoff: ApplicationHandoff,
   browserEndpoint?: string,
   approvedFinalUrl?: string,
+  packagePath?: string,
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -37,8 +38,11 @@ export async function submitApplication(
   if (pageId && (!groupId || !endpoint)) {
     throw new Error("BrowserOS submission lacks its saved browser identity");
   }
-  await workflow.advance(jobId, "submit-claimed", pageId ? { browserPageId: pageId,
-    browserGroupId: groupId!, browserEndpoint: endpoint! } : {});
+  await workflow.advance(jobId, "submit-claimed", {
+    browserPageUrl: browser.currentUrl(),
+    ...(pageId ? { browserPageId: pageId, browserGroupId: groupId!, browserEndpoint: endpoint! } : {}),
+    ...(packagePath ? { packagePath } : {}),
+  });
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
     if (hasUnboundReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {

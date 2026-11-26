@@ -116,8 +116,8 @@ export class ApplicationWorkflow {
       || details.browserPageId < 1)) {
       throw new Error("Browser page ID belongs only to a handoff or claimed submission");
     }
-    if (details.packagePath && stage !== "waiting-human") {
-      throw new Error("Application package path belongs only to a human handoff");
+    if (details.packagePath && !["waiting-human", "submit-claimed"].includes(stage)) {
+      throw new Error("Application package path belongs only to a handoff or claimed submission");
     }
     if ((details.browserGroupId || details.browserEndpoint || details.browserPageUrl)
       && !["waiting-human", "submit-claimed"].includes(stage)) {
