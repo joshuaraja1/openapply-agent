@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,9 @@ const config = handoffNotificationSchema.parse({ version: 1, email: {
 const checkpoint: ApplicationCheckpoint = { jobId: "private-job-123",
   officialUrl: "https://example.com/jobs/private", stage: "waiting-human",
   blocker: "Private legal question", updatedAt: "2026-11-25T18:00:00.000Z" };
+function marker(handoffId: string, to = config.email!.to): string {
+  return `${handoffId}:${createHash("sha256").update(to.toLowerCase()).digest("hex")}`;
+}
 function memorySecrets(): SecretStore {
   const values = new Map<string, string>();
   return { get: async (key) => values.get(key),
@@ -53,7 +57,7 @@ describe("human handoff email", () => {
     const secrets = memorySecrets();
     await notifyPendingHandoff(workflow, first, secrets, config, options);
     expect(await workflow.current(first.jobId)).toMatchObject({
-      desktopNotifiedFor: first.handoffId, emailNotifiedFor: first.handoffId });
+      desktopNotifiedFor: first.handoffId, emailNotifiedFor: marker(first.handoffId) });
     await notifyPendingHandoff(workflow, (await workflow.current(first.jobId))!, secrets, config, options);
     expect(desktop).toHaveBeenCalledTimes(1);
     expect(email).toHaveBeenCalledTimes(1);
@@ -79,9 +83,25 @@ describe("human handoff email", () => {
       expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBeUndefined();
       await notifyPendingHandoff(workflow, checkpoint, secrets, config,
         { desktopEnabled: false, email });
-      expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBe(checkpoint.updatedAt);
+      expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBe(marker(checkpoint.updatedAt));
       expect(email).toHaveBeenCalledTimes(2);
     } finally { warning.mockRestore(); }
+  });
+  it("alerts a changed recipient once while keeping the same handoff", async () => {
+    const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();
+    const workflow = new ApplicationWorkflow(store);
+    await store.compareAndSwap(checkpoint.jobId, undefined, checkpoint);
+    const email = vi.fn(async () => {});
+    const secrets = memorySecrets();
+    const options = { desktopEnabled: false, email };
+    await notifyPendingHandoff(workflow, checkpoint, secrets, config, options);
+    const changed = handoffNotificationSchema.parse({ ...config,
+      email: { ...config.email, to: "new@example.net" } });
+    await notifyPendingHandoff(workflow, (await workflow.current(checkpoint.jobId))!, secrets, changed, options);
+    expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor)
+      .toBe(marker(checkpoint.updatedAt, "new@example.net"));
+    await notifyPendingHandoff(workflow, (await workflow.current(checkpoint.jobId))!, secrets, changed, options);
+    expect(email).toHaveBeenCalledTimes(2);
   });
   it("sends only generic content with a stable retry key", async () => {
     const secrets = memorySecrets();

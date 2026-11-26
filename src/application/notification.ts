@@ -86,10 +86,13 @@ export async function notifyPendingHandoff(workflow: ApplicationWorkflow,
       await workflow.markNotification(checkpoint.jobId, "desktop", handoffId);
     } catch { console.warn("Desktop handoff notification was unavailable"); }
   }
-  if (config?.email && checkpoint.emailNotifiedFor !== handoffId) {
+  const emailMarker = config?.email
+    ? `${handoffId}:${createHash("sha256").update(config.email.to.toLowerCase()).digest("hex")}`
+    : undefined;
+  if (config?.email && checkpoint.emailNotifiedFor !== emailMarker) {
     try {
       await (options.email ?? sendHandoffEmail)(config, checkpoint, secrets);
-      await workflow.markNotification(checkpoint.jobId, "email", handoffId);
+      await workflow.markNotification(checkpoint.jobId, "email", handoffId, emailMarker);
     } catch { console.warn("Email handoff notification was unavailable"); }
   }
 }
