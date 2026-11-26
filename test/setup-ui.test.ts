@@ -10,6 +10,7 @@ import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 describe("local first-run setup", () => {
   it("compiles only valid private structured evidence and preserves existing outputs", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-setup-compile-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
     const destination = join(root, "onboarding");
     const ui = await startSetupUi({ destination, repositoryRoot: process.cwd() });
     try {
@@ -88,6 +89,7 @@ describe("local first-run setup", () => {
 
   it("serves private templates, saves with compare-and-swap, and rejects cross-origin writes", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-setup-ui-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
     const ui = await startSetupUi({ destination: join(root, "onboarding"), repositoryRoot: process.cwd() });
     try {
       const url = new URL(ui.url);
