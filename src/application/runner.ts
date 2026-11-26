@@ -299,13 +299,15 @@ export async function runApplicationPackage(
         else {
           const pageId = browser.pageId?.();
           const groupId = browser.groupId?.();
-          if (!pageId || !groupId || !pkg.browserEndpoint) {
-            loginBlocker = "Account registration requires a recoverable BrowserOS tab";
+          const owned = pkg.browserRuntime === "owned";
+          if (!owned && (!pageId || !groupId || !pkg.browserEndpoint)) {
+            loginBlocker = "Account registration requires a recoverable browser tab";
           } else {
             checkpoint = await workflow.advance(job.id, "waiting-human", {
               blocker: "Account registration may need human completion",
-              browserPageId: pageId, browserPageUrl: snapshot.url,
-              browserGroupId: groupId, browserEndpoint: pkg.browserEndpoint,
+              browserPageUrl: snapshot.url,
+              ...(!owned ? { browserPageId: pageId!, browserGroupId: groupId!,
+                browserEndpoint: pkg.browserEndpoint! } : {}),
               resumeUploaded: current?.resumeUploaded === true,
               ...(dependencies.packagePath ? { packagePath: dependencies.packagePath } : {}),
             });
