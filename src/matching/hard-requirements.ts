@@ -70,7 +70,8 @@ export function assessHardRequirements(description: string,
         if (clearance) {
           classified = true;
           const level = clearance[1]!.toLowerCase();
-          if (!approved.some((claim) => {
+        if (!approved.some((claim) => {
+          if (/\b(?:expired|revoked|inactive|suspended|incomplete|not|never)\b/i.test(claim)) return false;
             const documented = /\bactive\s+(?:security\s+)?(top secret|ts\/sci|secret)\s+clearance\b/i.exec(claim);
             return documented?.[1]?.toLowerCase() === level;
           })) {
@@ -82,7 +83,8 @@ export function assessHardRequirements(description: string,
           classified = true;
           const requiredLevel = degree[1]!.toLowerCase().replace(/'s$/, "");
           const requiredMajor = degree[2]?.trim().toLowerCase();
-          if (!approved.some((claim) => {
+        if (!approved.some((claim) => {
+          if (/\b(?:incomplete|unfinished|not|never|withdrawn)\b/i.test(claim)) return false;
             const documented = /\b(bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate)\s+(?:degree|of\s+science|of\s+arts)(?:\s+in\s+([a-z ]+))?/i.exec(claim);
             return documented?.[1]?.toLowerCase().replace(/'s$/, "") === requiredLevel
               && (!requiredMajor || documented?.[2]?.trim().toLowerCase() === requiredMajor);

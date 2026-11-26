@@ -131,6 +131,20 @@ describe("automatic match safety evaluation", () => {
       expired, preferences).eligible).toBe(false);
   });
 
+  it("does not accept revoked clearance or unfinished education", () => {
+    const claims = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "clearance", claim: "Active Secret clearance revoked", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] },
+      { id: "degree", claim: "Bachelor's degree in Computer Science incomplete", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    for (const descriptionText of ["TypeScript. Active Secret clearance required.",
+      "TypeScript. Bachelor's degree in Computer Science required."]) {
+      expect(scoreJob({ ...base, descriptionText }, claims, preferences).eligible).toBe(false);
+    }
+  });
+
   it("keeps supported entry-level roles eligible", () => {
     for (const descriptionText of ["Entry-level TypeScript engineer",
       "Required qualifications:\n- TypeScript\nPreferred qualifications:\n- Kubernetes",
