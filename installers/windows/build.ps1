@@ -16,7 +16,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $payload 'node.exe') -PathType Leaf)
 if (Test-Path -LiteralPath $output) { throw 'Output MSI already exists' }
 $wix = Get-Command wix -ErrorAction Stop
 $toolVersion = (& $wix.Source --version).Trim()
-if ($LASTEXITCODE -ne 0 -or $toolVersion -ne '5.0.2') { throw "WiX 5.0.2 is required, found $toolVersion" }
+if ($LASTEXITCODE -ne 0 -or $toolVersion -notmatch '^5\.0\.2(?:\+[A-Za-z0-9]+)?$') { throw "WiX 5.0.2 is required, found $toolVersion" }
 $source = Join-Path $PSScriptRoot 'OpenApply.wxs'
 & $wix.Source build -arch x64 -d "AppVersion=$Version" -bindpath "Payload=$payload" -pdbtype none -out $output $source
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'WiX MSI build failed' }
