@@ -13,6 +13,7 @@ import { candidateProfileSchema } from "../src/candidate/schema.js";
 import type { BrowserControl } from "../src/browser/actions.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import { EncryptedApplicationStateStore } from "../src/storage/encrypted-state.js";
+import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 import type { DiscoveredJob } from "../src/types.js";
 
 const job: DiscoveredJob = {
@@ -59,6 +60,7 @@ describe("controlled queue to handoff staging flow", () => {
   it("sends one generic alert for an unknown field, replays safely, then submits only after an approved answer", async () => {
     const directory = await mkdtemp(join(tmpdir(), "openapply-staging-handoff-"));
     directories.push(directory);
+    if (process.platform === "win32") await secureWindowsPrivatePath(directory);
     const statePath = join(directory, "applications.enc.json");
     const key = Buffer.alloc(32, 7);
     const applicationStore = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
