@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const moduleAt = (root, path) => import(pathToFileURL(join(root, "dist", "src", path)).href);
 const fenced = (tag, value) => `\u0060\u0060\u0060${tag}\n${JSON.stringify(value)}\n\u0060\u0060\u0060\n`;
@@ -132,4 +132,8 @@ export async function smokeInstalledFirstRun(installed, root, cwd) {
   assert.equal(await store.read("fixture:1"), undefined);
   await assert.rejects(stat(archivePath), { code: "ENOENT" });
   console.log("Packed first-run setup, handoff, export/delete/restore smoke passed");
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  await smokeInstalledFirstRun(process.argv[2], process.argv[3], process.argv[4]);
 }
