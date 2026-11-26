@@ -18,6 +18,8 @@
     "queue:benchmark": "node scripts/benchmark-queue.mjs",
     "application:run": "tsx src/application/cli.ts",
     "application:status": "tsx src/application/status-cli.ts",
+    "application:review": "tsx src/application/uncertain-review-cli.ts",
+    "application:verify-owned": "tsx src/application/owned-confirm-cli.ts",
     "handoff:ui": "tsx src/application/handoff-ui-cli.ts",
     "state:cutover": "tsx src/storage/sqlite-cutover-cli.ts",
     "state:control": "tsx src/storage/data-controls-cli.ts",

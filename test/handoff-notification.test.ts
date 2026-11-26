@@ -127,6 +127,8 @@ describe("human handoff email", () => {
     expect(body).toContain("user@example.net");
     const uncertainBody = String((fetcher.mock.calls[2]![1] as RequestInit).body);
     expect(uncertainBody).toContain("inspect its status");
+    expect(uncertainBody).toContain("openapply application:review");
+    expect(uncertainBody).toContain("Do not submit again");
     expect(uncertainBody).not.toContain("continue it");
     for (const privateValue of [checkpoint.jobId, checkpoint.officialUrl, checkpoint.blocker!]) {
       expect(body).not.toContain(privateValue);

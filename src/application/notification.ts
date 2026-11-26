@@ -61,7 +61,7 @@ export async function sendHandoffEmail(config: HandoffNotificationConfig, checkp
     body: JSON.stringify({ from: config.email.from, to: [config.email.to],
       subject: "OpenApply needs your attention",
       text: checkpoint.stage === "submission-uncertain"
-        ? "An application needs review. Open OpenApply on your device to inspect its status."
+        ? "An application needs review. On your device, run openapply application:review to inspect its status. Do not submit again before checking the employer confirmation."
         : "An application is paused. Open OpenApply on your device to review and continue it." }),
   });
   if (!response.ok) throw new Error(`Handoff email failed with HTTP ${response.status}`);
