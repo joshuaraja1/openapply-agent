@@ -16,6 +16,7 @@ import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { readPrivateFile } from "../storage/private-path.js";
 import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
@@ -33,12 +34,13 @@ import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 import { recoverClaimedSubmission } from "./recover-submission.js";
+import { currentProviderPauseReason } from "./provider-gate.js";
 
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 await holdWorkflowLease();
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
-const config = queueRunnerConfigSchema.parse(await json(configPath));
+const config = queueRunnerConfigSchema.parse(JSON.parse(await readPrivateFile(configPath)));
 if (config.browserEndpoint) assertLocalBrowserEndpoint(config.browserEndpoint);
 const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
@@ -57,8 +59,6 @@ const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
-await assertAutonomousNotificationReady(preferences.applicationPolicy.requireFinalApproval,
-  notificationConfig, secrets);
 const workflow = new ApplicationWorkflow(sqlite?.store<ApplicationCheckpoint>("applications")
   ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(sqlite?.store<DailyQuotaRecord>("quota")
@@ -114,10 +114,12 @@ for (const entry of runnableEntries(queue.queue)) {
     }
   }
 }
-const connection = config.browserRuntime === "browseros"
-  ? await connectBrowserOs(config.browserEndpoint!) : undefined;
-const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
-  await connection.client.callTool(request) as BrowserToolResult };
+if (eligible.some((job) => config.queueProviderAllowlist.includes(job.provider))) {
+  await assertAutonomousNotificationReady(preferences.applicationPolicy.requireFinalApproval,
+    notificationConfig, secrets);
+}
+let connection: Awaited<ReturnType<typeof connectBrowserOs>> | undefined;
+let client: BrowserToolClient | undefined;
 try {
   const date = () => {
     const now = new Date();
@@ -125,6 +127,20 @@ try {
   };
   const cap = Math.min(preferences.applicationPolicy.dailyTarget, preferences.applicationPolicy.dailyHardCap);
   const outcomes = await runApplicationQueue(eligible, quota, retries, date, cap, async (job) => {
+    // The canonical claim and quota reservation may await storage. Recheck
+    // once more before rendering or opening any employer browser page.
+    let preBrowserReason: string | undefined;
+    try { preBrowserReason = await currentProviderPauseReason(configPath, config, job.provider); }
+    catch { preBrowserReason = "Private queue provider policy is unavailable before browser activity"; }
+    if (preBrowserReason) {
+      return { status: "provider-paused" as const, reason: preBrowserReason };
+    }
+    // A disabled provider never needs a browser connection or a PDF render.
+    if (config.browserRuntime === "browseros" && !connection) {
+      connection = await connectBrowserOs(config.browserEndpoint!);
+      client = { callTool: async (request) =>
+        await connection!.client.callTool(request) as BrowserToolResult };
+    }
     const source = jobSources.get(job.id) ?? sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
     const artifact = config.browserRuntime === "owned"
@@ -147,13 +163,16 @@ try {
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
     await writeApplicationPackage(packagePath, pkg);
     const account = authPolicy ? accountForUrl(authPolicy, job.applicationUrl) : undefined;
+    const activeClient = client;
     const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
       packagePath,
+      beforeFinalSubmit: async (activeJob) => await currentProviderPauseReason(configPath, config,
+        activeJob.provider),
       ...(account ? { account, secretStore: secrets } : {}),
       ...(emailCode ? { emailCode } : {}),
-      ...(client ? { browserFactory: async (allowedHosts: ReadonlySet<string>,
+      ...(activeClient ? { browserFactory: async (allowedHosts: ReadonlySet<string>,
         approvedArtifacts: ReadonlyMap<string, string>) => ({
-        browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
+        browser: new NeoApplicationBrowser(activeClient, allowedHosts, approvedArtifacts),
         close: async () => {},
       }) } : {}),
     });
@@ -170,7 +189,14 @@ try {
       default:
         return undefined;
     }
-  }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
+  }, async (job) => {
+    const receipt = await postingClaims.claimWithReceipt(job.id, job.applicationUrl);
+    const createdVersion = receipt.createdVersion;
+    return { claimed: receipt.status === "claimed",
+      ...(createdVersion !== undefined ? { releaseBeforeBrowser: async () =>
+        await postingClaims.releaseNewClaim(job.id, job.applicationUrl, createdVersion) } : {}) };
+  },
+  async (job) => await currentProviderPauseReason(configPath, config, job.provider));
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
   await connection?.close();

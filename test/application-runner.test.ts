@@ -59,6 +59,40 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("pauses a claimed queued application if provider policy changes before the final click", async () => {
+    const page = { url: job.applicationUrl, title: "Apply", visibleText: "Example Co Software Engineer",
+      controls: [
+        { ref: "email", tag: "input", role: "textbox", name: "Email", type: "email",
+          value: "", required: true, options: [] },
+        { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+          value: null, required: true, options: [] },
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64),
+        claimIds: ["synthetic"] },
+      resumePdfPath: "/tmp/synthetic-provider-gate.pdf", expectedConfirmation: "Thank you for applying" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
+    const beforeFinalSubmit = vi.fn(async () => "Private queue policy changed during this run; restart before applying");
+    const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      validateOfficial: async () => true,
+      verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+        verifiedAt: new Date().toISOString() }),
+      beforeFinalSubmit,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => page, act: async () => page, fillBatch: async () => page, submit },
+      close: async () => {} }),
+    });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("policy changed");
+    expect(beforeFinalSubmit).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("saves a direct owned-browser submit claim with its private package before the click", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-direct-claim-"));
     try {
