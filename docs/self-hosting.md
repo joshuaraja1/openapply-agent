@@ -29,11 +29,12 @@ to the operating-system secret store, never to this repository or JSON files.
    browser profile. A company portal may require its own account. Set
    `OPENAPPLY_QUEUE_CONFIG` to your private queue configuration before launching
    `setup:ui`, then use **Check runtime setup**. It validates the queue file,
-   compiled profile paths, effective daily cap, browser mode, direct Overleaf
+   compiled candidate file and profile paths, effective daily cap, browser mode, direct Overleaf
    project URL, optional mailbox client ID, and handoff notification file. The
    screen returns only statuses and the daily limit; it does not reveal account
    addresses or secret references. **Check browser installation** runs the
-   owned Chromium doctor or indicates that BrowserOS must be checked separately.
+   owned Chromium doctor in a disposable private profile without opening saved
+   sessions, or indicates that BrowserOS must be checked separately.
    These checks do not verify sign-ins, stored sending keys, OAuth consent,
    actual email delivery, or a real application.
 5. If using automatic site login, create a private authentication policy with

@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Script } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { startSetupUi } from "../src/setup/ui.js";
@@ -145,10 +146,10 @@ describe("local first-run setup", () => {
       browserRuntime: "owned", overleafProjectUrl: "https://www.overleaf.com/project/0123456789abcdef01234567",
       outputDirectory: join(root, "artifacts") }), { mode: 0o600 });
     if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
-    const doctor = vi.fn(async () => ({ status: "ready" as const, startupMs: 1, browserVersion: "test" }));
+    const doctor = vi.fn(async (_profile: string) => ({ status: "ready" as const,
+      startupMs: 1, browserVersion: "test" }));
     const ui = await startSetupUi({ destination: join(root, "onboarding"),
-      repositoryRoot: process.cwd(), queueConfigPath: configPath, browserDoctor: doctor,
-      browserProfileDirectory: join(root, "browser-profile") });
+      repositoryRoot: process.cwd(), queueConfigPath: configPath, browserDoctor: doctor });
     try {
       const url = new URL(ui.url), token = url.searchParams.get("token")!;
       const endpoint = `${url.origin}/api/browser-doctor`;
@@ -161,7 +162,9 @@ describe("local first-run setup", () => {
       } });
       expect(result.status).toBe(200);
       expect(await result.json()).toEqual({ browser: "ready" });
-      expect(doctor).toHaveBeenCalledWith(join(root, "browser-profile"));
+      const profile = doctor.mock.calls[0]![0];
+      expect(profile).toContain("openapply-browser-doctor-");
+      expect(existsSync(dirname(profile))).toBe(false);
     } finally { await ui.close(); await rm(root, { recursive: true, force: true }); }
   });
 });

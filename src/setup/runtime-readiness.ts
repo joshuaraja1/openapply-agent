@@ -1,13 +1,15 @@
-import { userInfo } from "node:os";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { loadAuthenticationPolicy } from "../auth/schema.js";
 import { checkOwnedBrowser } from "../browser/doctor.js";
-import { searchPreferencesSchema } from "../candidate/schema.js";
+import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { loadHandoffNotificationConfig } from "../application/notification.js";
 import { queueRunnerConfigSchema } from "../application/queue-config.js";
 import { assertLocalBrowserEndpoint, assertOverleafProjectUrl } from "../resume/overleaf.js";
 import { readPrivateFile } from "../storage/private-path.js";
+import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 
 type State = "missing" | "invalid" | "ready";
 export interface RuntimeReadiness {
@@ -42,9 +44,16 @@ export async function inspectRuntimeReadiness(queueConfigPath: string | undefine
     return result;
   }
   result.queueConfig = "ready";
-  result.profilePaths = resolve(config.candidatePath) === resolve(join(setupDirectory, "candidate-profile.json"))
-    && resolve(config.preferencesPath) === resolve(join(setupDirectory, "search-preferences.json"))
-    ? "ready" : "invalid";
+  const matchingPaths = resolve(config.candidatePath) === resolve(join(setupDirectory, "candidate-profile.json"))
+    && resolve(config.preferencesPath) === resolve(join(setupDirectory, "search-preferences.json"));
+  if (matchingPaths) {
+    try {
+      candidateProfileSchema.parse(JSON.parse(await readPrivateFile(config.candidatePath)));
+      result.profilePaths = "ready";
+    } catch (error) {
+      result.profilePaths = (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "invalid";
+    }
+  } else result.profilePaths = "invalid";
   try {
     const parsed = searchPreferencesSchema.parse(JSON.parse(await readPrivateFile(config.preferencesPath)));
     result.preferences = "ready";
@@ -78,8 +87,7 @@ export async function inspectRuntimeReadiness(queueConfigPath: string | undefine
 
 /** The explicit doctor action checks the installed owned browser without reading sessions. */
 export async function runSetupBrowserDoctor(queueConfigPath: string | undefined,
-  doctor: typeof checkOwnedBrowser = checkOwnedBrowser,
-  profileDirectory = join(userInfo().homedir, ".openapply-agent", "browser-profile")):
+  doctor: typeof checkOwnedBrowser = checkOwnedBrowser):
   Promise<"ready" | "external-browser"> {
   if (!queueConfigPath) throw new Error("Configure a private queue file before checking the browser");
   const config = await readConfig(queueConfigPath);
@@ -87,6 +95,12 @@ export async function runSetupBrowserDoctor(queueConfigPath: string | undefined,
     assertLocalBrowserEndpoint(config.browserEndpoint!);
     return "external-browser";
   }
-  await doctor(profileDirectory);
-  return "ready";
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "openapply-browser-doctor-"));
+  try {
+    if (process.platform === "win32") await secureWindowsPrivatePath(temporaryRoot);
+    await doctor(join(temporaryRoot, "profile"));
+    return "ready";
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
 }
