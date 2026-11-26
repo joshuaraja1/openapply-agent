@@ -74,7 +74,9 @@ function startClaim(root, key) {
   const closed = new Promise((resolve) => worker.once("close", (code, signal) => resolve({ code, signal })));
   const ready = new Promise((resolve, reject) => {
     let output = "";
+    let stderr = "";
     const timer = setTimeout(() => { worker.kill("SIGKILL"); reject(new Error("Claim worker timed out")); }, 15_000);
+    worker.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     worker.stdout.on("data", (chunk) => {
       output += chunk.toString();
       if (output.includes("READY\n")) { clearTimeout(timer); resolve(); }
@@ -83,7 +85,7 @@ function startClaim(root, key) {
     worker.once("close", (code) => {
       if (!output.includes("READY\n")) {
         clearTimeout(timer);
-        reject(new Error(`Claim worker exited before READY: ${code}`));
+        reject(new Error(`Claim worker exited before READY: ${code}; ${stderr.slice(0, 2000)}`));
       }
     });
   });
@@ -91,7 +93,11 @@ function startClaim(root, key) {
 }
 
 async function measureRecovery() {
-  const root = await mkdtemp(join(tmpdir(), "openapply-recovery-benchmark-"));
+  // A Windows custom workflow root requires a private parent. The shared system
+  // temp directory is intentionally rejected by the production lease guard.
+  const base = process.platform === "win32" ? process.env.LOCALAPPDATA : tmpdir();
+  if (!base) throw new Error("Windows queue benchmark requires LOCALAPPDATA");
+  const root = await mkdtemp(join(base, "openapply-recovery-benchmark-"));
   let holder;
   try {
     if (process.platform === "win32") await secureWindowsPrivatePath(root);
