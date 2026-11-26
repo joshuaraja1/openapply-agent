@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isIP } from "node:net";
 import type { JobSource } from "../config.js";
 import { fetchSource } from "../sources/fetch.js";
 import type { NormalizedJob } from "../types.js";
@@ -15,6 +16,16 @@ export const browserLeadsFileSchema = z.object({
 interface OfficialLead { source: JobSource; postingId: string }
 const slug = /^[a-z0-9_-]{1,100}$/i;
 const posting = /^[a-z0-9-]{1,128}$/i;
+
+function isPublicHttpsUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^\[|\]$/g, "");
+    return url.protocol === "https:" && !url.username && !url.password && !url.port
+      && !isIP(host) && host.includes(".")
+      && !/(?:^|\.)(?:localhost|local|internal)$/.test(host);
+  } catch { return false; }
+}
 
 /** Only fixed ATS hosts can be promoted to employer postings. Board metadata is never trusted. */
 export function officialSourceForLead(rawUrl: string): OfficialLead | null {
@@ -68,7 +79,8 @@ export async function verifyOfficialBrowserLeads(leads: BrowserLead[], now = new
     const live = await fetcher(source, now);
     return group.flatMap(({ lead, postingId }) => {
       const job = live.find((item) => item.id === `${source.provider}:${source.company}:${postingId}`);
-      if (!job || !job.descriptionText.trim()) return [];
+      if (!job || job.provider !== source.provider || job.company !== source.company
+        || !job.descriptionText.trim() || !isPublicHttpsUrl(job.applicationUrl)) return [];
       const applicationHost = new URL(job.applicationUrl).hostname;
       return [{ lead, job, source: { ...source,
         allowedApplicationHosts: [...new Set([...source.allowedApplicationHosts, applicationHost])] } }];
