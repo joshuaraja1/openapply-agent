@@ -18,8 +18,11 @@ storage smoke, secret scanning, dependency audit, and CodeQL run in CI. A
 controlled two-step Chromium test verifies a browser restart, fresh résumé
 upload, approved answer, and confirmed submission. One operator handoff alert
 was delivered from a verified OpenApply sending domain to the owner's inbox
-using a domain-scoped Resend key. Queue-triggered delivery and delivery to beta
-candidates remain unverified.
+using a domain-scoped Resend key. A separate opt-in staging run created a
+synthetic queued human handoff, sent one alert through that key, confirmed it in
+the owner's inbox, and found no duplicate send after reopening encrypted state.
+The production queue CLI, real employer flow, and delivery to beta candidates
+remain unverified.
 
 **This is a beta foundation, not an unattended public release.** Complete the
 first-run and exception flow, signed installers and updater with rollback,
