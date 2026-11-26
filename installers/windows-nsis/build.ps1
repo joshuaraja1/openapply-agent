@@ -24,8 +24,42 @@ if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^v3\.13(?:\.|$)') {
 $launcher = Join-Path $payload 'openapply.cmd'
 if (Test-Path -LiteralPath $launcher) { throw 'Payload already contains an OpenApply launcher' }
 Set-Content -LiteralPath $launcher -Encoding Ascii -Value '@echo off', '"%~dp0node.exe" "%~dp0package\dist\src\product-cli.js" %*'
+$entries = @(Get-ChildItem -LiteralPath $payload -Recurse -Force)
+if (@($entries | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint }).Count -ne 0) {
+  throw 'Locked payload contains a linked entry'
+}
+function Escape-NsisPath([string]$value) {
+  if ($value.Contains('"') -or $value.Contains("`r") -or $value.Contains("`n")) {
+    throw 'Unsupported payload path'
+  }
+  return $value.Replace('$', '$$')
+}
+$directories = @($entries | Where-Object { $_.PSIsContainer } | Sort-Object { $_.FullName.Length } -Descending)
+$files = @($entries | Where-Object { -not $_.PSIsContainer } | Sort-Object FullName)
+$manifest = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(),
+  "OpenApply-Files-$([guid]::NewGuid().ToString('N')).nsh")
+$lines = [System.Collections.Generic.List[string]]::new()
+$lines.Add('!macro ValidatePayloadPaths')
+$lines.Add('  !insertmacro CheckNoReparse "$LOCALAPPDATA\OpenApply"')
+$lines.Add('  !insertmacro CheckNoReparse "$INSTDIR"')
+foreach ($directory in $directories) {
+  $relative = Escape-NsisPath($directory.FullName.Substring($payload.Length + 1))
+  $lines.Add("  !insertmacro CheckNoReparse `"`$INSTDIR\$relative`"")
+}
+$lines.Add('!macroend')
+$lines.Add('!macro RemovePayloadFiles')
+foreach ($file in $files) {
+  $relative = Escape-NsisPath($file.FullName.Substring($payload.Length + 1))
+  $lines.Add("  Delete `"`$INSTDIR\$relative`"")
+}
+foreach ($directory in $directories) {
+  $relative = Escape-NsisPath($directory.FullName.Substring($payload.Length + 1))
+  $lines.Add("  RMDir `"`$INSTDIR\$relative`"")
+}
+$lines.Add('!macroend')
+[System.IO.File]::WriteAllLines($manifest, $lines)
 $script = Join-Path $PSScriptRoot 'OpenApply.nsi'
-$args = @('/V2', "/DPAYLOAD_ROOT=$payload", "/DOUTPUT_FILE=$output")
+$args = @('/V2', "/DPAYLOAD_ROOT=$payload", "/DOUTPUT_FILE=$output", "/DFILE_MANIFEST=$manifest")
 if ($Sign) {
   if ($env:OPENAPPLY_WINDOWS_CERT_THUMBPRINT -notmatch '^[A-Fa-f0-9]{40}$' -or
       $env:OPENAPPLY_WINDOWS_TIMESTAMP_URL -notmatch '^https://') {
@@ -50,4 +84,5 @@ try {
   Write-Output $output
 } finally {
   Remove-Item -LiteralPath $launcher -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $manifest -ErrorAction SilentlyContinue
 }

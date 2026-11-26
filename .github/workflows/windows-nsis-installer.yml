@@ -58,6 +58,26 @@ jobs:
           & $launcher --help
           if ($LASTEXITCODE -ne 0) { throw 'Original runtime was damaged by refused reinstall' }
           $uninstall = Join-Path $runtime 'Uninstall.exe'
+          $external = Join-Path $env:LOCALAPPDATA 'OpenApply\candidate-external'
+          New-Item -ItemType Directory -Path $external -Force | Out-Null
+          $externalSentinel = Join-Path $external 'sentinel.txt'
+          Set-Content -LiteralPath $externalSentinel -Value 'outside-runtime-must-remain'
+          $docs = Join-Path $runtime 'package\docs'
+          $docsBackup = Join-Path $runtime 'package\docs.original'
+          Rename-Item -LiteralPath $docs -NewName 'docs.original'
+          New-Item -ItemType Junction -Path $docs -Target $external | Out-Null
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')) -or
+              (Get-Content -LiteralPath $externalSentinel -Raw).Trim() -ne 'outside-runtime-must-remain') {
+            throw 'Uninstall followed a linked package directory'
+          }
+          Remove-Item -LiteralPath $docs -Force
+          if ((Get-Content -LiteralPath $externalSentinel -Raw).Trim() -ne 'outside-runtime-must-remain') {
+            throw 'Junction fixture cleanup changed candidate data'
+          }
+          Rename-Item -LiteralPath $docsBackup -NewName 'docs'
+          $userFile = Join-Path $runtime 'user-note.txt'
+          Set-Content -LiteralPath $userFile -Value 'user-added-file-must-remain'
           $removed = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
           if ($removed.ExitCode -ne 0) { throw "NSIS uninstall failed: $($removed.ExitCode)" }
           for ($i = 0; $i -lt 30 -and (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')); $i++) {
@@ -66,4 +86,7 @@ jobs:
           if (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')) { throw 'Runtime remained after uninstall' }
           if ((Get-Content -LiteralPath $private -Raw).Trim() -ne 'private-state-must-remain') {
             throw 'Uninstall changed candidate state outside runtime'
+          }
+          if ((Get-Content -LiteralPath $userFile -Raw).Trim() -ne 'user-added-file-must-remain') {
+            throw 'Uninstall deleted a user-added runtime file'
           }

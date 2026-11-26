@@ -10,6 +10,24 @@ CRCCheck force
 !ifndef OUTPUT_FILE
   !error "OUTPUT_FILE is required"
 !endif
+!ifndef FILE_MANIFEST
+  !error "FILE_MANIFEST is required"
+!endif
+
+!include LogicLib.nsh
+
+!macro CheckNoReparse Path
+  ${If} ${FileExists} "${Path}"
+    System::Call 'kernel32::GetFileAttributesW(w "${Path}") i .r0'
+    IntOp $1 $0 & 0x400
+    ${If} $1 != 0
+      SetErrorLevel 4
+      Abort "OpenApply uninstall stopped at a linked directory."
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+!include "${FILE_MANIFEST}"
 
 OutFile "${OUTPUT_FILE}"
 InstallDir "$LOCALAPPDATA\OpenApply\runtime"
@@ -49,9 +67,14 @@ Function un.onInit
     Abort "Uninstaller is outside the OpenApply runtime folder."
   IfFileExists "$INSTDIR\openapply-install.marker" +2 0
     Abort "OpenApply install marker is missing."
+  !insertmacro ValidatePayloadPaths
 FunctionEnd
 
 Section "Uninstall"
   SetOutPath "$TEMP"
-  RMDir /r "$INSTDIR"
+  !insertmacro ValidatePayloadPaths
+  Delete "$INSTDIR\openapply-install.marker"
+  Delete "$INSTDIR\Uninstall.exe"
+  !insertmacro RemovePayloadFiles
+  RMDir "$INSTDIR"
 SectionEnd

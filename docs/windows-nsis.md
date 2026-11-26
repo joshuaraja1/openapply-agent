@@ -10,10 +10,13 @@ OpenApply npm tarball plus a bundled Node executable.
 The installer requests user privileges and writes only the executable
 runtime under `%LOCALAPPDATA%\OpenApply\runtime`. It rejects an existing
 runtime until a verified updater is implemented. The generated uninstaller
-requires an install marker and removes only that runtime folder; candidate
-data and secrets remain outside it. Windows CI builds an unsigned EXE, runs
-the installed CLI, checks reinstall rejection, uninstalls, and verifies a
-candidate-data sentinel survives.
+requires an install marker, checks every installed directory for a reparse
+point, and deletes only the files compiled into its install manifest. It
+leaves user-added files in place and removes empty runtime directories.
+Candidate data and secrets remain outside the runtime. Windows CI builds an
+unsigned EXE, runs the installed CLI, checks reinstall rejection, injects a
+junction to a candidate-data sentinel, and verifies that uninstall refuses
+the junction and later preserves both the sentinel and a user-added file.
 
 `installers/windows-nsis/build.ps1` accepts `-Sign` only when a valid
 certificate thumbprint and HTTPS timestamp endpoint are provided in
