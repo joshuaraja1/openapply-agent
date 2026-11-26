@@ -265,7 +265,7 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
     const result = await run("workday", "workday-three-step");
     expect(result.checkpoint.stage).toBe("submitted");
     expect(result.phoneValue).toBe("555-0100");
-    expect(result.fileName).toBe("verified-resume.pdf");
+    expect(result.fileName).toBe("fixture-resume.pdf");
     expect(result.authorizationValue).toBe("Yes");
     expect(result.confirmationVisible).toBe(true);
   }, 30_000);
@@ -284,7 +284,7 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
     expect(result.checkpoint.stage).toBe("waiting-human");
     expect(result.checkpoint.blocker).toContain("Continue did not advance");
     expect(result.validationVisible).toBe(true);
-    expect(result.fileName).toBe("verified-resume.pdf");
+    expect(result.fileName).toBe("fixture-resume.pdf");
     expect(result.confirmationVisible).toBe(false);
   }, 30_000);
 
