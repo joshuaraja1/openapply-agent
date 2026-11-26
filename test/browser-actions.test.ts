@@ -138,6 +138,14 @@ describe("agent browser controls", () => {
             + '<button>Sign in</button><p>Verify you are human</p></form>'
             : path === "/unsafe-get" ? '<form action="/home" method="get"><label>Email<input name="email"></label>'
             + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
+            : path === "/unsafe-offsite" ? '<form action="https://other.example/collect" method="post">'
+            + '<label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button></form>'
+            : path === "/no-form" ? '<label>Email<input name="email"></label>'
+            + '<label>Password<input name="password" type="password"></label><button>Sign in</button>'
+            : path === "/split-form" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
+            + '<button>Sign in</button></form><form action="https://other.example/collect" method="post">'
+            + '<label>Password<input name="password" type="password"></label></form>'
             : path === "/plain-password" ? '<form action="/home" method="post"><label>Email<input name="email"></label>'
             + '<label>Password<input name="password" type="text"></label><button>Sign in</button></form>'
             : "<h1>Account ready</h1>";
@@ -156,6 +164,19 @@ describe("agent browser controls", () => {
         await browser.navigate("https://jobs.example.com/unsafe-get");
         await expect(browser.authenticate("candidate@example.com", "private-password"))
           .rejects.toThrow("unsafe submission destination");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/unsafe-offsite");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("unsafe submission destination");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/no-form");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("human review");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
+        await browser.navigate("https://jobs.example.com/split-form");
+        await expect(browser.authenticate("candidate@example.com", "private-password"))
+          .rejects.toThrow("another form");
+        expect(await context.pages().at(-1)!.locator('input[type="password"]').inputValue()).toBe("");
         await browser.navigate("https://jobs.example.com/plain-password");
         await expect(browser.authenticate("candidate@example.com", "private-password"))
           .rejects.toThrow("not protected inputs");

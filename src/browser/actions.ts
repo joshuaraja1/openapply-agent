@@ -173,16 +173,10 @@ export class AgentBrowser {
     return { email, password, confirmation, submit: submit[0]! };
   }
 
-  private async submitAccountForm(kind: "login" | "registration", email: string, password: string) {
-    if (!email || !password) throw new Error("Portal credentials are unavailable");
-    let snapshot = await this.snapshot();
-    for (const field of ["email", "password", ...(kind === "registration" ? ["confirmation"] as const : [])] as const) {
-      const controls = this.accountForm(snapshot, kind);
-      snapshot = await this.act(controls[field]!.ref, "fill", field === "email" ? email : password);
-    }
-    const controls = this.accountForm(snapshot, kind);
-    if (controls.email.value !== email) throw new Error("Portal credential form changed during fill");
-    const handle = this.controls.get(controls.submit.ref);
+  private async assertCredentialFormTarget(
+    ref: string, fields: readonly BrowserControl[],
+  ): Promise<ElementHandle<HTMLElement>> {
+    const handle = this.controls.get(ref);
     if (!handle || !(await handle.evaluate((element) => element.isConnected))) {
       throw new Error("Portal credential submit control changed");
     }
@@ -190,14 +184,38 @@ export class AgentBrowser {
       const form = (element as HTMLButtonElement).form;
       return form ? { method: form.method.toLowerCase(), action: form.action } : null;
     });
-    if (formTarget) {
-      const destination = new URL(formTarget.action);
-      if (formTarget.method !== "post" || destination.protocol !== "https:"
-        || destination.username || destination.password
-        || destination.hostname.toLowerCase() !== new URL(this.currentUrl()).hostname.toLowerCase()) {
-        throw new Error("Portal credential form has an unsafe submission destination");
+    // Script-only login flows do not expose a destination that can be checked.
+    if (!formTarget) throw new Error("Portal credential form requires human review");
+    const destination = new URL(formTarget.action);
+    const current = new URL(this.currentUrl());
+    if (formTarget.method !== "post" || destination.protocol !== "https:"
+      || destination.username || destination.password || destination.origin !== current.origin) {
+      throw new Error("Portal credential form has an unsafe submission destination");
+    }
+    for (const field of fields) {
+      const input = this.controls.get(field.ref);
+      if (!input || !(await input.evaluate((element, button) =>
+        (element as HTMLInputElement).form === (button as HTMLButtonElement).form, handle))) {
+        throw new Error("Portal credential fields belong to another form");
       }
     }
+    return handle;
+  }
+
+  private async submitAccountForm(kind: "login" | "registration", email: string, password: string) {
+    if (!email || !password) throw new Error("Portal credentials are unavailable");
+    let snapshot = await this.snapshot();
+    const initial = this.accountForm(snapshot, kind);
+    await this.assertCredentialFormTarget(initial.submit.ref,
+      [initial.email, initial.password, ...(initial.confirmation ? [initial.confirmation] : [])]);
+    for (const field of ["email", "password", ...(kind === "registration" ? ["confirmation"] as const : [])] as const) {
+      const controls = this.accountForm(snapshot, kind);
+      snapshot = await this.act(controls[field]!.ref, "fill", field === "email" ? email : password);
+    }
+    const controls = this.accountForm(snapshot, kind);
+    if (controls.email.value !== email) throw new Error("Portal credential form changed during fill");
+    const handle = await this.assertCredentialFormTarget(controls.submit.ref,
+      [controls.email, controls.password, ...(controls.confirmation ? [controls.confirmation] : [])]);
     this.controls.clear();
     this.generation += 1;
     await handle.click();
