@@ -6,8 +6,11 @@ import { join, parse } from "node:path";
 import { test } from "node:test";
 import { installStaging, stagingRoot, statusStaging, uninstallStaging } from "./staging-user-install.mjs";
 
+const testBase = process.platform === "win32" ? process.env.LOCALAPPDATA : tmpdir();
+if (!testBase) throw new Error("Windows staging tests require LOCALAPPDATA");
+
 test("user-level staging install and uninstall preserve private state", () => {
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), "openapply-staging-test-")));
+  const temporary = realpathSync(mkdtempSync(join(testBase, "openapply-staging-test-")));
   try {
     const result = spawnSync(process.execPath, [process.env.npm_execpath, "pack", "--json",
       "--pack-destination", temporary], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -34,7 +37,7 @@ test("user-level staging install and uninstall preserve private state", () => {
 });
 
 test("uninstall refuses an unmarked runtime and install cleans failed staging", () => {
-  const temporary = realpathSync(mkdtempSync(join(tmpdir(), "openapply-staging-refusal-")));
+  const temporary = realpathSync(mkdtempSync(join(testBase, "openapply-staging-refusal-")));
   try {
     const root = join(temporary, "staging");
     const invalid = join(temporary, "invalid.tgz");
