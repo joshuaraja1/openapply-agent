@@ -12,6 +12,10 @@ portals and questions require human completion. See the [production roadmap](doc
 The remaining PR sequence and release gates are in the
 [autonomy release requirements](docs/autonomy-release-requirements.md).
 
+An optional [Cloudflare wake](docs/cloud-wake.md) can signal an always-on local
+agent on a 15-minute schedule; browser sessions and candidate data stay on the
+user's host. It is a single-user staging path, not a hosted consumer service.
+
 It does not include anyone's résumé, address, credentials, application history, or generated documents.
 
 When the repository is opened in a coding-agent workspace, [`AGENTS.md`](AGENTS.md) supplies the end-to-end operating contract: continue from discovery through per-role tailoring, PDF inspection, guarded BrowserOS form filling, explicit submission verification, and private outcome logging.

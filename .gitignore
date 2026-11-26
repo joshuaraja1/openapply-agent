@@ -13,3 +13,5 @@ output/
 /storage/
 *.pdf
 *.zip
+.wrangler/
+cloud/wrangler.jsonc
