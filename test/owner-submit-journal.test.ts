@@ -14,11 +14,12 @@ describe.skipIf(process.platform === "win32")("owner final-click journal", () =>
       artifactSha256: hash };
     try {
       const first = new OwnerSubmitJournal(directory);
-      const saved = await first.claim(binding, binding.officialUrl);
+      const saved = await first.claim(binding, binding.officialUrl, "b".repeat(64));
       expect(saved.binding).toEqual(binding);
       const restarted = new OwnerSubmitJournal(directory);
       expect(await restarted.read(binding.claimId)).toEqual(saved);
-      await expect(restarted.claim(binding, binding.officialUrl)).rejects.toMatchObject({ code: "EEXIST" });
+      await expect(restarted.claim(binding, binding.officialUrl, "b".repeat(64)))
+        .rejects.toMatchObject({ code: "EEXIST" });
       const files = await import("node:fs/promises").then((fs) => fs.readdir(directory));
       expect(files).toHaveLength(1);
       expect(await readFile(join(directory, files[0]!), "utf8")).toContain(binding.claimId);

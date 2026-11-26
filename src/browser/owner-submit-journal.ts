@@ -9,12 +9,29 @@ const intentSchema = z.object({ version: z.literal(1), binding: z.object({
   tabId: z.uuid(), claimId: z.uuid(), jobId: z.string().min(1).max(256),
   officialUrl: z.url(), packageSha256: z.string().regex(/^[a-f0-9]{64}$/),
   artifactSha256: z.string().regex(/^[a-f0-9]{64}$/),
-}).strict(), preSubmitUrl: z.url(), submittedAt: z.iso.datetime() }).strict();
+}).strict(), preSubmitUrl: z.url(), receiptPolicySha256: z.string().regex(/^[a-f0-9]{64}$/),
+  submittedAt: z.iso.datetime() }).strict();
+
+export interface OwnerReceiptPolicy {
+  company: string;
+  role: string;
+  phrase: string;
+  postUrl: string;
+  postFields: Record<string, string>;
+}
+
+export function receiptPolicySha256(policy: OwnerReceiptPolicy): string {
+  const fields = Object.entries(policy.postFields).sort(([left], [right]) => left.localeCompare(right));
+  return createHash("sha256").update(JSON.stringify({ company: policy.company.trim(),
+    role: policy.role.trim(), phrase: policy.phrase.trim(), postUrl: new URL(policy.postUrl).href,
+    postFields: fields })).digest("hex");
+}
 
 export interface OwnerSubmitIntent {
   version: 1;
   binding: OwnerClaimBinding;
   preSubmitUrl: string;
+  receiptPolicySha256: string;
   submittedAt: string;
 }
 
@@ -61,11 +78,13 @@ export class OwnerSubmitJournal {
     return intent;
   }
 
-  async claim(binding: OwnerClaimBinding, preSubmitUrl: string): Promise<OwnerSubmitIntent> {
+  async claim(binding: OwnerClaimBinding, preSubmitUrl: string,
+    policySha256: string): Promise<OwnerSubmitIntent> {
     await this.assertPrivateDirectory();
     const path = pathFor(this.directory, binding.claimId);
     const intent: OwnerSubmitIntent = { version: 1, binding: { ...binding },
-      preSubmitUrl, submittedAt: new Date().toISOString() };
+      preSubmitUrl, receiptPolicySha256: policySha256,
+      submittedAt: new Date().toISOString() };
     const file = await open(path, "wx", 0o600);
     try {
       await file.writeFile(JSON.stringify(intent));

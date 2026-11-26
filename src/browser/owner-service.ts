@@ -8,8 +8,9 @@ import { MAX_OWNER_MESSAGE_BYTES, OwnerRequestVerifier, signOwnerRequest,
   type OwnerClaimBinding, type OwnerRequest } from "./owner-protocol.js";
 import { AgentBrowser, type BrowserSnapshot } from "./actions.js";
 import { assertServiceWorkersBlocked, type BrowserRuntime } from "./runtime.js";
-import { OwnerSubmitJournal, type OwnerSubmitIntent } from "./owner-submit-journal.js";
-import type { Page } from "playwright";
+import { OwnerSubmitJournal, receiptPolicySha256, type OwnerReceiptPolicy,
+  type OwnerSubmitIntent } from "./owner-submit-journal.js";
+import type { Page, Request } from "playwright";
 
 const MAX_OWNER_REPLY_BYTES = 65_536;
 
@@ -37,7 +38,8 @@ type OwnerReply = z.infer<typeof ownerReply>;
 type RegisteredTab = { binding: OwnerClaimBinding; inspect: () => Promise<{
   url: string; title: string; visibleText: string;
 }>; browser?: AgentBrowser;
-  receipt?: { company: string; role: string; phrase: string; postUrl: string };
+  receipt?: OwnerReceiptPolicy;
+  acceptedPost?: Request;
   postAllowed?: boolean; postCount?: number; submitting?: boolean;
   navigationAttempted?: boolean };
 
@@ -51,9 +53,35 @@ function exactToken(text: string, token: string): boolean {
   return new RegExp(`(^|[^a-z0-9_-])${escaped}($|[^a-z0-9_-])`, "i").test(text);
 }
 
+function exactFormPost(request: Request, tab: RegisteredTab): boolean {
+  const receipt = tab.receipt;
+  if (!receipt || !tab.browser || request.method() !== "POST"
+    || request.url() !== receipt.postUrl || !request.isNavigationRequest()
+    || request.resourceType() !== "document") return false;
+  try {
+    if (request.frame() !== tab.browser.ownedPage().mainFrame()) return false;
+    if (!/^application\/x-www-form-urlencoded(?:;|$)/i.test(request.headers()["content-type"] ?? "")) {
+      return false;
+    }
+    const body = request.postData();
+    if (body === null) return false;
+    const actual = [...new URLSearchParams(body).entries()];
+    const expected = Object.entries(receipt.postFields);
+    return actual.length === expected.length && actual.every(([key, value]) =>
+      Object.hasOwn(receipt.postFields, key) && receipt.postFields[key] === value
+      && actual.filter(([other]) => other === key).length === 1);
+  } catch { return false; }
+}
+
 async function ownerReceipt(page: Page, tab: RegisteredTab, intent: OwnerSubmitIntent): Promise<string | undefined> {
   const receipt = tab.receipt;
   if (!receipt || page.isClosed() || tab.browser?.ownedPage() !== page) return undefined;
+  const accepted = tab.acceptedPost;
+  if (!accepted || !accepted.isNavigationRequest() || accepted.frame() !== page.mainFrame()
+    || accepted.url() !== receipt.postUrl) return undefined;
+  const response = await accepted.response();
+  if (!response || response.status() < 200 || response.status() >= 300
+    || response.url() !== receipt.postUrl) return undefined;
   const url = page.url();
   if (url === intent.preSubmitUrl || hasUnboundReceiptUrl(tab.binding.jobId, tab.binding.officialUrl, url)) {
     return undefined;
@@ -121,14 +149,15 @@ async function runSubmitAction(tab: RegisteredTab, journal: OwnerSubmitJournal |
   tab.submitting = true;
   try {
     let intent = await journal.read(tab.binding.claimId);
-    if (intent && !sameBinding(intent.binding, tab.binding)) {
+    if (intent && (!sameBinding(intent.binding, tab.binding)
+      || intent.receiptPolicySha256 !== receiptPolicySha256(tab.receipt))) {
       throw new Error("Submit journal belongs to another claim binding");
     }
     if (!intent && request.action === "submit-once") {
       const prepared = await tab.browser.prepareFinalClick(request.ref);
       const currentUrl = prepared.page.url();
       assertBoundSnapshot(tab.binding, { url: currentUrl, title: "", controls: [] });
-      intent = await journal.claim(tab.binding, currentUrl);
+      intent = await journal.claim(tab.binding, currentUrl, receiptPolicySha256(tab.receipt));
       // Only the owner that just persisted this intent may dispatch a click.
       tab.postAllowed = true;
       try { await prepared.click(); } catch { /* An uncertain click is never retried. */ }
@@ -240,21 +269,24 @@ export async function startOwnerInspectionService(input: {
       if (receipt && (!journal || !receipt.company.trim() || !receipt.role.trim()
         || !receipt.phrase.trim() || new URL(receipt.postUrl).origin !== officialOrigin
         || new URL(receipt.postUrl).protocol !== "https:"
-        || hasUnboundReceiptUrl(binding.jobId, binding.officialUrl, receipt.postUrl))) {
+        || hasUnboundReceiptUrl(binding.jobId, binding.officialUrl, receipt.postUrl)
+        || Object.keys(receipt.postFields).length === 0
+        || Object.entries(receipt.postFields).some(([key, value]) => !key || typeof value !== "string"))) {
         throw new Error("Owner submit staging requires a private journal and exact receipt binding");
       }
       const tab: RegisteredTab = { binding: { ...binding },
         inspect: async () => { throw new Error("Browser tab has not been initialized"); },
-        ...(receipt ? { receipt } : {}), postAllowed: false, postCount: 0 };
+        ...(receipt ? { receipt: { ...receipt, postFields: { ...receipt.postFields } } } : {}),
+        postAllowed: false, postCount: 0 };
       // The owner must launch this context with serviceWorkers: "block". This
       // route prevents page JavaScript from submitting by POST while workers
       // have only navigation/snapshot access.
       await context.route("**/*", async (route) => {
         const request = route.request();
         const destination = new URL(request.url());
-        const approvedPost = request.method() === "POST" && tab.postAllowed
-          && tab.postCount === 0 && receipt && destination.href === receipt.postUrl;
-        if (approvedPost) tab.postCount = 1;
+        const approvedPost = tab.postAllowed && tab.postCount === 0
+          && exactFormPost(request, tab);
+        if (approvedPost) { tab.postCount = 1; tab.acceptedPost = request; }
         if (!(approvedPost || (["GET", "HEAD"].includes(request.method())
           && destination.origin === officialOrigin))) {
           await route.abort("blockedbyclient");
