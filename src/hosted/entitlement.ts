@@ -8,6 +8,9 @@ const subscription = z.strictObject({
   status: z.enum(["active", "trialing", "past_due", "unpaid", "paused", "canceled", "incomplete"]),
   startsAt: instant,
   endsAt: instant,
+  // Projected only from a verified settled invoice, never from subscription.status.
+  settledInvoiceId: z.string().min(1),
+  paidThrough: instant,
 });
 const freeGrant = z.strictObject({
   kind: z.literal("free-grant"),
@@ -41,13 +44,16 @@ export function requireHostedAccess(
   const eligible = records.filter((record) => record.subjectId === subjectId
     && Date.parse(record.startsAt) <= now.getTime()
     && now.getTime() < Date.parse(record.endsAt)
+    && (record.kind !== "subscription" || now.getTime() < Date.parse(record.paidThrough))
     && Date.parse(record.startsAt) < Date.parse(record.endsAt)
     && (record.kind === "subscription" ? record.status === "active" :
       record.revokedAt === null));
   if (!eligible.length) throw new Error("Hosted access unavailable");
   eligible.sort((a, b) => Date.parse(b.endsAt) - Date.parse(a.endsAt));
   const chosen = eligible[0]!;
+  const paidEnd = chosen.kind === "subscription" && Date.parse(chosen.paidThrough) < Date.parse(chosen.endsAt)
+    ? chosen.paidThrough : chosen.endsAt;
   return { kind: chosen.kind,
     sourceId: chosen.kind === "subscription" ? chosen.subscriptionId : chosen.grantId,
-    accessUntil: chosen.endsAt };
+    accessUntil: paidEnd };
 }
