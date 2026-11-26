@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Script } from "node:vm";
@@ -13,6 +13,10 @@ describe("local first-run setup", () => {
     try {
       const url = new URL(ui.url);
       const headers = { "x-openapply-token": url.searchParams.get("token")!, origin: url.origin };
+      const readiness = async () => fetch(`${url.origin}/api/readiness`, { headers })
+        .then(async (result) => ({ status: result.status, value: await result.json() }));
+      expect(await readiness()).toEqual({ status: 200,
+        value: { valid: false, compiled: false, current: false } });
       expect((await fetch(`${url.origin}/api/compile`, { method: "POST", headers })).status).toBe(400);
       const fenced = (tag: string, data: unknown) => `\u0060\u0060\u0060${tag}\n${JSON.stringify(data)}\n\u0060\u0060\u0060\n`;
       await writeFile(join(destination, "01-candidate-profile.md"), fenced("openapply-identity-json", {
@@ -34,9 +38,19 @@ describe("local first-run setup", () => {
         compensation: { preferredBaseFloor: 100000 },
         applicationPolicy: { dailyTarget: 10, dailyHardCap: 25, requireFinalApproval: true },
       }));
+      expect(await readiness()).toEqual({ status: 200,
+        value: { valid: true, compiled: false, current: false } });
       const compile = () => fetch(`${url.origin}/api/compile`, { method: "POST", headers });
       expect((await compile()).status).toBe(200);
       expect((await compile()).status).toBe(200);
+      expect(await readiness()).toEqual({ status: 200,
+        value: { valid: true, compiled: true, current: true } });
+      const profileSource = join(destination, "01-candidate-profile.md");
+      if (process.platform !== "win32") {
+        await chmod(profileSource, 0o644);
+        expect((await readiness()).status).toBe(400);
+        await chmod(profileSource, 0o600);
+      }
       const preview = (title: string, description: string) => fetch(`${url.origin}/api/preview`, {
         method: "POST", headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({ title, description }),
@@ -55,9 +69,15 @@ describe("local first-run setup", () => {
       const profile = JSON.parse(await readFile(join(destination, "candidate-profile.json"), "utf8")) as
         { identity: { fullName: string } };
       expect(profile.identity.fullName).toBe("Test Candidate");
-      await writeFile(join(destination, "01-candidate-profile.md"), "changed");
+      const oldSource = await readFile(profileSource, "utf8");
+      await writeFile(profileSource, oldSource.replace("Test Candidate", "Changed Candidate"));
+      expect(await readiness()).toEqual({ status: 200,
+        value: { valid: true, compiled: true, current: false } });
       expect((await compile()).status).toBe(400);
       expect((await readFile(join(destination, "candidate-profile.json"), "utf8"))).toContain("Test Candidate");
+      await writeFile(profileSource, "changed");
+      expect(await readiness()).toEqual({ status: 200,
+        value: { valid: false, compiled: false, current: false } });
     } finally {
       await ui.close();
       await rm(root, { recursive: true, force: true });
@@ -76,10 +96,12 @@ describe("local first-run setup", () => {
       expect(page.headers.get("content-security-policy")).toContain("default-src 'none'");
       const html = await page.text();
       expect(html).toContain("Try a job match");
+      expect(html).toContain("Check readiness");
       const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
       expect(script).toBeTruthy();
       expect(() => new Script(script!)).not.toThrow();
       expect((await fetch(`${origin}/api/templates`)).status).toBe(403);
+      expect((await fetch(`${origin}/api/readiness`)).status).toBe(403);
       const listing = await fetch(`${origin}/api/templates`, { headers: { "x-openapply-token": token } });
       const files = (await listing.json()) as { files: { name: string; content: string; sha256: string }[] };
       expect(files.files).toHaveLength(8);
