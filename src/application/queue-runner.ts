@@ -2,11 +2,15 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota } from "./daily-quota.js";
 import { RetryLedger } from "./retry-ledger.js";
 
-export interface QueueOutcome { jobId: string; status: "processed" | "duplicate" | "cap-reached" | "failed" | "quarantined" }
+export type QueueExecutionStatus = "submitted" | "waiting-human" | "submission-uncertain" | "blocked" | "skipped";
+export interface QueueOutcome {
+  jobId: string;
+  status: "processed" | QueueExecutionStatus | "duplicate" | "cap-reached" | "failed" | "quarantined";
+}
 
 export async function runApplicationQueue(
   jobs: DiscoveredJob[], quota: DailyQuota, retries: RetryLedger, date: () => string, cap: number,
-  execute: (job: DiscoveredJob) => Promise<void>,
+  execute: (job: DiscoveredJob) => Promise<void | QueueExecutionStatus>,
   claimPosting?: (job: DiscoveredJob) => Promise<boolean>,
 ): Promise<QueueOutcome[]> {
   const outcomes: QueueOutcome[] = [];
@@ -44,8 +48,8 @@ export async function runApplicationQueue(
       continue;
     }
     try {
-      await execute(job);
-      outcomes.push({ jobId: job.id, status: "processed" });
+      const status = await execute(job);
+      outcomes.push({ jobId: job.id, status: status ?? "processed" });
     } catch {
       await retries.fail(job.id);
       outcomes.push({ jobId: job.id, status: "failed" });
