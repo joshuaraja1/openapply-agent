@@ -23,4 +23,4 @@ RUN npm ci --include=dev \
 USER openapply
 ENV HOME=/home/openapply
 WORKDIR /work
-ENTRYPOINT ["node", "/app/dist/src/cloud/browser-smoke-cli.js"]
+CMD ["node", "/app/dist/src/cloud/browser-smoke-cli.js"]
