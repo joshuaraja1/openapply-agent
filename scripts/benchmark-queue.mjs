@@ -13,6 +13,9 @@ import { secureWindowsPrivatePath } from "../dist/src/storage/windows-acl.js";
 
 const jobCount = 100;
 const iterations = 5;
+// Hang guard only: Windows fixture setup can spawn several ACL and encryption
+// operations. This limit is not a throughput acceptance threshold.
+const childSafetyTimeoutMs = 120_000;
 const childPath = fileURLToPath(new URL("./queue-recovery-child.mjs", import.meta.url));
 const jobs = Array.from({ length: jobCount }, (_, index) => ({
   id: `synthetic-${String(index).padStart(3, "0")}`,
@@ -54,7 +57,7 @@ function runChild(mode, root, key) {
     });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => worker.kill("SIGKILL"), 15_000);
+    const timer = setTimeout(() => worker.kill("SIGKILL"), childSafetyTimeoutMs);
     worker.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     worker.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     worker.on("error", reject);
@@ -75,7 +78,7 @@ function startClaim(root, key) {
   const ready = new Promise((resolve, reject) => {
     let output = "";
     let stderr = "";
-    const timer = setTimeout(() => { worker.kill("SIGKILL"); reject(new Error("Claim worker timed out")); }, 15_000);
+    const timer = setTimeout(() => { worker.kill("SIGKILL"); reject(new Error("Claim worker timed out")); }, childSafetyTimeoutMs);
     worker.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     worker.stdout.on("data", (chunk) => {
       output += chunk.toString();
