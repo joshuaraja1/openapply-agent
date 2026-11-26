@@ -57,7 +57,8 @@ export function selectFreshnessTier<T extends DiscoveredJob>(
 
 function jobAgeHours(job: DiscoveredJob, now: Date): number {
   const age = (now.getTime() - Date.parse(job.sourcePublishedAt ?? job.firstSeenAt)) / 3_600_000;
-  return Number.isFinite(age) && age >= 0 ? age : Number.POSITIVE_INFINITY;
+  return Number.isFinite(age) && age >= 0
+    ? Math.max(age, (job.sourceAgeLowerBoundDays ?? 0) * 24) : Number.POSITIVE_INFINITY;
 }
 
 /** Dated recent jobs lead; newly observed undated jobs follow, then older postings. */

@@ -71,6 +71,16 @@ describe("job discovery policy", () => {
     expect(freshnessPriority(future, 48, now)).toBe(2);
   });
 
+  it("does not rank a 30-plus-day Workday job as a fresh observation", () => {
+    const now = new Date("2026-01-15T10:00:00Z");
+    const old = evaluateJob({ ...job, id: "workday-old", sourcePublishedAt: null,
+      sourceAgeLowerBoundDays: 30 }, input, { jobs: {} }, now)!;
+    expect(old.freshnessBasis).toBe("first-seen");
+    expect(old.isFresh).toBe(false);
+    expect(freshnessPriority(old, 48, now)).toBe(3);
+    expect(selectFreshnessTier([old], 48, 336, now).jobs).toEqual([]);
+  });
+
   it("allows no age cutoff by default and a configured cutoff when requested", () => {
     expect(input.maximumFreshnessHours).toBeNull();
     expect(discoveryInputSchema.parse({ sources: input.sources,

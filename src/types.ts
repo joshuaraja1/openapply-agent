@@ -15,6 +15,8 @@ export interface NormalizedJob {
   sourceUrl: string;
   sourcePublishedAt: string | null;
   sourceUpdatedAt: string | null;
+  /** Conservative lower bound for provider-relative posting ages. */
+  sourceAgeLowerBoundDays?: number | undefined;
 }
 
 export interface DiscoveredJob extends NormalizedJob {

@@ -23,6 +23,7 @@ export const jobSchema = z.object({
   location: z.string().nullable(), department: z.string().nullable(), employmentType: z.string().nullable(),
   workplaceType: z.string().nullable(), compensation: z.string().nullable(), sourcePublishedAt: z.string().nullable(),
   sourceUpdatedAt: z.string().nullable(), firstSeenAt: z.string(), discoveredAt: z.string(),
+  sourceAgeLowerBoundDays: z.number().int().nonnegative().optional(),
   isNew: z.boolean(), isFresh: z.boolean(), freshnessBasis: z.enum(["source-published", "first-seen"]),
   matchedKeywords: z.array(z.string()),
 });
