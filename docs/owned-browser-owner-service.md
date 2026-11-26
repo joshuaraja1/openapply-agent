@@ -1,0 +1,7 @@
+# Private owner inspection service (staging)
+
+This service is an inactive slice of [issue #153](https://github.com/joshuaraja1/openapply-agent/issues/153). It runs on a user-owned Unix socket in a private directory. A browser-owning process may register an opaque tab ID and a read-only inspection callback. A separate worker process can reconnect and request evidence for that exact tab, claim, official URL, package hash, and artifact hash. Requests and replies are authenticated for one owner generation; replay, changed bindings, and off-requisition URLs fail closed. Tests kill and restart worker processes while the owner service remains alive.
+
+The service does **not** launch Chromium, hold an application tab, dispatch a final click, or mark a job submitted. The application runner still closes its owned browser in `finally`. No production command calls this service. Windows is disabled until named-pipe ACLs are implemented and tested. An uncertain submission still needs the existing candidate-assisted employer receipt check.
+
+Before activating this path, move all owned browser actions behind a separate process; store a private owner secret in the OS secret store; durably record a click intent before any final click; prove one click under crash fault injection; bind a visible employer receipt to the same live tab, requisition, company, role, and saved artifact; then test the exact providers on consented sites. The socket directory must be created as a private user-owned directory before starting the owner.
