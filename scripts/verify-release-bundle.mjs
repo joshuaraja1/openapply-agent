@@ -24,9 +24,10 @@ function verifyNative(platform, file, trusted, run = command) {
     if (!/^[A-Z0-9]{10}$/.test(trusted.appleTeamId ?? "")) throw new Error("Trusted Apple team ID is required");
     const signature = run("pkgutil", ["--check-signature", file]);
     if (!signature.includes("Signed with a trusted timestamp")
-      || !signature.split(/\r?\n/).some((line) =>
-        /^\s*1\. Developer ID Installer: .+ \([A-Z0-9]{10}\)\s*$/.test(line)
-        && line.includes(`(${trusted.appleTeamId})`))) {
+      || !signature.split(/\r?\n/).some((line) => {
+        const match = /^\s*1\. Developer ID Installer: .+ \(([A-Z0-9]{10})\)\s*$/.exec(line);
+        return match?.[1] === trusted.appleTeamId;
+      })) {
       throw new Error("macOS installer is not signed by the trusted Developer ID Installer");
     }
     run("xcrun", ["stapler", "validate", file]);

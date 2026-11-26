@@ -68,6 +68,11 @@ test("manifest signature, platform coverage, and native identity failures block 
       : JSON.stringify({ Status: "UnknownError", Thumbprint: thumbprint });
     assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
       { ...fixture.trusted, appleTeamId: teamId }, "darwin", run), /not signed by the trusted/);
+    const spoofedName = (program) => program === "pkgutil"
+      ? `Signed with a trusted timestamp\n1. Developer ID Installer: Fake (${teamId}) (ZZZZZZZZZZ)`
+      : "accepted";
+    assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
+      { ...fixture.trusted, appleTeamId: teamId }, "darwin", spoofedName), /not signed by the trusted/);
     assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
       { ...fixture.trusted, windowsThumbprint: thumbprint }, "win32", run), /no valid trusted/);
     assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
