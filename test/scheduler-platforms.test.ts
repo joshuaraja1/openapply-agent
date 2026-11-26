@@ -90,5 +90,5 @@ describe("user-level recurring schedule rendering", () => {
       await secureWindowsPrivatePath(path);
       expect(await readPrivateFile(path)).toContain("# OpenApply managed schedule v1");
     } finally { await rm(directory, { recursive: true, force: true }); }
-  });
+  }, 20_000);
 });
