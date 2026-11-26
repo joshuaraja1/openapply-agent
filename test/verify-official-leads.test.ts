@@ -74,12 +74,17 @@ describe("official browser lead verification", () => {
   it("rejects unsafe application destinations even when a matching ID appears in a provider result", async () => {
     for (const applicationUrl of ["http://jobs.example.com/apply",
       "https://127.0.0.1/apply", "https://localhost/apply",
-      "https://jobs.example.com:8443/apply", "https://user:pass@jobs.example.com/apply"]) {
+      "https://127.0.0.1.nip.io/apply", "https://evil.example.com/apply",
+      "https://jobs.example.com:8443/apply", "https://user:pass@jobs.example.com/apply",
+      "https://job-boards.greenhouse.io/example/jobs/5678",
+      "https://job-boards.greenhouse.io/another/jobs/1234"]) {
       expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
         [{ ...live, applicationUrl }])).toHaveLength(0);
     }
     expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
       [{ ...live, provider: "ashby" }])).toHaveLength(0);
+    expect(await verifyOfficialBrowserLeads([lead], new Date(), async () =>
+      [{ ...live, applicationUrl: `${link}?utm_source=board` }])).toHaveLength(1);
   });
 
   it("does not promote stale, incomplete, or failed provider results", async () => {
