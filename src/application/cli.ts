@@ -15,6 +15,8 @@ import { approvedDestinationHost, runApplicationPackage } from "./runner.js";
 import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
+import { confirmOwnedSubmission, loadOwnedConfirmationAttestation } from "./owned-confirm.js";
+import { launchBrowser } from "../browser/runtime.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
 import { loadHandoffNotificationConfig, notificationConfigPathForPackage,
   notifyPendingHandoff } from "./notification.js";
@@ -73,11 +75,17 @@ try {
   const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
     await connection.client.callTool(request) as BrowserToolResult };
   if (confirmJobId) {
-    if (!client) throw new Error("Manual confirmation requires the saved BrowserOS endpoint");
     const attestationPath = process.env.OPENAPPLY_CONFIRMATION_ATTESTATION;
     if (!attestationPath) throw new Error("Manual confirmation requires a private job-bound attestation file");
-    const browser = new NeoApplicationBrowser(client, new Set([approvedDestinationHost(pkg)]), new Map());
-    await confirmManualSubmission(runtimePackage, workflow, browser, await loadManualAttestation(attestationPath));
+    if (runtimePackage.browserRuntime === "owned") {
+      await confirmOwnedSubmission(runtimePackage, workflow,
+        await loadOwnedConfirmationAttestation(attestationPath), profileDirectory,
+        async (directory) => launchBrowser({ profileDirectory: directory, headless: false }));
+    } else {
+      if (!client) throw new Error("Manual confirmation requires the saved BrowserOS endpoint");
+      const browser = new NeoApplicationBrowser(client, new Set([approvedDestinationHost(pkg)]), new Map());
+      await confirmManualSubmission(runtimePackage, workflow, browser, await loadManualAttestation(attestationPath));
+    }
     console.log(JSON.stringify({ jobId: pkg.job.id, stage: "submitted" }));
   } else {
   const result = await runApplicationPackage(runtimePackage, workflow, profileDirectory,

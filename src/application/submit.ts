@@ -1,4 +1,5 @@
 import type { ApplicationWorkflow } from "./state-machine.js";
+import { resolve } from "node:path";
 import type { ApplicationHandoff } from "./handoff.js";
 import { hasUnboundReceiptUrl } from "./requisition.js";
 
@@ -19,6 +20,7 @@ export async function submitApplication(
   browserEndpoint?: string,
   approvedFinalUrl?: string,
   packagePath?: string,
+  ownedProfileDirectory?: string,
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -41,6 +43,7 @@ export async function submitApplication(
   await workflow.advance(jobId, "submit-claimed", {
     browserPageUrl: browser.currentUrl(),
     ...(pageId ? { browserPageId: pageId, browserGroupId: groupId!, browserEndpoint: endpoint! } : {}),
+    ...(!pageId && ownedProfileDirectory ? { ownedProfileDirectory: resolve(ownedProfileDirectory) } : {}),
     ...(packagePath ? { packagePath } : {}),
   });
   try {

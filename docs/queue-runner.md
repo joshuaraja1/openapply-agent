@@ -87,9 +87,18 @@ first acquires the exclusive workflow lease, then marks that exact job
 the click. A killed process may leave `workflow.lock`; follow the inactive-worker
 inspection in [the state guide](sqlite-state.md) before manually removing that
 lock and restarting. Check the employer confirmation before recording success.
-Current manual confirmation requires a saved BrowserOS tab identity. An owned-browser
-submission without that identity stays `submission-uncertain` until a separate
-verified recovery path is available; do not record success from the alert alone.
+An owned-browser submission can be reconciled only while its exact employer
+confirmation tab is still open in the saved private browser profile. The
+candidate must attest to the saved job, official and pre-submit URLs, verified
+résumé digest, profile path, confirmation URL, and expected confirmation text.
+Use `examples/owned-confirmation-attestation.example.json` as the private file
+template. The browser inspection never navigates or clicks Submit. It requires
+the exact confirmation URL on the approved employer host, a visible confirmation
+heading or status, and the original requisition, company, and role on that page.
+If the tab or profile is missing after a restart, or the receipt omits those
+identifiers, leave the application `submission-uncertain` and inspect the
+employer portal manually. Claims made before the owned-profile binding was
+introduced cannot use this reconciliation path.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
@@ -110,7 +119,9 @@ the portal flow yourself. If you submit manually, run
 `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_CONFIRM_JOB_ID=<job-id> OPENAPPLY_CONFIRMATION_ATTESTATION=<private-attestation-file> npm run application:run`
 to verify the employer confirmation in that same tab before recording success.
 The attestation follows `examples/manual-confirmation-attestation.example.json`
-and is your explicit statement that the confirmation belongs to this job.
+for BrowserOS, or `examples/owned-confirmation-attestation.example.json` for
+the owned browser. It is your explicit statement that the confirmation belongs
+to this job; the live employer receipt is also required.
 
 For an owned-browser handoff, set `browserPageId` to `0` in the approved answers
 file. Resume with the same `OPENAPPLY_RESUME_JOB_ID` command. OpenApply reopens

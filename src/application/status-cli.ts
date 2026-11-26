@@ -22,4 +22,9 @@ if (!checkpoint) throw new Error("No application checkpoint exists for that job 
 console.log(JSON.stringify({ jobId: checkpoint.jobId, stage: checkpoint.stage,
   blocker: checkpoint.blocker ?? null, officialUrl: checkpoint.officialUrl,
   browserPageId: checkpoint.browserPageId ?? null, packagePath: checkpoint.packagePath ?? null,
+  ...(checkpoint.stage === "submission-uncertain" ? {
+    preSubmitUrl: checkpoint.browserPageUrl ?? null,
+    ownedProfileDirectory: checkpoint.ownedProfileDirectory ?? null,
+    artifactSha256: checkpoint.artifactSha256 ?? null,
+  } : {}),
   updatedAt: checkpoint.updatedAt }));
