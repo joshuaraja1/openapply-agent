@@ -23,15 +23,22 @@ The default install directory is user-owned: `~/Library/Application Support/Open
 on macOS, `%LOCALAPPDATA%/OpenApply/staging` on Windows, and
 `$XDG_DATA_HOME/openapply/staging` (or `~/.local/share/openapply/staging`) on Linux.
 For isolated tests, append `--root /absolute/test/directory` to each command.
+An existing root must be owned by the current user with owner-only Unix
+permissions or a protected owner-only Windows ACL. Windows custom roots must
+stay inside the current user's LocalAppData. Linked path components and unsafe
+shared ancestors are rejected.
 The installed CLI is under `runtime/node_modules/openapply-agent/dist/src/product-cli.js`
 inside that directory and runs with the current Node installation. No admin
 privileges or global npm installation are needed.
 
-Uninstall checks an OpenApply marker and removes only its managed `runtime`
-directory. Candidate files, SQLite state, keychain secrets, and the shared
+Uninstall checks an OpenApply marker outside the managed `runtime` directory,
+so an interrupted removal can be retried, and removes only that directory.
+Candidate files, SQLite state, keychain secrets, and the shared
 Chromium cache are outside that directory and remain in place. This script
 does not create a launcher, register a scheduler, perform upgrades, or verify
-release signatures. Use it only for controlled staging and testing.
+release signatures or dependency integrity independently of npm registry
+resolution. Use it only for controlled staging and testing; do not publish it
+as a public installer.
 
 ## Requirements for a safe updater
 
