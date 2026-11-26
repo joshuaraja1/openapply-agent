@@ -71,7 +71,7 @@ release artifact.
 
 `npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem /absolute/new-verified-output`
 fails unless an Ed25519-signed manifest names one macOS `.pkg`, one Windows
-`.msi`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
+`.msi` or `.exe`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
 that manifest. Keep the signing key outside the repository. Set
 `OPENAPPLY_RELEASE_KEY_SHA256` to the SHA-256 fingerprint of the trusted
 public-key PEM obtained through a separately trusted channel; the command
@@ -99,7 +99,7 @@ The bundle contains `release-manifest.json`, its raw Ed25519 signature in
   "version": "0.1.0",
   "artifacts": [
     { "platform": "darwin", "file": "OpenApply.pkg", "sha256": "<64 lowercase hex characters>" },
-    { "platform": "win32", "file": "OpenApply.msi", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "win32", "file": "OpenApply-Setup.exe", "sha256": "<64 lowercase hex characters>" },
     { "platform": "linux", "file": "OpenApply.tar.gz", "sha256": "<64 lowercase hex characters>" }
   ]
 }
@@ -112,6 +112,55 @@ Linux distribution artifact is produced. Until those exist and verification
 passes on real artifacts, a public release remains blocked. A Windows
 code-signing certificate or signing service is still needed; do not put its
 private material in repository files or CI logs.
+
+## macOS CLI PKG build
+
+On a macOS build machine with a standalone Node 22.13+ binary, build the
+portable tarball with `npm pack`, then run
+`npm run distribution:macos-pkg -- /absolute/OpenApply.tgz /absolute/new/OpenApply.pkg`.
+The build validates the tarball through the locked installer, bundles the CLI,
+its production dependencies, and the selected standalone Node binary under
+`/Applications/OpenApply`, and creates an `openapply` launcher there. Set
+`OPENAPPLY_MAC_NODE_BINARY` to the absolute path of a standalone Node binary
+if the build process uses a Homebrew Node linked to external libraries. The
+builder rejects such linked binaries so the installed CLI does not depend on
+Homebrew packages on a candidate's machine. It also requires the selected Node
+binary to have the build host's CPU architecture and imports all runtime/native
+dependencies with that copied Node before constructing the PKG.
+
+For a production build, set `OPENAPPLY_APPLE_TEAM_ID`,
+`OPENAPPLY_MAC_APP_IDENTITY` (Developer ID Application),
+`OPENAPPLY_MAC_INSTALLER_IDENTITY` (Developer ID Installer), and
+`OPENAPPLY_MAC_NOTARY_PROFILE` (an existing notarytool Keychain profile). The
+builder signs bundled native code with hardened runtime and timestamp, signs
+the PKG, requires Apple notarization to return `Accepted`, staples the ticket,
+and runs Gatekeeper assessment before moving the artifact to the requested
+output path. Credentials stay in the local Keychain; do not put them in the
+repository or command output. Run `distribution:verify-release` on the final
+PKG as part of a three-platform signed manifest before publishing it.
+
+`--unsigned-smoke` exists solely for local and CI package-structure tests.
+The macOS CI job builds a real unsigned fixture PKG and inspects its package
+identifier and payload. The unsigned drill also expands the PKG into a
+disposable directory, runs its preinstall guard with that directory as the
+Installer destination volume, rejects symlinks in the volume path or its
+`Applications` parent, launches the packaged CLI with its bundled Node,
+confirms a repeat install is refused without changing the runtime, and models
+manual removal and restoration while a separate private-state sentinel remains
+intact. Run it on macOS with a standalone Node 22.13+ binary:
+
+`OPENAPPLY_MAC_TEST_NODE=/absolute/path/to/node npm run distribution:macos-pkg-smoke`
+
+The drill does not invoke macOS Installer, write a system package receipt, test
+an actual upgrade or updater, sign or notarize an artifact, or validate
+Gatekeeper. A clean macOS VM install, upgrade, rollback, and uninstall test
+with the signed and notarized artifact is still required before release. This
+PKG currently installs a CLI, not a graphical first-run application, and it
+does not bundle Chromium, register a scheduler, or provide a safe updater or
+uninstall flow. Issue #59 remains open
+until those tests and signed artifacts pass. Apple documents the Developer ID,
+hardened runtime, and notarization requirements in its
+[notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
 ## Requirements for a safe updater
 
@@ -129,4 +178,6 @@ and uninstall on each supported OS, including browser installation and private
 file permissions. macOS requires validated signing and notarization; Windows
 requires a validated code-signing identity; Linux needs a production
 distribution format and signing process. This preflight covers a portable
-Linux tarball only. No production signing or packaging is configured by this PR.
+Linux tarball only. The supported NSIS Windows build is described in
+[`windows-nsis.md`](windows-nsis.md); it remains a staging path until a real
+certificate-backed signed install and update/rollback drill pass.

@@ -6,7 +6,7 @@ export type QueueExecutionStatus = "submitted" | "waiting-human" | "submission-u
 export interface QueueOutcome {
   jobId: string;
   status: "processed" | QueueExecutionStatus | "duplicate" | "cap-reached" | "failed" | "quarantined"
-    | "provider-paused";
+    | "provider-paused" | "resume-review";
   reason?: string;
 }
 export interface QueuePostingClaimResult {
@@ -18,7 +18,7 @@ export interface QueuePostingClaimResult {
 export async function runApplicationQueue(
   jobs: DiscoveredJob[], quota: DailyQuota, retries: RetryLedger, date: () => string, cap: number,
   execute: (job: DiscoveredJob, reservedDate: string) => Promise<void | QueueExecutionStatus
-    | { status: "provider-paused"; reason: string }>,
+    | { status: "provider-paused" | "resume-review"; reason: string }>,
   claimPosting?: (job: DiscoveredJob) => Promise<boolean | QueuePostingClaimResult>,
   beforeDispatch?: (job: DiscoveredJob) => Promise<string | undefined>,
 ): Promise<QueueOutcome[]> {
@@ -72,7 +72,7 @@ export async function runApplicationQueue(
     }
     try {
       const status = await execute(job, runDate);
-      if (typeof status === "object" && status.status === "provider-paused") {
+      if (typeof status === "object" && ["provider-paused", "resume-review"].includes(status.status)) {
         // This status is returned only by the pre-browser policy check. A
         // newly created canonical claim must not strand a rediscovered job ID.
         await quota.releaseBeforeBrowser(runDate, job.id);

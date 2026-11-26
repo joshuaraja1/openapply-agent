@@ -70,6 +70,28 @@ test("a signed manifest and complete artifact hashes are required on every platf
   }
 });
 
+test("a signed Windows EXE can be retained after native identity verification", () => {
+  const fixture = bundle();
+  try {
+    const msi = fixture.artifacts.find((item) => item.platform === "win32");
+    const exe = { ...msi, file: "OpenApply-Setup.exe" };
+    writeFileSync(join(fixture.root, exe.file), readFileSync(join(fixture.root, msi.file)));
+    fixture.writeManifest({ schemaVersion: 1, version: "0.1.0",
+      artifacts: fixture.artifacts.map((item) => item.platform === "win32" ? exe : item) });
+    const output = join(fixture.root, "verified-exe");
+    const result = verifyReleaseBundle(fixture.root, fixture.keyPath,
+      { ...fixture.trusted, windowsThumbprint: thumbprint }, "win32",
+      (program) => {
+        assert.equal(program, "powershell.exe");
+        return JSON.stringify({ Status: "Valid", Thumbprint: thumbprint });
+      }, output);
+    assert.equal(result.artifactPath, join(output, exe.file));
+    assert.deepEqual(readFileSync(result.artifactPath), readFileSync(join(fixture.root, exe.file)));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("manifest signature, platform coverage, and native identity failures block release", () => {
   const fixture = bundle();
   try {

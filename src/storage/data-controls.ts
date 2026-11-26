@@ -10,6 +10,7 @@ import { ENCRYPTED_STATE_FILES, openActiveSqliteRuntime,
   type LegacyStatePaths } from "./sqlite-runtime.js";
 
 const namespaces = ["applications", "quota", "retries", "postingClaims", "emailClaims"] as const;
+const betaEvidenceFile = "beta-evidence.enc.json";
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 
 export interface LocalStatePaths extends LegacyStatePaths { databasePath: string }
@@ -21,6 +22,7 @@ interface ArchiveManifest { version: 1; entries: ArchiveEntry[] }
 function knownFiles(paths: LocalStatePaths): string[] {
   const files = [paths.databasePath,
     ...Object.values(ENCRYPTED_STATE_FILES).map((name) => join(paths.encryptedDirectory, name)),
+    join(paths.encryptedDirectory, betaEvidenceFile),
     paths.discoveryStatePath, paths.queuePath].map((path) => resolve(path));
   if (new Set(files).size !== files.length) throw new Error("State paths must be distinct");
   return files;
@@ -41,8 +43,13 @@ export async function snapshotLocalState(paths: LocalStatePaths, key: Uint8Array
   if (active) {
     try {
       active.assertLegacyPaths(paths);
-      return { version: 1, source: "sqlite", records: Object.fromEntries(
-        [...namespaces, "discovery", "queue"].map((name) => [name, active.snapshot(name)])) };
+      const betaPath = join(paths.encryptedDirectory, betaEvidenceFile);
+      if (await exists(betaPath)) await assertPrivateFile(betaPath);
+      return { version: 1, source: "sqlite", records: {
+        ...Object.fromEntries([...namespaces, "discovery", "queue"]
+          .map((name) => [name, active.snapshot(name)])),
+        betaEvidence: await new EncryptedApplicationStateStore<unknown>(betaPath, key).snapshotRecords(),
+      } };
     } finally { active.close(); }
   }
   const records: Snapshot["records"] = {};
@@ -51,6 +58,9 @@ export async function snapshotLocalState(paths: LocalStatePaths, key: Uint8Array
     if (await exists(file)) await assertPrivateFile(file);
     records[name] = await new EncryptedApplicationStateStore<unknown>(file, key).snapshotRecords();
   }
+  const betaPath = join(paths.encryptedDirectory, betaEvidenceFile);
+  if (await exists(betaPath)) await assertPrivateFile(betaPath);
+  records.betaEvidence = await new EncryptedApplicationStateStore<unknown>(betaPath, key).snapshotRecords();
   for (const [name, file] of [["discovery", paths.discoveryStatePath],
     ["queue", paths.queuePath]] as const) {
     if (await exists(file)) records[name] = [{ id: "current", version: 1,

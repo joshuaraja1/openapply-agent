@@ -1,0 +1,95 @@
+name: Windows NSIS installer staging
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-nsis-installer.yml'
+      - 'installers/windows-nsis/**'
+      - 'scripts/verify-release-bundle*'
+      - 'scripts/locked-tarball-install.mjs'
+      - 'scripts/pack-runtime-lock.mjs'
+      - 'src/product-cli.ts'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  unsigned-nsis-smoke:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install supported NSIS compiler
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.13.0 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS compiler installation failed' }
+      - run: npm ci
+      - name: Build, install, and remove unsigned NSIS package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveName = (npm pack --silent | Select-Object -Last 1).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed' }
+          $archive = (Resolve-Path -LiteralPath $archiveName).Path
+          $payload = Join-Path $env:RUNNER_TEMP 'openapply-nsis-payload'
+          npm run distribution:locked-install -- $archive $payload
+          if ($LASTEXITCODE -ne 0) { throw 'Locked package install failed' }
+          Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination (Join-Path $payload 'node.exe')
+          $setup = Join-Path $env:RUNNER_TEMP 'OpenApply-unsigned-setup.exe'
+          & ./installers/windows-nsis/build.ps1 -PayloadRoot $payload -OutputPath $setup
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS build failed' }
+          $runtime = Join-Path $env:LOCALAPPDATA 'OpenApply\runtime'
+          $private = Join-Path $env:LOCALAPPDATA 'OpenApply\candidate-state-sentinel.txt'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $private) -Force | Out-Null
+          Set-Content -LiteralPath $private -Value 'private-state-must-remain'
+          $install = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "NSIS install failed: $($install.ExitCode)" }
+          $launcher = Join-Path $runtime 'openapply.cmd'
+          & $launcher --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed CLI failed to start' }
+          $again = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($again.ExitCode -eq 0) { throw 'Existing runtime was overwritten' }
+          & $launcher --help
+          if ($LASTEXITCODE -ne 0) { throw 'Original runtime was damaged by refused reinstall' }
+          $uninstall = Join-Path $runtime 'Uninstall.exe'
+          $external = Join-Path $env:LOCALAPPDATA 'OpenApply\candidate-external'
+          New-Item -ItemType Directory -Path $external -Force | Out-Null
+          $externalSentinel = Join-Path $external 'sentinel.txt'
+          Set-Content -LiteralPath $externalSentinel -Value 'outside-runtime-must-remain'
+          $docs = Join-Path $runtime 'package\docs'
+          $docsBackup = Join-Path $runtime 'package\docs.original'
+          Rename-Item -LiteralPath $docs -NewName 'docs.original'
+          New-Item -ItemType Junction -Path $docs -Target $external | Out-Null
+          Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')) -or
+              (Get-Content -LiteralPath $externalSentinel -Raw).Trim() -ne 'outside-runtime-must-remain') {
+            throw 'Uninstall followed a linked package directory'
+          }
+          Remove-Item -LiteralPath $docs -Force
+          if ((Get-Content -LiteralPath $externalSentinel -Raw).Trim() -ne 'outside-runtime-must-remain') {
+            throw 'Junction fixture cleanup changed candidate data'
+          }
+          Rename-Item -LiteralPath $docsBackup -NewName 'docs'
+          $userFile = Join-Path $runtime 'user-note.txt'
+          Set-Content -LiteralPath $userFile -Value 'user-added-file-must-remain'
+          $removed = Start-Process -FilePath $uninstall -ArgumentList '/S' -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "NSIS uninstall failed: $($removed.ExitCode)" }
+          for ($i = 0; $i -lt 30 -and (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')); $i++) {
+            Start-Sleep -Seconds 1
+          }
+          if (Test-Path -LiteralPath (Join-Path $runtime 'node.exe')) { throw 'Runtime remained after uninstall' }
+          if ((Get-Content -LiteralPath $private -Raw).Trim() -ne 'private-state-must-remain') {
+            throw 'Uninstall changed candidate state outside runtime'
+          }
+          if ((Get-Content -LiteralPath $userFile -Raw).Trim() -ne 'user-added-file-must-remain') {
+            throw 'Uninstall deleted a user-added runtime file'
+          }
+          Remove-Item -LiteralPath $userFile
+          Remove-Item -LiteralPath $runtime
+          & ./installers/windows-nsis/test-update-rollback.ps1 -LockedPayloadRoot $payload
