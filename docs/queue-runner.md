@@ -121,6 +121,27 @@ to verify the employer confirmation in that same tab before recording success.
 The attestation follows `examples/manual-confirmation-attestation.example.json`
 and is your explicit statement that the confirmation belongs to this job.
 
+If an owned-browser submission is `submission-uncertain`, OpenApply never retries
+the final click. The owned browser profile preserves sign-in state, but a closed
+Chromium context does not restore its receipt tab. To reconcile manually, run
+`OPENAPPLY_PACKAGE=<original-private-package-path> npm run application:verify-owned`.
+In the opened private browser, sign in if necessary and open the employer's
+application receipt or status for that exact job. Type the exact job ID and
+explicitly attest that you used your own employer account and submitted this
+application. OpenApply then reads the live page without clicking or
+navigating. It records `submitted` only if the saved package and verified résumé
+match the uncertain claim and one visible receipt on the original requisition
+path contains the company, role, exact requisition, and configured confirmation
+phrase in one semantic receipt block. The receipt must be on a different path
+from the pre-submit page. If the employer portal does not
+show all that evidence, the application stays uncertain; inspect the employer
+portal or confirmation email outside OpenApply before deciding whether to retry.
+The prompt expires after two minutes and closes the browser; rerun the command
+when ready. The workflow lease is acquired only for the final state check and
+update. While this browser window is open, a scheduled queue that needs the
+same private profile may fail fast on the profile lock; it can retry after the
+verification window closes.
+
 For an owned-browser handoff, set `browserPageId` to `0` in the approved answers
 file. Resume with the same `OPENAPPLY_RESUME_JOB_ID` command. OpenApply reopens
 the verified requisition in its private profile and refills the résumé and

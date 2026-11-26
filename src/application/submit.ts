@@ -19,6 +19,7 @@ export async function submitApplication(
   browserEndpoint?: string,
   approvedFinalUrl?: string,
   packagePath?: string,
+  packageSha256?: string,
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -42,6 +43,7 @@ export async function submitApplication(
     browserPageUrl: browser.currentUrl(),
     ...(pageId ? { browserPageId: pageId, browserGroupId: groupId!, browserEndpoint: endpoint! } : {}),
     ...(packagePath ? { packagePath } : {}),
+    ...(packageSha256 ? { packageSha256 } : {}),
   });
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);

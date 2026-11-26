@@ -14,6 +14,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   autopilot: () => import("./application/autopilot-cli.js"),
   "application:status": () => import("./application/status-cli.js"),
   "application:review": () => import("./application/uncertain-review-cli.js"),
+  "application:verify-owned": () => import("./application/owned-confirm-cli.js"),
   handoff: () => import("./application/handoff-ui-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
   "state:control": () => import("./storage/data-controls-cli.js"),
