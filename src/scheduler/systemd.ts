@@ -3,23 +3,30 @@ import { lstat, mkdir, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readPrivateFile } from "../storage/private-path.js";
 import type { ScheduleConfig } from "./launchd.js";
 import { validateSchedule } from "./common.js";
 
 const exec = promisify(execFile);
 const name = "openapply-agent";
+const marker = "# OpenApply managed schedule v1";
 const unitDirectory = () => join(userInfo().homedir, ".config", "systemd", "user");
 
 function unitValue(value: string): string {
-  if (/[\r\n\0]/.test(value)) throw new Error("Scheduler paths cannot contain control characters");
+  if (/[\r\n\0$]/.test(value)) throw new Error("Scheduler path contains a control or expansion character");
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
 export function systemdUnits(config: ScheduleConfig, nodePath: string, script: string,
   logs: string): { service: string; timer: string } {
-  const service = `[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitValue(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitValue(join(logs, "autopilot.out.log"))}\nStandardError=append:${unitValue(join(logs, "autopilot.err.log"))}\n`;
-  const timer = `[Unit]\nDescription=Run OpenApply on a local schedule\n\n[Timer]\nOnStartupSec=1min\nOnUnitInactiveSec=${config.intervalMinutes}min\nUnit=${name}.service\n\n[Install]\nWantedBy=timers.target\n`;
+  const service = `${marker}\n[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitValue(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitValue(join(logs, "autopilot.out.log"))}\nStandardError=append:${unitValue(join(logs, "autopilot.err.log"))}\n`;
+  const timer = `${marker}\n[Unit]\nDescription=Run OpenApply on a local schedule\n\n[Timer]\nOnStartupSec=1min\nOnUnitInactiveSec=${config.intervalMinutes}min\nUnit=${name}.service\n\n[Install]\nWantedBy=timers.target\n`;
   return { service, timer };
+}
+
+export function isManagedSystemdUnits(service: string, timer: string): boolean {
+  return service.startsWith(`${marker}\n`) && timer.startsWith(`${marker}\n`)
+    && service.includes("ExecStart=") && timer.includes(`Unit=${name}.service`);
 }
 
 export async function installSystemdTimer(config: ScheduleConfig, nodePath = process.execPath): Promise<string> {
@@ -54,8 +61,14 @@ export async function installSystemdTimer(config: ScheduleConfig, nodePath = pro
 
 export async function removeSystemdTimer(): Promise<void> {
   if (process.platform !== "linux") throw new Error("systemd user timers require Linux");
+  const service = join(unitDirectory(), `${name}.service`);
+  const timer = join(unitDirectory(), `${name}.timer`);
+  const [serviceText, timerText] = await Promise.all([readPrivateFile(service), readPrivateFile(timer)]);
+  if (!isManagedSystemdUnits(serviceText, timerText)) {
+    throw new Error("Refusing to remove a scheduler definition not managed by OpenApply");
+  }
   await exec("systemctl", ["--user", "disable", "--now", `${name}.timer`]);
-  await unlink(join(unitDirectory(), `${name}.timer`));
-  await unlink(join(unitDirectory(), `${name}.service`));
+  await unlink(timer);
+  await unlink(service);
   await exec("systemctl", ["--user", "daemon-reload"]);
 }

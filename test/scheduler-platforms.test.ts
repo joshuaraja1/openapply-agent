@@ -5,8 +5,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { scheduleConfigSchema } from "../src/scheduler/launchd.js";
-import { systemdUnits } from "../src/scheduler/systemd.js";
-import { windowsRegistrationScript, windowsRunner } from "../src/scheduler/windows.js";
+import { isManagedSystemdUnits, systemdUnits } from "../src/scheduler/systemd.js";
+import { windowsRegistrationScript, windowsRemovalScript, windowsRunner } from "../src/scheduler/windows.js";
 
 const config = scheduleConfigSchema.parse({ version: 1,
   repositoryPath: "/private/OpenApply Project", queueConfigPath: "/private/queue.json",
@@ -28,6 +28,8 @@ describe("user-level recurring schedule rendering", () => {
     expect(timer).toContain("OnUnitInactiveSec=60min");
     expect(timer).toContain("WantedBy=timers.target");
     expect(service).not.toContain("npm run");
+    expect(isManagedSystemdUnits(service, timer)).toBe(true);
+    expect(isManagedSystemdUnits(service.replace("OpenApply managed", "Other managed"), timer)).toBe(false);
   });
 
   it("escapes systemd expansion and rejects control characters", () => {
@@ -36,6 +38,8 @@ describe("user-level recurring schedule rendering", () => {
     expect(escaped.service).toContain("100%% queue.json");
     expect(() => systemdUnits({ ...config, queueConfigPath: "/private/bad\npath" },
       "/usr/bin/node", "/private/run.js", "/private/logs")).toThrow(/control/);
+    expect(() => systemdUnits({ ...config, queueConfigPath: "/private/$HOME/queue.json" },
+      "/usr/bin/node", "/private/run.js", "/private/logs")).toThrow(/expansion/);
   });
 
   it.runIf(process.platform === "linux")("passes systemd's unit verifier", async () => {
@@ -68,5 +72,9 @@ describe("user-level recurring schedule rendering", () => {
     expect(script).toContain("-RepetitionInterval (New-TimeSpan -Minutes 60)");
     expect(script).not.toMatch(/-Password|-LogonType Password/i);
     expect(() => windowsRegistrationScript(config, "C:\\bad\"path")).toThrow();
+    const removal = windowsRemovalScript("C:\\Users\\Example\\scheduled-run.ps1");
+    expect(removal).toContain("Refusing to remove a task not managed by OpenApply");
+    expect(removal).toContain("$task.Actions[0].Arguments -ne");
+    expect(removal).toContain("$task.Principal.LogonType -ne 'Interactive'");
   });
 });
