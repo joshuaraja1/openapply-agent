@@ -90,3 +90,6 @@ jobs:
           if ((Get-Content -LiteralPath $userFile -Raw).Trim() -ne 'user-added-file-must-remain') {
             throw 'Uninstall deleted a user-added runtime file'
           }
+          Remove-Item -LiteralPath $userFile
+          Remove-Item -LiteralPath $runtime
+          & ./installers/windows-nsis/test-update-rollback.ps1 -LockedPayloadRoot $payload

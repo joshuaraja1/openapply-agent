@@ -12,6 +12,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $payload 'node.exe') -PathType Leaf)
   throw 'Payload must contain node.exe and a locked, built OpenApply package'
 }
 if (Test-Path -LiteralPath $output) { throw 'Output installer already exists' }
+if ($Sign -and ($env:OPENAPPLY_WINDOWS_CERT_THUMBPRINT -notmatch '^[A-Fa-f0-9]{40}$' -or
+    $env:OPENAPPLY_WINDOWS_TIMESTAMP_URL -notmatch '^https://')) {
+  throw 'A Windows signing thumbprint and HTTPS timestamp URL are required'
+}
 $compiler = Get-Command makensis.exe -ErrorAction SilentlyContinue
 $binary = if ($compiler) { $compiler.Source } else {
   Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
@@ -61,10 +65,6 @@ $lines.Add('!macroend')
 $script = Join-Path $PSScriptRoot 'OpenApply.nsi'
 $args = @('/V2', "/DPAYLOAD_ROOT=$payload", "/DOUTPUT_FILE=$output", "/DFILE_MANIFEST=$manifest")
 if ($Sign) {
-  if ($env:OPENAPPLY_WINDOWS_CERT_THUMBPRINT -notmatch '^[A-Fa-f0-9]{40}$' -or
-      $env:OPENAPPLY_WINDOWS_TIMESTAMP_URL -notmatch '^https://') {
-    throw 'A Windows signing thumbprint and HTTPS timestamp URL are required'
-  }
   $args += "/DSIGN_SCRIPT=$(Join-Path $PSScriptRoot 'sign.ps1')"
 }
 $args += $script
