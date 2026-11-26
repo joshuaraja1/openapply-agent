@@ -18,8 +18,9 @@ The script builds a job-specific source with `createJakeResumeSource` from a
 fixed synthetic candidate and job. Each sample starts a new Tectonic process,
 compiles in a private temporary directory using `--only-cached --untrusted`,
 then runs the existing `verifyResumePdf` checks on the resulting PDF. It never
-uses a real candidate file, an Overleaf account, or a network fetch from
-Tectonic. The optional `OPENAPPLY_KEEP_SYNTHETIC_BENCH=1` retains synthetic
+uses a real candidate file or an Overleaf account. `--only-cached` prevents
+fetching uncached TeX support files; it does not enforce general network
+isolation. The optional `OPENAPPLY_KEEP_SYNTHETIC_BENCH=1` retains synthetic
 output for visual inspection; the default deletes it. No PDF is committed.
 
 ## Observed result
