@@ -65,7 +65,7 @@ export interface ApplicationBrowserSurface {
   navigate(url: string): Promise<BrowserSnapshot>;
   act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot>;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
-  fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
+  fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot | import("./form-mapper.js").BatchFillResult>;
   pageId?(): number | undefined;
   groupId?(): string | undefined;
   attach?(pageId: number, expectedUrl: string, expectedGroupId: string,
@@ -499,7 +499,8 @@ export async function runApplicationPackage(
             continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
             dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined,
             dependencies.beforeFinalSubmit
-              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined);
+              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined,
+            { company: job.company, title: job.title });
           checkpoint = (await workflow.current(job.id))!;
         }
       }

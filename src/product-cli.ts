@@ -14,6 +14,8 @@ const commands: Record<string, () => Promise<unknown>> = {
   autopilot: () => import("./application/autopilot-cli.js"),
   "queue:run": () => import("./application/queue-cli.js"),
   "application:run": () => import("./application/cli.js"),
+  "schedule:install": async () => (await import("./scheduler/cli.js")).runScheduleAction("install"),
+  "schedule:remove": async () => (await import("./scheduler/cli.js")).runScheduleAction("remove"),
   "application:status": () => import("./application/status-cli.js"),
   "application:review": () => import("./application/uncertain-review-cli.js"),
   "application:verify-owned": () => import("./application/owned-confirm-cli.js"),
