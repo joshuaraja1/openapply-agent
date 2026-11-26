@@ -133,7 +133,9 @@ export async function restoreLocalState(paths: LocalStatePaths, archivePath: str
   if (confirmedInactive !== true) throw new Error("Stop workers and confirm inactivity first");
   await ensurePrivateDirectory(archivePath);
   const manifest = parseManifest(await readPrivateFile(join(archivePath, "manifest.json")), paths);
-  let restored = 0;
+  const toRestore: ArchiveEntry[] = [];
+  // Preflight the entire archive before moving any file; a late conflict must
+  // not leave a half-restored state directory.
   for (const entry of manifest.entries) {
     const saved = join(archivePath, entry.saved);
     if (!await exists(saved)) {
@@ -148,12 +150,14 @@ export async function restoreLocalState(paths: LocalStatePaths, archivePath: str
     if (sha256(await readFile(saved)) !== entry.digest || await exists(entry.original)) {
       throw new Error("Archive changed or newer state exists; refusing to overwrite");
     }
+    toRestore.push(entry);
+  }
+  for (const entry of toRestore) {
     await ensurePrivateDirectory(dirname(entry.original));
-    await rename(saved, entry.original);
-    restored++;
+    await rename(join(archivePath, entry.saved), entry.original);
   }
   await rm(archivePath, { recursive: true, force: false });
-  return restored;
+  return toRestore.length;
 }
 
 /** Irreversible phase: only a complete archive of the configured state can be purged. */

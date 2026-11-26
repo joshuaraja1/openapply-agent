@@ -48,10 +48,12 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("confirm inactivity");
       expect(await quarantineLocalState(f.paths, f.key, f.output, f.archive, true)).toBe(3);
       expect(await f.applications.read("job:1")).toBeUndefined();
-      await f.applications.compareAndSwap("job:new", undefined, { stage: "found" });
+      await writeFile(f.paths.queuePath, JSON.stringify({ queue: [{ id: "new" }] }), { mode: 0o600 });
+      if (process.platform === "win32") await secureWindowsPrivatePath(f.paths.queuePath);
       await expect(restoreLocalState(f.paths, f.archive, true))
         .rejects.toThrow("refusing to overwrite");
-      await rm(join(f.privateDir, "applications.enc.json"));
+      expect(await f.applications.read("job:1")).toBeUndefined();
+      await rm(f.paths.queuePath);
       expect(await restoreLocalState(f.paths, f.archive, true)).toBe(3);
       expect((await f.applications.read("job:1"))?.state)
         .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
