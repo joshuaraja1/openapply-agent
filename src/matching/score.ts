@@ -78,11 +78,25 @@ export function scoreJob(
     salaryTarget,
     reviewFlags: ["Review candidate evidence or this role manually"],
   };
+  const arrangement = `${job.location ?? ""} ${job.workplaceType ?? ""}`.toLowerCase();
+  const requiredArrangement = /\b(?:on[ -]?site|in[ -]?office|five days? (?:per week )?in (?:the )?office)\b/i.test(`${job.descriptionText} ${arrangement}`)
+    ? "on-site" : /\bhybrid\b/i.test(arrangement) ? "hybrid" : /\bremote\b/i.test(arrangement) ? "remote" : null;
+  const accepted = [...preferences.workArrangements.preferred, ...preferences.workArrangements.accepted]
+    .map((value) => value.toLowerCase().replace(/on\s*site|onsite/, "on-site"));
+  const arrangementBlockers: string[] = [];
+  if (requiredArrangement && !accepted.includes(requiredArrangement)) {
+    arrangementBlockers.push(`${requiredArrangement} work arrangement is outside candidate preferences`);
+  }
+  if (requiredArrangement && requiredArrangement !== "remote" && job.location
+    && !job.location.toLowerCase().includes(candidate.identity.location.split(",")[0]!.toLowerCase())) {
+    arrangementBlockers.push("Onsite or hybrid location needs candidate confirmation");
+  }
   const hardRequirements = assessHardRequirements(job.descriptionText, candidate);
-  if (hardRequirements.blockers.length) return {
+  const blockers = [...arrangementBlockers, ...hardRequirements.blockers];
+  if (blockers.length) return {
     eligible: false,
     score: 0,
-    reasons: hardRequirements.blockers,
+    reasons: blockers,
     matchedSkills: matchedSkills.sort(),
     salaryTarget,
     reviewFlags: ["Review mandatory qualifications before applying"],
@@ -96,7 +110,6 @@ export function scoreJob(
     score += 15;
     reasons.push("Explicit early-career signal");
   }
-  const arrangement = `${job.location ?? ""} ${job.workplaceType ?? ""}`.toLowerCase();
   if (arrangement.includes("remote")) score += 15;
   else if (arrangement.includes("hybrid")) score += 8;
   else reviewFlags.push("Work arrangement needs review");
