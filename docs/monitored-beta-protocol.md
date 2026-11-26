@@ -3,6 +3,8 @@
 This is the operating plan for the two-week release gate in
 `autonomy-release-requirements.md`. It is not evidence that a beta has started or
 passed. No synthetic identity is submitted to a real employer.
+Use the [provider beta runbook](provider-beta-runbook.md) for the per-provider
+evidence matrix, one-application smoke procedure, and go/no-go record.
 
 ## Entry gate
 
