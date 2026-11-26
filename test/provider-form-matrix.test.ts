@@ -5,7 +5,7 @@ import type { BrowserControl, BrowserSnapshot } from "../src/browser/actions.js"
 import type { Provider } from "../src/types.js";
 
 // These are contract cases, not 100 employer submissions. The browser suite
-// separately exercises navigation, upload, and job-bound confirmation.
+// separately exercises synthetic navigation, upload, and local confirmation.
 const candidate = candidateProfileSchema.parse({
   version: 1,
   identity: { fullName: "Test Candidate", email: "test@example.com", phone: "555-0100",
@@ -67,15 +67,25 @@ for (const provider of ["greenhouse", "ashby"] as const) {
             const snapshot: BrowserSnapshot = { url: "https://jobs.example.com/apply/123456",
               title: "Synthetic application", controls,
               visibleText: hazard === "captcha" ? "Verify you are human with CAPTCHA" : "Apply" };
-            const plan = planApplicationForm(snapshot, candidate, "/tmp/verified-resume.pdf", { provider });
+            const plan = planApplicationForm(snapshot, candidate, "/tmp/fixture-resume.pdf", { provider });
             const browser = { act: vi.fn().mockResolvedValue(snapshot) };
             const result = await fillApplicationForm(browser as never, snapshot, candidate,
-              "/tmp/verified-resume.pdf", { provider });
+              "/tmp/fixture-resume.pdf", { provider });
 
             if (hazard === "clean") {
               expect(plan.blockers).toEqual([]);
+              for (const name of names) {
+                const fieldName = name === "provider-name"
+                  ? provider === "ashby" ? "Your name" : "Full name" : name;
+                const expectedValue = /^(first name|given name)$/i.test(fieldName) ? "Test"
+                  : /^(last name|family name|surname)$/i.test(fieldName) ? "Candidate"
+                    : "Test Candidate";
+                expect(plan.actions).toContainEqual(expect.objectContaining({
+                  name: fieldName, action: "fill", value: expectedValue,
+                }));
+              }
               expect(plan.actions).toContainEqual(expect.objectContaining({
-                name: "Resume", action: "upload", value: "/tmp/verified-resume.pdf",
+                name: "Resume", action: "upload", value: "/tmp/fixture-resume.pdf",
               }));
               expect(plan.actions).toContainEqual(expect.objectContaining({
                 name: "Email", action: "fill", value: "test@example.com",
