@@ -84,6 +84,9 @@ workers, set `OPENAPPLY_QUEUE_CONFIG`, then run
 files. To export current state back before disabling SQLite, stop the workers
 and run `npm run state:cutover -- --rollback --confirm-inactive`. See the
 [migration and recovery guide](docs/sqlite-state.md) before using either command.
+To export or delete only the local application-state ledgers and queue, follow
+the [state export and deletion guide](docs/data-controls.md). It uses an explicit
+quarantine and restore step before permanent purge.
 
 For a single application, create private render input containing the selected
 `job`, its configured official `source`, `candidate`, browser settings,

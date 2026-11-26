@@ -15,6 +15,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "application:status": () => import("./application/status-cli.js"),
   handoff: () => import("./application/handoff-ui-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
+  "state:control": () => import("./storage/data-controls-cli.js"),
 };
 
 const command = process.argv[2];

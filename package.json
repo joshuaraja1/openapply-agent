@@ -19,6 +19,7 @@
     "application:status": "tsx src/application/status-cli.ts",
     "handoff:ui": "tsx src/application/handoff-ui-cli.ts",
     "state:cutover": "tsx src/storage/sqlite-cutover-cli.ts",
+    "state:control": "tsx src/storage/data-controls-cli.ts",
     "queue:run": "tsx src/application/queue-cli.ts",
     "autopilot": "tsx src/application/autopilot-cli.ts",
     "profile:compile": "tsx src/candidate/markdown-cli.ts",
