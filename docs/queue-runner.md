@@ -89,6 +89,9 @@ first acquires the exclusive workflow lease, then marks that exact job
 It never retries the click. A killed process may leave `workflow.lock`; follow the inactive-worker
 inspection in [the state guide](sqlite-state.md) before manually removing that
 lock and restarting. Check the employer confirmation before recording success.
+Current manual confirmation requires a saved BrowserOS tab identity. An owned-browser
+submission without that identity stays `submission-uncertain` until a separate
+verified recovery path is available; do not record success from the alert alone.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
