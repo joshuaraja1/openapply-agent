@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { encodeCloudRunEnvelope } from "../src/cloud/run-envelope.js";
-import { handleQueuedApplication, type CloudRunPorts, type VerifiedReceipt }
+import { handleQueuedApplication, receiptArtifactId, type CloudRunPorts, type VerifiedReceipt }
   from "../src/cloud/queued-run.js";
 
 const candidateId = "ec5a592a-a5ea-409f-b21b-0064558c72bb";
@@ -21,12 +21,16 @@ function harness() {
   let status: "not_started" | "needs_reconciliation" | "confirmed" = "not_started";
   let busy = false;
   let leaseRenewalSucceeds = true;
+  let intentWriteSucceeds = true;
+  let confirmSucceeds = true;
+  let storedArtifactId: string | undefined;
   let authorized = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
   let clickThrows = false;
   let failsBeforeClick = false;
   let prepareThrows = false;
   let ackThrows = false;
+  let cleanupThrows = false;
   const ports: CloudRunPorts = {
     authorization: { async authorize() { events.push("authorize"); return authorized; } },
     journal: {
@@ -36,12 +40,18 @@ function harness() {
       async submissionStatus() { events.push("status"); return status; },
       async beginSubmission() {
         events.push("intent");
+        if (!intentWriteSucceeds) return false;
         if (status !== "not_started") return false;
         status = "needs_reconciliation";
         return true;
       },
       async markUncertain() { events.push("uncertain"); },
-      async confirmAfterVerification() { events.push("confirmed"); status = "confirmed"; return true; },
+      async confirmAfterVerification() {
+        events.push("confirmed");
+        if (!confirmSucceeds) return false;
+        status = "confirmed";
+        return true;
+      },
     },
     runRecords: {
       async load() { events.push("load"); return { profileArtifactId: runId, job }; },
@@ -49,9 +59,12 @@ function harness() {
     vault: {
       async restoreToPrivateTemp() {
         events.push("restore");
-        return { path: "/private/test-profile", async cleanup() { events.push("cleanup"); } };
+        return { path: "/private/test-profile", async cleanup() {
+          events.push("cleanup");
+          if (cleanupThrows) throw new Error("private profile cleanup failed");
+        } };
       },
-      async put() { events.push("receipt-stored"); },
+      async put(_candidateId, artifactId) { storedArtifactId = artifactId; events.push("receipt-stored"); },
     },
     application: {
       async prepare() {
@@ -75,13 +88,17 @@ function harness() {
     ports, events,
     setBusy(value: boolean) { busy = value; },
     setLeaseRenewalSucceeds(value: boolean) { leaseRenewalSucceeds = value; },
+    setIntentWriteSucceeds(value: boolean) { intentWriteSucceeds = value; },
+    setConfirmSucceeds(value: boolean) { confirmSucceeds = value; },
     setAuthorized(value: boolean) { authorized = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
     setFailsBeforeClick(value: boolean) { failsBeforeClick = value; },
     setPrepareThrows(value: boolean) { prepareThrows = value; },
     setClickResult(value: VerifiedReceipt | null) { clickResult = value; },
     setAckThrows(value: boolean) { ackThrows = value; },
+    setCleanupThrows(value: boolean) { cleanupThrows = value; },
     getStatus() { return status; },
+    getStoredArtifactId() { return storedArtifactId; },
   };
 }
 
@@ -120,6 +137,15 @@ describe("cloud queued application bridge", () => {
     expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
     expect(h.events).toContain("cleanup");
     expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
+  });
+
+  it("retries a rejected intent write when no durable intent exists", async () => {
+    const h = harness();
+    h.setIntentWriteSucceeds(false);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
+    expect(h.getStatus()).toBe("not_started");
     expect(h.events).not.toContain("click");
     expect(h.events).not.toContain("ack");
   });
@@ -177,6 +203,29 @@ describe("cloud queued application bridge", () => {
     h.events.length = 0;
     expect(await handleQueuedApplication(message(), h.ports)).toBe("already_confirmed");
     expect(h.events).not.toContain("click");
+  });
+
+  it("does not acknowledge before private profile cleanup and lease release", async () => {
+    const h = harness();
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("confirmed");
+    expect(h.events.indexOf("cleanup")).toBeLessThan(h.events.indexOf("ack"));
+    expect(h.events.indexOf("release")).toBeLessThan(h.events.indexOf("ack"));
+    const bad = harness();
+    bad.setCleanupThrows(true);
+    await expect(handleQueuedApplication(message(), bad.ports)).rejects.toThrow("cleanup failed");
+    expect(bad.events).not.toContain("ack");
+  });
+
+  it("retains a stable receipt pointer when confirmation loses the lease after a click", async () => {
+    const h = harness();
+    h.setConfirmSucceeds(false);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.getStoredArtifactId()).toBe(receiptArtifactId(candidateId, job));
+    expect(h.events).not.toContain("ack");
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).not.toContain("click");
+    expect(receiptArtifactId(candidateId, job)).toBe(h.getStoredArtifactId());
   });
 
   it("rejects discovery messages before acquiring a candidate lease", async () => {

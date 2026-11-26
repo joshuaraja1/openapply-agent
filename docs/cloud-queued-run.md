@@ -14,6 +14,11 @@ ambiguous browser result, mismatched requisition, or receipt failure leaves
 the message unacknowledged for reconciliation. A second delivery must not click
 Submit. The queue receipt is deleted only after exact-job confirmation evidence
 is encrypted in the vault and its digest is committed to the durable journal.
+Private profile cleanup and lease release complete before queue acknowledgment.
+Receipt artifact IDs are derived from the candidate and official requisition,
+so reconciliation can find evidence even if the worker dies after vault storage
+but before journal confirmation. The vault's create-only put rejects rewriting
+that evidence.
 
 This is **not a live cloud application worker**. No SQS poller, run-record
 loader, browser action, independent receipt verifier, or remote handoff service
