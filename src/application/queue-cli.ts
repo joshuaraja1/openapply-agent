@@ -9,6 +9,7 @@ import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
+import { readBundledJakeTemplate } from "../resume/bundled-template.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
@@ -69,7 +70,7 @@ const postingClaims = new PostingClaimLedger(sqlite?.store<PostingClaim>("postin
 const emailCode = authPolicy?.emailVerification.autoEnter
   ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
     ?? new EncryptedApplicationStateStore(join(root, "email-code-claims.enc.json"), key)) : undefined;
-const template = await readFile("templates/resume/main.tex", "utf8");
+const template = await readBundledJakeTemplate();
 // Replay pending alerts independently of today's queue: a source outage or
 // closed posting must not hide an already-saved human handoff.
 const checkpoints = sqlite
