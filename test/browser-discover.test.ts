@@ -31,7 +31,8 @@ describe("BrowserOS lead discovery", () => {
       url: "https://www.linkedin.com/jobs/view/123/",
       observedAt: "2026-01-02T03:04:05.000Z",
     })]);
-    expect(callTool.mock.calls.map(([request]) => request.name)).toEqual(["name_session", "tabs", "read"]);
+    expect(callTool.mock.calls.map(([request]) => request.name)).toEqual(["name_session", "tabs", "read", "tabs"]);
+    expect(callTool.mock.calls.at(-1)?.[0].arguments).toEqual({ action: "close", page: 17 });
   });
 
   it("extracts official ATS links from a bounded set of board details", async () => {
@@ -54,5 +55,26 @@ describe("BrowserOS lead discovery", () => {
       "https://www.linkedin.com/jobs/view/123/",
       "https://job-boards.greenhouse.io/example/jobs/1234",
     ]);
+    const closed = callTool.mock.calls.filter(([request]) => request.name === "tabs"
+      && request.arguments.action === "close");
+    expect(closed.map(([request]) => request.arguments.page)).toEqual([17, 17]);
+  });
+
+  it("closes only newly opened tabs when reading a search fails", async () => {
+    const calls: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+    const client: BrowserToolClient = { callTool: async (request) => {
+      calls.push(request);
+      if (request.name === "tabs" && request.arguments.action === "new") {
+        return { structuredContent: { page: { id: 18 } } };
+      }
+      if (request.name === "read") return { isError: true, content: [{ type: "text", text: "offline" }] };
+      return { content: [{ type: "text", text: "ok" }] };
+    } };
+    const input: BrowserSearchInput = { runtime: "browseros", endpoint: "http://127.0.0.1:9010/mcp",
+      searches: [{ label: "LinkedIn", platform: "linkedin",
+        url: "https://www.linkedin.com/jobs/search/", enabled: true }] };
+    await expect(discoverBrowserLeads(client, input)).rejects.toThrow("Could not read LinkedIn");
+    expect(calls.filter((call) => call.name === "tabs" && call.arguments.action === "close")
+      .map((call) => call.arguments.page)).toEqual([18]);
   });
 });
