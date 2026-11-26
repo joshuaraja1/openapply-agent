@@ -4,6 +4,8 @@ import { officialJobKey, type OfficialJobIdentity, type SubmissionStatus } from 
 
 export interface CloudRunRecord {
   profileArtifactId: string;
+  /** Version of the candidate's durable, server-side consent grant for this run. */
+  consentVersion: number;
   job: OfficialJobIdentity;
 }
 
@@ -27,8 +29,12 @@ export interface CloudRunPorts {
     acquireLease(candidateId: string, runId: string): Promise<string | null>;
     renewLease(candidateId: string, token: string): Promise<boolean>;
     releaseLease(candidateId: string, token: string): Promise<void>;
-    submissionStatus(candidateId: string, job: OfficialJobIdentity): Promise<SubmissionStatus>;
-    beginSubmission(candidateId: string, token: string, job: OfficialJobIdentity): Promise<boolean>;
+    readSubmission(candidateId: string, job: OfficialJobIdentity): Promise<{
+      status: SubmissionStatus; receiptArtifactId?: string;
+    }>;
+    /** Atomically checks the consent version and reserves the receipt ID. */
+    beginSubmission(candidateId: string, token: string, runId: string, consentVersion: number,
+      job: OfficialJobIdentity): Promise<string | null>;
     markUncertain(candidateId: string, token: string, job: OfficialJobIdentity): Promise<void>;
     confirmAfterVerification(candidateId: string, token: string, job: OfficialJobIdentity,
       receipt: { artifactId: string; sha256: string }): Promise<boolean>;
@@ -63,17 +69,6 @@ export type CloudRunOutcome = "confirmed" | "already_confirmed" | "lease_busy" |
 
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 
-/** Stable lookup even when the worker dies after storing evidence but before journal confirmation. */
-export function receiptArtifactId(candidateId: string, job: OfficialJobIdentity): string {
-  const bytes = createHash("sha256")
-    .update(`openapply-receipt-v1:${candidateId}:${officialJobKey(job)}`)
-    .digest().subarray(0, 16);
-  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
-  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 /**
  * Fail-closed bridge between a received SQS message and durable application state.
  * No production browser adapter or queue poller is included in this staging slice.
@@ -93,7 +88,10 @@ export async function handleQueuedApplication(
 
   try {
     const record = await ports.runRecords.load(run.candidateId, run.runId);
-    const status = await ports.journal.submissionStatus(run.candidateId, record.job);
+    if (!Number.isSafeInteger(record.consentVersion) || record.consentVersion < 1) {
+      throw new Error("Run has no valid durable consent version");
+    }
+    const { status } = await ports.journal.readSubmission(run.candidateId, record.job);
     if (status === "confirmed") {
       shouldAck = true;
       return "already_confirmed";
@@ -105,8 +103,11 @@ export async function handleQueuedApplication(
     try {
       const prepared = await ports.application.prepare(profile.path, record.job);
       if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
-      if (!await ports.journal.beginSubmission(run.candidateId, token, record.job)) {
-        const afterConflict = await ports.journal.submissionStatus(run.candidateId, record.job);
+      if (!await ports.authorization.authorize(run.candidateId, run.runId)) return "unauthorized";
+      const artifactId = await ports.journal.beginSubmission(
+        run.candidateId, token, run.runId, record.consentVersion, record.job);
+      if (!artifactId) {
+        const { status: afterConflict } = await ports.journal.readSubmission(run.candidateId, record.job);
         if (afterConflict === "not_started") return "retry";
         if (afterConflict === "confirmed") {
           shouldAck = true;
@@ -130,7 +131,6 @@ export async function handleQueuedApplication(
         return "needs_reconciliation";
       }
 
-      const artifactId = receiptArtifactId(run.candidateId, record.job);
       const sha256 = createHash("sha256").update(receipt.evidence).digest("hex");
       await ports.vault.put(run.candidateId, artifactId, receipt.evidence);
       if (!await ports.journal.confirmAfterVerification(run.candidateId, token, record.job,

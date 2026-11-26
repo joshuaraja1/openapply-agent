@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { encodeCloudRunEnvelope } from "../src/cloud/run-envelope.js";
-import { handleQueuedApplication, receiptArtifactId, type CloudRunPorts, type VerifiedReceipt }
+import { handleQueuedApplication, type CloudRunPorts, type VerifiedReceipt }
   from "../src/cloud/queued-run.js";
 
 const candidateId = "ec5a592a-a5ea-409f-b21b-0064558c72bb";
 const runId = "e4590bf1-91c4-4a63-9203-a8715a68d8d4";
 const job = { provider: "Greenhouse", employerId: "acme", requisitionId: "109" };
 const evidence = new TextEncoder().encode("Employer confirmation for requisition 109");
+const reservedReceiptId = "8c231a91-c73b-4e2d-b085-5d5ebf302311";
 
 function message(id = runId): { body: string; receiptHandle: string } {
   return {
@@ -25,6 +26,8 @@ function harness() {
   let confirmSucceeds = true;
   let storedArtifactId: string | undefined;
   let authorized = true;
+  let revokeDuringPrepare = false;
+  let consentGranted = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
   let clickThrows = false;
   let failsBeforeClick = false;
@@ -37,13 +40,16 @@ function harness() {
       async acquireLease() { events.push("lease"); return busy ? null : "lease-token"; },
       async renewLease() { events.push("renew"); return leaseRenewalSucceeds; },
       async releaseLease() { events.push("release"); },
-      async submissionStatus() { events.push("status"); return status; },
+      async readSubmission() {
+        events.push("status");
+        return status === "not_started" ? { status } : { status, receiptArtifactId: reservedReceiptId };
+      },
       async beginSubmission() {
         events.push("intent");
-        if (!intentWriteSucceeds) return false;
-        if (status !== "not_started") return false;
+        if (!intentWriteSucceeds || !consentGranted) return null;
+        if (status !== "not_started") return null;
         status = "needs_reconciliation";
-        return true;
+        return reservedReceiptId;
       },
       async markUncertain() { events.push("uncertain"); },
       async confirmAfterVerification() {
@@ -54,7 +60,7 @@ function harness() {
       },
     },
     runRecords: {
-      async load() { events.push("load"); return { profileArtifactId: runId, job }; },
+      async load() { events.push("load"); return { profileArtifactId: runId, consentVersion: 1, job }; },
     },
     vault: {
       async restoreToPrivateTemp() {
@@ -70,6 +76,7 @@ function harness() {
       async prepare() {
         events.push("prepare");
         if (prepareThrows) throw new Error("preflight failed");
+        if (revokeDuringPrepare) authorized = false;
         return { async submitOnce() {
           if (failsBeforeClick) throw new Error("browser closed before click");
           events.push("click");
@@ -91,6 +98,8 @@ function harness() {
     setIntentWriteSucceeds(value: boolean) { intentWriteSucceeds = value; },
     setConfirmSucceeds(value: boolean) { confirmSucceeds = value; },
     setAuthorized(value: boolean) { authorized = value; },
+    setRevokeDuringPrepare(value: boolean) { revokeDuringPrepare = value; },
+    setConsentGranted(value: boolean) { consentGranted = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
     setFailsBeforeClick(value: boolean) { failsBeforeClick = value; },
     setPrepareThrows(value: boolean) { prepareThrows = value; },
@@ -146,6 +155,24 @@ describe("cloud queued application bridge", () => {
     h.setIntentWriteSucceeds(false);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
     expect(h.getStatus()).toBe("not_started");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
+  });
+
+  it("rechecks authorization after preparation and blocks a revoked run", async () => {
+    const h = harness();
+    h.setRevokeDuringPrepare(true);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("unauthorized");
+    expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
+  });
+
+  it("depends on atomic consent fencing when revocation races with the second check", async () => {
+    const h = harness();
+    h.setConsentGranted(false);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
+    expect(h.events).toContain("intent");
     expect(h.events).not.toContain("click");
     expect(h.events).not.toContain("ack");
   });
@@ -220,12 +247,12 @@ describe("cloud queued application bridge", () => {
     const h = harness();
     h.setConfirmSucceeds(false);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
-    expect(h.getStoredArtifactId()).toBe(receiptArtifactId(candidateId, job));
+    expect(h.getStoredArtifactId()).toBe(reservedReceiptId);
     expect(h.events).not.toContain("ack");
     h.events.length = 0;
     expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
     expect(h.events).not.toContain("click");
-    expect(receiptArtifactId(candidateId, job)).toBe(h.getStoredArtifactId());
+    expect(h.getStoredArtifactId()).toBe(reservedReceiptId);
   });
 
   it("rejects discovery messages before acquiring a candidate lease", async () => {

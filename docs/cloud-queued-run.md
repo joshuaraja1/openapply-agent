@@ -8,6 +8,12 @@ loader supplies the verified official requisition and encrypted profile
 artifact ID after a candidate lease is acquired. The bridge restores the
 profile to a private temporary path and removes it after the run.
 
+The future SQS poller must extend message visibility while a task runs and
+must not treat `lease_busy` or `needs_reconciliation` as a successful delivery.
+The staging queue currently redrives after three receives, so a persistent
+reconciliation/handoff record and dead-letter monitoring are required before
+live jobs are enabled.
+
 The final Submit action is available only through `PreparedApplication` after
 the journal writes a non-expiring submit intent. Once intent exists, a crash,
 ambiguous browser result, mismatched requisition, or receipt failure leaves
@@ -15,10 +21,10 @@ the message unacknowledged for reconciliation. A second delivery must not click
 Submit. The queue receipt is deleted only after exact-job confirmation evidence
 is encrypted in the vault and its digest is committed to the durable journal.
 Private profile cleanup and lease release complete before queue acknowledgment.
-Receipt artifact IDs are derived from the candidate and official requisition,
-so reconciliation can find evidence even if the worker dies after vault storage
-but before journal confirmation. The vault's create-only put rejects rewriting
-that evidence.
+The journal reserves a receipt artifact ID in the same transaction as submit
+intent, so reconciliation can find evidence even if the worker dies after vault
+storage but before journal confirmation. The vault's create-only put rejects
+rewriting that evidence.
 
 This is **not a live cloud application worker**. No SQS poller, run-record
 loader, browser action, independent receipt verifier, or remote handoff service
@@ -38,3 +44,6 @@ No real candidate vault writes are enabled by this staging module.
 The handler intentionally favors safety over automatic retry: a crash after
 intent but before a click may require a human/provider status check. A future
 worker must not infer that a click did not happen from a closed tab or timeout.
+Authorization is checked again after preparation, and the journal checks the
+stored consent version atomically when it writes intent. The separate second
+check improves response time to revocation but cannot replace that transaction.
