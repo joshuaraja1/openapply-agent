@@ -2,6 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFi
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { assertPackageManifest } from "./assert-package.mjs";
 
 const npmCli = process.env.npm_execpath;
@@ -74,7 +75,25 @@ try {
     return installed;
   };
   install(priorTarball, "0.0.0");
-  install(tarball, manifest.version);
+  const installed = install(tarball, manifest.version);
+  // Exercise the built module from a directory unrelated to the repository or
+  // installation. This catches CWD-relative template reads in packaged runs.
+  const foreignDirectory = join(root, "foreign-working-directory");
+  mkdirSync(foreignDirectory);
+  const templatePath = join(installed, "templates", "resume", "main.tex");
+  const expectedHash = createHash("sha256").update(readFileSync(templatePath)).digest("hex");
+  const modulePath = join(installed, "dist", "src", "resume", "bundled-template.js");
+  const check = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+    import { createHash } from "node:crypto";
+    import { pathToFileURL } from "node:url";
+    const { readBundledJakeTemplate } = await import(pathToFileURL(process.argv[1]).href);
+    process.stdout.write(createHash("sha256")
+      .update(await readBundledJakeTemplate()).digest("hex"));
+  `, modulePath], { cwd: foreignDirectory, encoding: "utf8", maxBuffer: 1024 * 1024 });
+  if (check.error) throw check.error;
+  if (check.status !== 0 || check.stdout !== expectedHash) {
+    throw new Error(`Installed resume template resolution failed outside the package: ${check.stderr || check.stdout}`);
+  }
   install(priorTarball, "0.0.0");
   console.log(`Portable package ${manifest.version} installs, upgrades, and rolls back on ${process.platform}`);
 } finally {
