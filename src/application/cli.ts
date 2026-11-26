@@ -16,6 +16,7 @@ import { readApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { confirmManualSubmission, loadManualAttestation } from "./manual-confirm.js";
 import { savedBrowserEndpoint } from "./runtime-selection.js";
+import { loadHandoffNotificationConfig, notifyHumanHandoff, sendHandoffEmail } from "./notification.js";
 
 await holdWorkflowLease();
 
@@ -83,6 +84,15 @@ try {
     });
   console.log(JSON.stringify({ jobId: pkg.job.id, stage: result.checkpoint.stage,
     blocker: result.checkpoint.blocker ?? null }));
+  if (result.checkpoint.stage === "waiting-human") {
+    await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
+    const configPath = process.env.OPENAPPLY_NOTIFICATION_CONFIG;
+    if (configPath) {
+      const config = await loadHandoffNotificationConfig(configPath);
+      await sendHandoffEmail(config, result.checkpoint, secrets)
+        .catch(() => console.warn("Email handoff notification was unavailable"));
+    }
+  }
   }
 } finally {
   await connection?.close();

@@ -54,6 +54,19 @@ output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a
 confirmed submission from a human handoff.
 On macOS, a paused application also triggers a generic desktop notification.
+Optional email alerts use a private
+[`handoff-notification.json`](../examples/handoff-notification.example.json) with
+the candidate's recipient address, a verified sender address, and a Resend API
+key reference. Store the key in the operating-system secret store with
+`OPENAPPLY_SECRET_REF=<apiKeySecretRef> npm run secret:put` and pipe its value
+through stdin. Use a `keychain://`, `credential-manager://`, or
+`secret-service://` reference for macOS, Windows, or Linux respectively. Set
+`notificationConfigPath` in the private queue config; for a
+single package run set `OPENAPPLY_NOTIFICATION_CONFIG` to the same absolute path.
+The email contains only a generic reminder to open OpenApply. An email failure
+never changes the application checkpoint or marks a submission complete. The
+notification path has synthetic tests; live delivery requires the user's own
+verified sender domain and API key.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run

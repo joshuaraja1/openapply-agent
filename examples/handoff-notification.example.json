@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "email": {
+    "provider": "resend",
+    "from": "alerts@your-verified-domain.example",
+    "to": "candidate@example.com",
+    "apiKeySecretRef": "keychain://openapply/notification-resend"
+  }
+}

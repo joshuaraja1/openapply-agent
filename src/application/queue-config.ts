@@ -10,6 +10,7 @@ export const queueRunnerConfigSchema = z.object({
   browserRuntime: z.enum(["browseros", "owned"]).default("browseros"),
   browserEndpoint: z.url().optional(),
   authenticationPolicyPath: absolutePath.optional(),
+  notificationConfigPath: absolutePath.optional(),
   overleafProjectUrl: z.url(), outputDirectory: absolutePath,
   expectedConfirmationByDomain: z.record(z.string(), z.string().min(1)).default({}),
 }).superRefine((config, context) => {

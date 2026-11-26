@@ -8,6 +8,7 @@
   "browserEndpoint": "http://127.0.0.1:9210/mcp",
   "browserRuntime": "browseros",
   "authenticationPolicyPath": "/Users/you/.openapply-agent/authentication-policy.json",
+  "notificationConfigPath": "/Users/you/.openapply-agent/handoff-notification.json",
   "overleafProjectUrl": "https://www.overleaf.com/project/000000000000000000000000",
   "outputDirectory": "/Users/you/.openapply-agent/artifacts",
   "expectedConfirmationByDomain": {}

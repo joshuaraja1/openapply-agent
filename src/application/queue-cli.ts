@@ -20,7 +20,7 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
-import { notifyHumanHandoff } from "./notification.js";
+import { loadHandoffNotificationConfig, notifyHumanHandoff, sendHandoffEmail } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { runnableEntries } from "./queue-reconcile.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
@@ -41,6 +41,8 @@ const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
 const root = join(userInfo().homedir, ".openapply-agent");
 const secrets = createNativeSecretStore();
+const notificationConfig = config.notificationConfigPath
+  ? await loadHandoffNotificationConfig(config.notificationConfigPath) : undefined;
 const key = await getOrCreateStateKey(secrets, stateKeyReference());
 const sqlite = await openActiveSqliteRuntime(key);
 if (sqlite) sqlite.assertLegacyPaths({ encryptedDirectory: root,
@@ -132,6 +134,10 @@ try {
     });
     if (result.checkpoint.stage === "waiting-human") {
       await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
+      if (notificationConfig) {
+        await sendHandoffEmail(notificationConfig, result.checkpoint, secrets)
+          .catch(() => console.warn("Email handoff notification was unavailable"));
+      }
     }
   }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
