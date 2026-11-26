@@ -12,7 +12,8 @@ import { candidateProfileSchema } from "../src/candidate/schema.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import type { Provider, DiscoveredJob } from "../src/types.js";
 
-type Scenario = "success" | "unknown-required" | "wrong-requisition";
+type Scenario = "success" | "unknown-required" | "wrong-requisition"
+  | "conditional-required" | "validation-error" | "identity-drift";
 
 const candidate = candidateProfileSchema.parse({
   version: 1,
@@ -23,22 +24,30 @@ const candidate = candidateProfileSchema.parse({
 });
 
 function portal(provider: Provider, scenario: Scenario): string {
-  const nameLabel = provider === "ashby" || provider === "lever" ? "Your name" : "Full name";
+  const nameLabel = scenario === "identity-drift" ? "Candidate name"
+    : provider === "ashby" || provider === "lever" ? "Your name" : "Full name";
   const emailLabel = provider === "workday" ? "Primary Email" : "Email";
+  const revealQuestion = scenario === "conditional-required"
+    ? "document.getElementById('conditional').hidden=false" : "";
+  const continueAction = scenario === "validation-error"
+    ? "document.getElementById('validation').hidden=false"
+    : `document.getElementById('first').hidden=true;
+        document.getElementById('second').hidden=false;${scenario === "wrong-requisition"
+          ? "history.pushState({}, '', '/apply/654321')" : ""}`;
   const phone = provider === "smartrecruiters"
     ? '<label>Mobile Phone<input name="phone" required></label>' : "";
   const unknown = scenario === "unknown-required"
     ? '<label>Unanswered legal question<input required name="legal"></label>' : "";
-  const changeJob = scenario === "wrong-requisition"
-    ? "history.pushState({}, '', '/apply/654321')" : "";
   return `<!doctype html><title>Example Co application</title>
     <h1>Example Co Software Engineer</h1>
     <section id="first"><label>${nameLabel}<input name="name" required></label>
-      <label>${emailLabel}<input type="email" name="email" required></label>
+      <label>${emailLabel}<input type="email" name="email" required oninput="${revealQuestion}"></label>
+      ${scenario === "conditional-required"
+        ? '<label id="conditional" hidden>Security clearance<input name="clearance" required></label>' : ""}
       ${phone}
       <label>Resume<input type="file" name="resume" required></label>
-      <button type="button" onclick="document.getElementById('first').hidden=true;
-        document.getElementById('second').hidden=false;${changeJob}">Continue</button></section>
+      <button type="button" onclick="${continueAction}">Continue</button></section>
+    <p id="validation" hidden>Employer validation rejected this step</p>
     <section id="second" hidden>
       <label>Are you legally authorized to work in the United States?
         <select required><option value="">Select</option><option>Yes</option><option>No</option></select></label>
@@ -95,6 +104,7 @@ async function run(provider: Provider, scenario: Scenario) {
       authorizationValue: await page.locator("select").inputValue(),
       fileName: await page.locator('input[type="file"]').evaluate((input) =>
         (input as HTMLInputElement).files?.[0]?.name),
+      validationVisible: await page.locator("#validation").isVisible(),
       confirmationVisible: await page.locator("#done").isVisible() };
   } finally {
     await context.close();
@@ -131,4 +141,29 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       expect(result.confirmationVisible).toBe(false);
     }, 30_000);
   }
+
+  it("greenhouse pauses when filling reveals a new required question", async () => {
+    const result = await run("greenhouse", "conditional-required");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
+    expect(result.fileName).toBeUndefined();
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
+
+  it("greenhouse pauses when Continue leaves a validation error on the same step", async () => {
+    const result = await run("greenhouse", "validation-error");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("Continue did not advance");
+    expect(result.fileName).toBe("verified-resume.pdf");
+    expect(result.validationVisible).toBe(true);
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
+
+  it("greenhouse pauses on an unrecognized required identity label", async () => {
+    const result = await run("greenhouse", "identity-drift");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
+    expect(result.fileName).toBeUndefined();
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
 });
