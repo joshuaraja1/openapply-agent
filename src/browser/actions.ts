@@ -189,13 +189,19 @@ export class AgentBrowser {
           await page.waitForTimeout(50);
         }
         if (!listbox) throw new Error("Combobox's owned listbox was not visible");
-        const matching: ElementHandle<Element>[] = [];
-        for (const option of await listbox.$$("[role=option]")) {
-          if (!await option.isVisible()) continue;
-          const name = (await option.getAttribute("aria-label")) ?? (await option.innerText()).trim();
-          if (name === value) matching.push(option);
+        let matching: ElementHandle<Element>[] = [];
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          matching = [];
+          for (const option of await listbox.$$("[role=option]")) {
+            if (!await option.isVisible()) continue;
+            const name = (await option.getAttribute("aria-label")) ?? (await option.innerText()).trim();
+            if (name === value) matching.push(option);
+          }
+          if (matching.length > 1) throw new Error("Combobox option is ambiguous");
+          if (matching.length === 1) break;
+          await page.waitForTimeout(50);
         }
-        if (matching.length !== 1) throw new Error("Combobox option is missing or ambiguous");
+        if (matching.length !== 1) throw new Error("Combobox option was not visible");
         await matching[0]!.click();
         // Only the original control can establish success. A framework may
         // update it asynchronously or replace it; replacement is uncertain.

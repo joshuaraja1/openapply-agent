@@ -51,6 +51,44 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
 
 describe("owned browser accessible controls", () => {
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "waits for an option inserted after its owned listbox opens", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "openapply-controls-delayed-option-"));
+      const context = await chromium.launchPersistentContext(join(directory, "profile"), { headless: true });
+      try {
+        await context.route("https://jobs.example.com/**", (route) => route.fulfill({ contentType: "text/html", body: `
+          <!doctype html><title>Apply</title><x-form></x-form><script>
+          const root = document.querySelector('x-form').attachShadow({mode:'open'});
+          root.innerHTML = '<button type="button" role="combobox" aria-label="Work location" aria-controls="locations">Choose</button>' +
+            '<div id="locations" role="listbox" hidden></div>';
+          const combo = root.querySelector('[role=combobox]');
+          const list = root.querySelector('#locations');
+          combo.addEventListener('click', () => {
+            list.hidden = false;
+            setTimeout(() => {
+              const option = document.createElement('div');
+              option.setAttribute('role', 'option');
+              option.textContent = 'Remote';
+              option.addEventListener('click', () => {
+                window.optionClicks = (window.optionClicks || 0) + 1;
+                combo.textContent = 'Remote';
+              });
+              list.append(option);
+            }, 100);
+          });</script>` }));
+        const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
+        const first = await browser.navigate("https://jobs.example.com/apply");
+        const combo = first.controls.find((control) => control.name === "Work location")!;
+        const selected = await browser.act(combo.ref, "select", "Remote");
+        expect(selected.controls.find((control) => control.name === "Work location")?.value).toBe("Remote");
+        const page = context.pages().find((candidate) => candidate.url() === "https://jobs.example.com/apply")!;
+        expect(await page.evaluate(() => (window as Window & { optionClicks?: number }).optionClicks)).toBe(1);
+      } finally {
+        await context.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }, 30_000,
+  );
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
     "never selects a same-ID option in another shadow root", async () => {
       const directory = await mkdtemp(join(tmpdir(), "openapply-controls-scope-"));
       const context = await chromium.launchPersistentContext(join(directory, "profile"), { headless: true });
