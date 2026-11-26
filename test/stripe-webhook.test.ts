@@ -66,8 +66,25 @@ describe("Stripe billing event boundary", () => {
       .rejects.toThrow("could not be resolved");
     expect(enqueue).not.toHaveBeenCalled();
     expect(await acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks,
-      enqueue, async () => "cus_test_1")).toBe("queued");
+      enqueue, async () => ({ kind: "customer", customerId: "cus_test_1" })))
+      .toBe("queued");
     expect(enqueue).toHaveBeenCalledWith({ eventId: "evt_refund", customerId: "cus_test_1" });
+  });
+
+  it("audits a verified unaffiliated guest refund and retries transient lookups", async () => {
+    const { body, signature } = signedEvent("charge.refunded", "evt_guest", null, "ch_guest");
+    const enqueue = vi.fn(async () => "queued" as const);
+    const recordGuestRefund = vi.fn(async () => {});
+    await expect(acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks,
+      enqueue, async () => undefined, recordGuestRefund)).rejects.toThrow("could not be resolved");
+    await expect(acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks,
+      enqueue, async () => ({ kind: "verified-unaffiliated-guest" })))
+      .rejects.toThrow("audit port");
+    expect(await acceptBillingWebhook(body, signature, signingSecret, stripe.webhooks,
+      enqueue, async () => ({ kind: "verified-unaffiliated-guest" }), recordGuestRefund))
+      .toBe("guest-acknowledged");
+    expect(recordGuestRefund).toHaveBeenCalledWith({ eventId: "evt_guest", chargeId: "ch_guest" });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("projects only current settled and tenant-bound paid coverage", () => {

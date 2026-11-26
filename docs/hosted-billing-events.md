@@ -7,9 +7,12 @@ This PR supplies testable domain functions, not a deployed billing endpoint.
    header, and endpoint signing secret to `verifiedBillingRequest`. The signing
    secret comes from a server-side secret manager, never a browser or repository.
 2. A signed refund may omit its customer ID. Resolve its charge through the
-   trusted Stripe API before enqueueing; if resolution fails, return an error
-   so the event is retried and alert an operator. Never acknowledge it as
-   handled. Atomically record the verified event ID and enqueue one reconciliation
+   trusted Stripe API before enqueueing. The resolver must inspect invoice and
+   payment links as well as the charge's customer field. A charge proven to be
+   unaffiliated with any candidate is recorded in a durable, idempotent audit
+   before acknowledgement. A transient lookup failure returns an error so the
+   event is retried and an operator is alerted; it is never acknowledged as a
+   guest refund. Atomically record a candidate-linked event ID and enqueue one reconciliation
    request. The queue groups requests by Stripe customer ID so only one
    reconciliation for a customer runs at a time. A durable event ledger, not
    short queue deduplication alone, handles retries.
@@ -27,7 +30,7 @@ This PR supplies testable domain functions, not a deployed billing endpoint.
    candidate batch and at its final-submit authorization fence.
 
 The current code does not implement the HTTP endpoint, provider API reader,
-customer binding store, event ledger, serialized queue, periodic reconciliation,
+customer binding store, guest audit ledger, event ledger, serialized queue, periodic reconciliation,
 or atomic final-submit fence. No live Stripe account or charges are involved.
 Refund and dispute handling must be mapped from current provider state to
 `paymentReversed`; a user-supplied value is never authoritative. The provider

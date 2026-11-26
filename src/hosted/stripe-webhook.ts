@@ -14,6 +14,9 @@ export interface UnresolvedChargeRequest {
   eventId: string;
   chargeId: string;
 }
+export type TrustedChargeResolution =
+  | { kind: "customer"; customerId: string }
+  | { kind: "verified-unaffiliated-guest" };
 
 /** Verify the raw snapshot event before accepting any customer identifier. */
 export function verifiedBillingRequest(
@@ -43,16 +46,25 @@ export async function acceptBillingWebhook(
   endpointSecret: string,
   verifier: Pick<Stripe["webhooks"], "constructEvent">,
   enqueueOnce: (request: BillingReconcileRequest) => Promise<"queued" | "duplicate">,
-  resolveChargeCustomer?: (chargeId: string) => Promise<string | undefined>,
-): Promise<"queued" | "duplicate" | "ignored"> {
+  resolveCharge?: (chargeId: string) => Promise<TrustedChargeResolution | undefined>,
+  recordGuestRefund?: (request: UnresolvedChargeRequest) => Promise<void>,
+): Promise<"queued" | "duplicate" | "ignored" | "guest-acknowledged"> {
   const request = verifiedBillingRequest(rawBody, signature, endpointSecret, verifier);
   if (!request) return "ignored";
   if ("customerId" in request) return enqueueOnce(request);
-  // No silent acknowledgement: the endpoint must retry/alert if Stripe cannot
-  // resolve the charge to a customer, rather than leaving paid access stale.
-  const customerId = await resolveChargeCustomer?.(request.chargeId);
-  if (!customerId?.startsWith("cus_")) throw new Error("Refund charge customer could not be resolved");
-  return enqueueOnce({ eventId: request.eventId, customerId });
+  // A null customer field in the event is not proof that the refund is unrelated
+  // to a candidate. The trusted reader must inspect the current charge and its
+  // invoice/payment links before classifying it as an unaffiliated guest.
+  const resolution = await resolveCharge?.(request.chargeId);
+  if (resolution?.kind === "verified-unaffiliated-guest") {
+    if (!recordGuestRefund) throw new Error("Guest refund audit port is unavailable");
+    await recordGuestRefund(request);
+    return "guest-acknowledged";
+  }
+  if (resolution?.kind !== "customer" || !resolution.customerId.startsWith("cus_")) {
+    throw new Error("Refund charge customer could not be resolved");
+  }
+  return enqueueOnce({ eventId: request.eventId, customerId: resolution.customerId });
 }
 
 export interface TrustedStripeBillingSnapshot {
