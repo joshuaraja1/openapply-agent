@@ -47,9 +47,12 @@ operating system scheduler. `OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json n
 runs both commands in order, using the queue configuration as the only source
 for discovery and candidate paths. BrowserOS neo and Overleaf must already be signed
 in. Queued applications use that same BrowserOS profile and its existing site
-sessions. Configured exact-domain account creation and email-code entry can
-proceed when their safety checks pass. Unknown questions, unsupported account
-forms or email codes, CAPTCHA, and MFA pause for human handling. The queue
+sessions. BrowserOS neo pauses for human sign-in or account creation because
+its snapshots do not prove where credentials would be submitted. The owned
+browser can use configured exact-domain credentials only for a verified
+same-origin POST form. Scoped email-code entry can proceed when its safety
+checks pass. Unknown questions, unsupported account forms or email codes,
+CAPTCHA, and MFA pause for human handling. The queue
 output reports a job as `processed` when the
 application workflow ran; inspect its encrypted checkpoint to distinguish a
 confirmed submission from a human handoff.

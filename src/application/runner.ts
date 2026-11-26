@@ -259,7 +259,9 @@ export async function runApplicationPackage(
       && snapshot.controls.some((control) => control.tag === "button"
         && /^(sign in|log in|login)$/i.test(control.name.trim()));
     let authenticatedRedirect = false;
-    if (!loginBlocker && loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
+    if (!loginBlocker && loginPage && (pkg.browserRuntime === "browseros" || Boolean(pkg.browserEndpoint))) {
+      loginBlocker = "Portal sign-in needs human completion";
+    } else if (!loginBlocker && loginPage && dependencies.account && dependencies.secretStore && browser.authenticate) {
       const account = dependencies.account;
       if (!account.domains.some((domain) => domain.toLowerCase() === host)) {
         loginBlocker = "Automatic sign-in requires an exact account domain";
@@ -288,7 +290,9 @@ export async function runApplicationPackage(
     }
     if (!loginBlocker && isRegistrationPage(snapshot)) {
       const account = dependencies.account;
-      if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
+      if (pkg.browserRuntime === "browseros" || pkg.browserEndpoint) {
+        loginBlocker = "Account registration requires human completion";
+      } else if (!account || !account.allowAccountCreation || !dependencies.secretStore || !browser.register
         || !account.domains.some((domain) => domain.toLowerCase() === host)) {
         loginBlocker = "Account registration requires an enabled exact-domain account";
       } else if (account.email.toLowerCase() !== pkg.candidate.identity.email.toLowerCase()) {

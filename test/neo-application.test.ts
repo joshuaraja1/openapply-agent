@@ -25,7 +25,7 @@ const tree = (filled: boolean, submitted: boolean, origin = url) =>
   + `[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]`;
 
 describe("BrowserOS application adapter", () => {
-  it("fills a guarded registration form and refuses unknown required controls", async () => {
+  it("hands BrowserOS registration to a human before any password fill", async () => {
     let filled = false;
     let registered = false;
     const registration = () => `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`
@@ -45,12 +45,10 @@ describe("BrowserOS application adapter", () => {
     }) };
     const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
     await browser.navigate(url);
-    expect(await browser.register("test@example.com", "private-password")).toMatchObject({ url });
-    const fill = vi.mocked(client.callTool).mock.calls.find(([call]) => call.name === "act"
-      && call.arguments.kind === "fill")![0];
-    expect(fill.arguments.sensitive).toBe(true);
-    expect(fill.arguments.fields).toEqual([{ ref: "e1", value: "test@example.com" },
-      { ref: "e2", value: "private-password" }, { ref: "e3", value: "private-password" }]);
+    await expect(browser.register("test@example.com", "private-password"))
+      .rejects.toThrow("human completion");
+    expect(vi.mocked(client.callTool).mock.calls.some(([call]) => call.name === "act"
+      || call.name === "credentials")).toBe(false);
 
     let revealed = false;
     const unsafe: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
@@ -67,11 +65,11 @@ describe("BrowserOS application adapter", () => {
     const blocked = new NeoApplicationBrowser(unsafe, new Set(["jobs.example.com"]), new Map());
     await blocked.navigate(url);
     await expect(blocked.register("test@example.com", "private-password"))
-      .rejects.toThrow("human review");
+      .rejects.toThrow("human completion");
     expect(vi.mocked(unsafe.callTool).mock.calls.some(([call]) => call.name === "act"
-      && call.arguments.kind === "click")).toBe(false);
+      || call.name === "credentials")).toBe(false);
   });
-  it("fills an existing portal login from a supplied secret without saving it", async () => {
+  it("hands BrowserOS sign-in to a human without sending credentials to the tool", async () => {
     let signedIn = false;
     const login = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${url}] Untrusted page content follows.\n`
       + '- textbox "Password" [required] [ref=e1]\n- button "Sign in" [ref=e2]\n'
@@ -89,12 +87,10 @@ describe("BrowserOS application adapter", () => {
     }) };
     const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
     await browser.navigate(url);
-    expect(await browser.authenticate("candidate@example.com", "private-password"))
-      .toMatchObject({ url });
+    await expect(browser.authenticate("candidate@example.com", "private-password"))
+      .rejects.toThrow("human completion");
     expect(vi.mocked(client.callTool).mock.calls.some(([call]) => call.name === "credentials"
-      && call.arguments.action === "add")).toBe(false);
-    expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "credentials"))
-      .toHaveLength(1);
+      || call.name === "act")).toBe(false);
   });
 
   it("does not click sign-in when BrowserOS rejects credential fill", async () => {
@@ -114,7 +110,7 @@ describe("BrowserOS application adapter", () => {
     const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
     await browser.navigate(url);
     await expect(browser.authenticate("candidate@example.com", "private-password"))
-      .rejects.toThrow("did not confirm");
+      .rejects.toThrow("human completion");
     expect(vi.mocked(client.callTool).mock.calls.some(([call]) => call.name === "act")).toBe(false);
   });
   it("parses visible required fields and the résumé control", () => {

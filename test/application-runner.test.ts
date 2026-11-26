@@ -217,21 +217,25 @@ describe("application runner", () => {
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     let currentUrl = job.applicationUrl;
     const attach = vi.fn(async () => { currentUrl = application.url; return application; });
+    const authenticate = vi.fn(async () => { throw new Error("identity provider redirect"); });
+    const get = vi.fn(async () => "private-password");
     const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
       pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
       fillBatch: async () => application, submit: async () => "Thank you for applying",
-      authenticate: async () => { throw new Error("identity provider redirect"); } };
+      authenticate };
     const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
       verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
       account: { id: "example", email: "candidate@example.com", domains: ["jobs.example.com"],
         passwordSecretRef: "keychain://example", allowAccountCreation: false },
-      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      secretStore: { get, put: async () => {}, delete: async () => {} },
       browserFactory: async () => ({ browser, close: async () => {} }) };
-    await expect(runApplicationPackage(pkg, workflow, "/tmp/profile", options))
-      .rejects.toThrow("identity provider redirect");
-    expect(await workflow.current(job.id)).toMatchObject({ stage: "waiting-human",
-      blocker: "Portal sign-in needs human completion", browserPageUrl: job.applicationUrl });
+    const pending = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
+    expect(pending.checkpoint.stage).toBe("waiting-human");
+    expect(pending.checkpoint.blocker).toContain("Portal sign-in needs human completion");
+    expect(pending.checkpoint.browserPageUrl).toBe(job.applicationUrl);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
     const resumed = await runApplicationPackage(pkg, workflow, "/tmp/profile",
       { ...options, resumedJobId: job.id });
     expect(attach).toHaveBeenCalledWith(7, job.applicationUrl, "AAAAAAAAAAAAAAAA", true);
@@ -828,52 +832,22 @@ describe("application runner", () => {
     const verify = async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() });
     const register = vi.fn(async () => application);
+    const get = vi.fn(async () => "private-password");
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
-    const advance = vi.spyOn(workflow, "advance");
     const options = { verify, validateOfficial: async () => true, account,
-      secretStore: { get: async () => "private-password", put: async () => {}, delete: async () => {} },
+      secretStore: { get, put: async () => {}, delete: async () => {} },
       browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
         navigate: async () => registration, pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
         register, act: async () => application, fillBatch: async () => application,
         submit: async () => "Thank you for applying" }, close: async () => {} }),
     };
     const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
-    expect(result.checkpoint.stage).toBe("submitted");
-    expect(register).toHaveBeenCalledWith("test@example.com", "private-password");
-    expect(advance).toHaveBeenCalledWith(job.id, "waiting-human", expect.objectContaining({
-      blocker: "Account registration may need human completion", browserPageId: 7 }));
-    const failedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
-    const failed = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
-      ...options, browserFactory: async () => ({ browser: {
-        ...(await options.browserFactory()).browser,
-        register: async () => { throw new Error("registration uncertain"); },
-      }, close: async () => {} }),
-    });
-    expect(failed.checkpoint.stage).toBe("waiting-human");
-    await expect(runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", options))
-      .rejects.toThrow("inspect or resume");
-    const resumedWrong = await runApplicationPackage(pkg, failedWorkflow, "/tmp/profile", {
-      ...options, resumedJobId: job.id, browserFactory: async () => ({ browser: {
-        ...(await options.browserFactory()).browser,
-        attach: async () => ({ ...application, url: "https://jobs.example.com/other",
-          visibleText: "Unrelated account dashboard" }),
-      }, close: async () => {} }),
-    });
-    expect(resumedWrong.checkpoint.blocker).toContain("cannot be bound to this requisition");
-    const mismatched = await runApplicationPackage(pkg,
-      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
-        ...options, account: { ...account, email: "different@example.com" },
-      });
-    expect(mismatched.checkpoint.blocker).toContain("differs from the candidate email");
-    expect(register).toHaveBeenCalledOnce();
-    const unrelated = await runApplicationPackage(pkg,
-      new ApplicationWorkflow(new MemoryApplicationStateStore()), "/tmp/profile", {
-        ...options, browserFactory: async () => ({ browser: {
-          ...(await options.browserFactory()).browser,
-          register: async () => ({ ...application, visibleText: "Account dashboard" }),
-        }, close: async () => {} }),
-      });
-    expect(unrelated.checkpoint.blocker).toContain("cannot be bound to this requisition");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("Account registration requires human completion");
+    expect(register).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+    expect(result.checkpoint.browserPageId).toBe(7);
+    expect(result.checkpoint.browserPageUrl).toBe(job.applicationUrl);
 
     const ownedPkg = applicationPackageSchema.parse({ ...pkg, browserEndpoint: undefined,
       browserRuntime: "owned" });

@@ -118,9 +118,11 @@ Service respectively, and checkpoints in
 `~/.openapply-agent/applications.enc.json`. It fills exact common fields,
 stops on unknown required answers, submits only when the handoff mode
 authorizes it, and records submission only after a new employer confirmation
-is found. Opt-in exact-domain
-account creation and scoped email-code entry are available with a private auth
-policy and consented mailbox. Provider-specific adapters and automated
+is found. Opt-in exact-domain account creation is limited to verified
+same-origin POST forms in the owned browser. BrowserOS neo pauses for human
+sign-in or account creation; existing signed-in sessions continue automatically.
+Scoped email-code entry is available with a private auth policy and consented
+mailbox. Provider-specific adapters and automated
 page-image inspection are pending; review the
 rendered PDF before enabling unattended submission.
 
