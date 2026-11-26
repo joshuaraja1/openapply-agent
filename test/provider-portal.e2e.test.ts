@@ -142,28 +142,30 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
     }, 30_000);
   }
 
-  it("greenhouse pauses when filling reveals a new required question", async () => {
-    const result = await run("greenhouse", "conditional-required");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
-    expect(result.fileName).toBeUndefined();
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+  for (const provider of ["greenhouse", "ashby"] as const) {
+    it(`${provider} pauses when filling reveals a new required question`, async () => {
+      const result = await run(provider, "conditional-required");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
+      expect(result.fileName).toBeUndefined();
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
 
-  it("greenhouse pauses when Continue leaves a validation error on the same step", async () => {
-    const result = await run("greenhouse", "validation-error");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("Continue did not advance");
-    expect(result.fileName).toBe("verified-resume.pdf");
-    expect(result.validationVisible).toBe(true);
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+    it(`${provider} pauses when Continue leaves a validation error on the same step`, async () => {
+      const result = await run(provider, "validation-error");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("Continue did not advance");
+      expect(result.fileName).toBe("verified-resume.pdf");
+      expect(result.validationVisible).toBe(true);
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
 
-  it("greenhouse pauses on an unrecognized required identity label", async () => {
-    const result = await run("greenhouse", "identity-drift");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
-    expect(result.fileName).toBeUndefined();
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+    it(`${provider} pauses on an unrecognized required identity label`, async () => {
+      const result = await run(provider, "identity-drift");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
+      expect(result.fileName).toBeUndefined();
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
+  }
 });
