@@ -28,6 +28,25 @@ async function ready(jobId = "job", applicationUrl = "https://jobs.example.com/j
 }
 
 describe("submission verification", () => {
+  it("rechecks provider policy after durable claim and never clicks after revocation", async () => {
+    const { workflow } = await ready();
+    const submit = vi.fn(async () => "Thank you for applying");
+    const browser = { currentUrl: () => handoff.applicationUrl, submit };
+    let revoked = false;
+    const advance = workflow.advance.bind(workflow);
+    vi.spyOn(workflow, "advance").mockImplementation(async (jobId, stage, details) => {
+      const checkpoint = await advance(jobId, stage, details);
+      if (stage === "submit-claimed") revoked = true;
+      return checkpoint;
+    });
+    await submitApplication(workflow, browser, "job", "1:0", "Thank you for applying",
+      handoff, undefined, undefined, undefined, undefined,
+      async () => revoked ? "Provider revoked after claim" : undefined);
+    expect(submit).not.toHaveBeenCalled();
+    expect(await workflow.current("job")).toMatchObject({ stage: "submission-uncertain",
+      blocker: expect.stringContaining("no final click was attempted") });
+  });
+
   it("marks a generic thank-you receipt uncertain when it redirects to another requisition", async () => {
     const jobId = "greenhouse:example:123456";
     const applicationUrl = "https://jobs.example.com/apply/123456";
@@ -39,6 +58,32 @@ describe("submission verification", () => {
         return "Thank you for applying"; }) };
     await expect(submitApplication(workflow, browser, jobId, "1:0",
       "Thank you for applying", boundHandoff)).rejects.toThrow("not bound to the original requisition");
+    expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
+    expect(browser.submit).toHaveBeenCalledOnce();
+  });
+  it("keeps an explicitly conflicting same-path receipt uncertain without retrying", async () => {
+    const jobId = "lever:example:123456";
+    const applicationUrl = "https://jobs.example.com/apply/123456";
+    const { workflow } = await ready(jobId, applicationUrl);
+    const browser = { currentUrl: () => applicationUrl,
+      submit: vi.fn(async () => "Thank you for applying to Another Co as Data Scientist") };
+    await expect(submitApplication(workflow, browser, jobId, "1:0", "Thank you for applying",
+      { ...handoff, jobId, applicationUrl }, undefined, undefined, undefined, undefined,
+      undefined, { company: "Example Co", title: "Software Engineer" })).rejects.toThrow("another job");
+    expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
+    await expect(submitApplication(workflow, browser, jobId, "1:0", "Thank you for applying",
+      { ...handoff, jobId, applicationUrl })).rejects.toThrow("Invalid");
+    expect(browser.submit).toHaveBeenCalledOnce();
+  });
+  it("keeps a generic same-path receipt uncertain without a job identity", async () => {
+    const jobId = "lever:example:123456";
+    const applicationUrl = "https://jobs.example.com/apply/123456";
+    const { workflow } = await ready(jobId, applicationUrl);
+    const browser = { currentUrl: () => applicationUrl,
+      submit: vi.fn(async () => "Thank you for applying") };
+    await expect(submitApplication(workflow, browser, jobId, "1:0", "Thank you for applying",
+      { ...handoff, jobId, applicationUrl }, undefined, undefined, undefined, undefined,
+      undefined, { company: "Example Co", title: "Software Engineer" })).rejects.toThrow("does not identify");
     expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
     expect(browser.submit).toHaveBeenCalledOnce();
   });

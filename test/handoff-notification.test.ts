@@ -7,7 +7,8 @@ import type { SecretStore } from "../src/storage/contracts.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import { assertAutonomousNotificationReady, handoffNotificationSchema, loadHandoffNotificationConfig,
   notificationConfigPathForPackage, notifyPendingHandoff, sendHandoffEmail } from "../src/application/notification.js";
-import { ApplicationWorkflow, type ApplicationCheckpoint } from "../src/application/state-machine.js";
+import { ApplicationWorkflow, resumeVisualReviewPrefix,
+  type ApplicationCheckpoint } from "../src/application/state-machine.js";
 
 const config = handoffNotificationSchema.parse({ version: 1, email: {
   provider: "resend", from: "alerts@example.org", to: "user@example.net",
@@ -86,6 +87,31 @@ describe("human handoff email", () => {
       expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBe(marker(checkpoint.updatedAt));
       expect(email).toHaveBeenCalledTimes(2);
     } finally { warning.mockRestore(); }
+  });
+  it("replays a private résumé review alert without leaking its saved path", async () => {
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore<ApplicationCheckpoint>());
+    const created = await workflow.create("pdf-review", "https://example.com/jobs/pdf-review");
+    await workflow.advance(created.jobId, "validated");
+    await workflow.advance(created.jobId, "matched");
+    await workflow.advance(created.jobId, "tailored");
+    const blocked = await workflow.advance(created.jobId, "blocked", {
+      blocker: `${resumeVisualReviewPrefix} Inspect /private/resume.pdf`,
+    });
+    const email = vi.fn(async () => {});
+    await notifyPendingHandoff(workflow, blocked, memorySecrets(), config,
+      { desktopEnabled: false, email });
+    await notifyPendingHandoff(workflow, (await workflow.current(blocked.jobId))!, memorySecrets(), config,
+      { desktopEnabled: false, email });
+    expect(email).toHaveBeenCalledOnce();
+    const secrets = memorySecrets();
+    await secrets.put(config.email!.apiKeySecretRef, "test-secret");
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200 }));
+    await sendHandoffEmail(config, blocked, secrets, fetcher as typeof fetch);
+    const body = String((fetcher.mock.calls[0]![1] as RequestInit).body);
+    expect(body).toContain("resume:review");
+    expect(body).not.toContain("/private/resume.pdf");
+    expect(body).not.toContain(blocked.jobId);
   });
   it("alerts a changed recipient once while keeping the same handoff", async () => {
     const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();

@@ -5,6 +5,7 @@ import { hasUnboundReceiptUrl } from "./requisition.js";
 export interface SubmissionBrowser {
   currentUrl(): string;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
+  receiptContext?(): Promise<string>;
   pageId?(): number | undefined;
   groupId?(): string | undefined;
 }
@@ -20,6 +21,8 @@ export async function submitApplication(
   approvedFinalUrl?: string,
   packagePath?: string,
   packageSha256?: string,
+  beforeClick?: () => Promise<string | undefined>,
+  receiptJob?: { company: string; title: string },
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -45,8 +48,42 @@ export async function submitApplication(
     ...(packagePath ? { packagePath } : {}),
     ...(packageSha256 ? { packageSha256 } : {}),
   });
+  // The durable claim prevents any restart from repeating the final click.
+  // Recheck mutable local policy after the claim and immediately before the
+  // browser action; a denied claim remains conservative and requires review.
+  let policyBlocker: string | undefined;
+  try { policyBlocker = await beforeClick?.(); }
+  catch { policyBlocker = "Private provider policy is unavailable before the final click"; }
+  if (policyBlocker) {
+    await workflow.advance(jobId, "submission-uncertain", {
+      blocker: `${policyBlocker}; no final click was attempted in this run`,
+    });
+    return;
+  }
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
+    // A generic thank-you on the same URL does not prove which job was received.
+    // Inspect all bounded post-click text for contradictions, but require the
+    // actual confirmation line to identify the approved job.
+    const context = await browser.receiptContext?.() ?? confirmation;
+    const identity = (line: string) =>
+      /\bapplying to\s+(.+?)\s+as\s+([^"\r\n]+?)(?:"|\s+\[|$)/i.exec(line);
+    const matchesJob = (match: RegExpExecArray) => receiptJob
+      && match[1]!.trim().toLowerCase() === receiptJob.company.trim().toLowerCase()
+      && match[2]!.trim().toLowerCase() === receiptJob.title.trim().toLowerCase();
+    if (receiptJob) {
+      const contextIdentities = context.split(/\r?\n/).map(identity).filter((match) => match !== null);
+      if (contextIdentities.some((match) => !matchesJob(match))) {
+        throw new Error("Employer receipt identifies another job");
+      }
+      const confirmationIdentities = confirmation.split(/\r?\n/).map(identity).filter((match) => match !== null);
+      const requisition = jobId.split(":").at(-1) ?? "";
+      const confirmationContainsRequisition = /^[a-z0-9_-]{6,}$/i.test(requisition)
+        && new RegExp(`(?:^|[^a-z0-9_-])${requisition}(?:$|[^a-z0-9_-])`, "i").test(confirmation);
+      if (!confirmationIdentities.some(matchesJob) && !confirmationContainsRequisition) {
+        throw new Error("Employer confirmation does not identify the original job");
+      }
+    }
     if (hasUnboundReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {
       throw new Error("Employer receipt is not bound to the original requisition");
     }

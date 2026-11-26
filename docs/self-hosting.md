@@ -37,14 +37,49 @@ to the operating-system secret store, never to this repository or JSON files.
    sessions, or indicates that BrowserOS must be checked separately.
    These checks do not verify sign-ins, stored sending keys, OAuth consent,
    actual email delivery, or a real application.
+   The setup screen can create a private queue configuration with one supported
+   official source (Greenhouse, Ashby, Lever, SmartRecruiters, or an HTTPS
+   employer job page), browser mode, and a direct Overleaf project URL. It
+   reads the daily target, hard cap, and final-approval policy from the compiled
+   section 03; edit and recompile that section to change those values. This
+   first-run action preserves existing private configurations and requires
+   final approval. Set `OPENAPPLY_QUEUE_CONFIG` to the resulting private
+   `~/.openapply-agent/queue-runner.json` for scheduled commands. Add further
+   sources in the private discovery input file after validating their exact
+   employer destinations.
 5. If using automatic site login, create a private authentication policy with
    exact domains and OS secret references. Enter each password through
    `npm run secret:put` using stdin. If enabling email-code entry, register your
    own OAuth desktop client, add its client ID to the policy, and run the
    consent flow. Do not put passwords or client secrets in environment variables.
+   Run `npm run oauth:doctor` with `OPENAPPLY_AUTH_POLICY` set to verify the grant
+   and mailbox identity. A configured client ID alone does not establish consent.
 6. Run discovery and a prepare-only application first. Enable automatic final
    submission only after reviewing the candidate's policy and testing the
    target portals.
+
+### Scheduled provider policy upgrade
+
+The scheduled `queue:run` command defaults to **no enabled providers**, including
+for existing queue files. An entry paused before dispatch stays queued, consumes
+no daily application slot or posting claim, and appears as `provider-paused`
+with a reason in the local run output. If the policy changes after an attempt
+is claimed but before browser activity, the daily slot and a newly created
+canonical claim are released so a rediscovered source ID can retry. A claim
+that existed before the run is preserved. If browser
+activity has begun, OpenApply pauses before the final click as `waiting-human` and keeps
+the existing quota reservation and checkpoint for safe recovery. A revocation
+detected after the durable final-click claim stays `submission-uncertain` with
+an explicit no-click blocker; it cannot be retried automatically.
+`source.enabled` controls discovery only; it
+does not authorize applications. After a provider passes the controlled and
+consented real-site gates in the [beta protocol](monitored-beta-protocol.md),
+add its exact name to `queueProviderAllowlist` in the private queue-runner JSON,
+for example `"queueProviderAllowlist": ["greenhouse"]`. Restart the scheduled
+runner after editing the policy. A policy change detected during a run pauses
+remaining queued jobs until restart. Removing a provider from the list pauses
+its already queued jobs as well. Direct `application:run` remains a separate
+manual path governed by its job-bound handoff and final-approval controls.
 
 The scheduled queue's established path uses BrowserOS neo. An owned-browser
 queue preview is tracked in the release PR stack; recovery from human handoffs

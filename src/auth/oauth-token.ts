@@ -131,9 +131,9 @@ export async function exchangeMailboxAuthorizationCode(policy: AuthenticationPol
 
 /** Reads and refreshes only the configured account's mailbox token, then verifies mailbox identity. */
 export async function getMailboxAccessToken(policy: AuthenticationPolicy, secrets: SecretStore,
-  fetcher: typeof fetch = fetch, now = Date.now()): Promise<string> {
+  fetcher: typeof fetch = fetch, now = Date.now(), requireAutoEnter = true): Promise<string> {
   const verification = policy.emailVerification;
-  if (!verification.enabled || !verification.autoEnter || !verification.provider
+  if (!verification.enabled || (requireAutoEnter && !verification.autoEnter) || !verification.provider
     || !verification.accountId || !verification.oauthClientId || !verification.oauthSecretRef) {
     throw new Error("Automatic email verification is not configured");
   }

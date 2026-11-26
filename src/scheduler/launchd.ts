@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { lstat, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { queueRunnerConfigSchema } from "../application/queue-config.js";
 
@@ -10,7 +11,8 @@ const exec = promisify(execFile);
 const label = "com.openapply.agent";
 const absolutePath = z.string().min(1).refine(isAbsolute, "Use an absolute path");
 export const scheduleConfigSchema = z.object({
-  version: z.literal(1), repositoryPath: absolutePath,
+  version: z.literal(1), repositoryPath: absolutePath.default(
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")),
   queueConfigPath: absolutePath,
   intervalMinutes: z.number().int().min(30).max(1440),
 });

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ApplicationStateStore } from "../storage/contracts.js";
 
 export interface PostingClaim { jobId: string; canonicalUrl: string; claimedAt: string }
+export type PostingClaimReceipt = { status: "claimed" | "duplicate"; createdVersion?: number };
 
 /** Preserve requisition parameters while removing only known referral parameters. */
 export function canonicalPostingUrl(raw: string): string {
@@ -24,14 +25,29 @@ export class PostingClaimLedger {
   constructor(private readonly store: ApplicationStateStore<PostingClaim>) {}
 
   async claim(jobId: string, applicationUrl: string): Promise<"claimed" | "duplicate"> {
+    return (await this.claimWithReceipt(jobId, applicationUrl)).status;
+  }
+
+  async claimWithReceipt(jobId: string, applicationUrl: string): Promise<PostingClaimReceipt> {
     if (!jobId) throw new Error("Posting claim requires a job ID");
     const canonicalUrl = canonicalPostingUrl(applicationUrl);
     const key = `posting:${createHash("sha256").update(canonicalUrl).digest("hex")}`;
     const current = await this.store.read(key);
-    if (current) return current.state.jobId === jobId ? "claimed" : "duplicate";
+    if (current) return { status: current.state.jobId === jobId ? "claimed" : "duplicate" };
     const value = { jobId, canonicalUrl, claimedAt: new Date().toISOString() };
-    if (await this.store.compareAndSwap(key, undefined, value)) return "claimed";
+    const createdVersion = await this.store.compareAndSwap(key, undefined, value);
+    if (createdVersion !== undefined) return { status: "claimed", createdVersion };
     const winner = await this.store.read(key);
-    return winner?.state.jobId === jobId ? "claimed" : "duplicate";
+    return { status: winner?.state.jobId === jobId ? "claimed" : "duplicate" };
+  }
+
+  /** Release only this run's new claim, and only before any browser attempt. */
+  async releaseNewClaim(jobId: string, applicationUrl: string, createdVersion: number): Promise<boolean> {
+    const canonicalUrl = canonicalPostingUrl(applicationUrl);
+    const key = `posting:${createHash("sha256").update(canonicalUrl).digest("hex")}`;
+    const current = await this.store.read(key);
+    if (current?.version !== createdVersion || current.state.jobId !== jobId
+      || current.state.canonicalUrl !== canonicalUrl) return false;
+    return await this.store.delete(key, createdVersion);
   }
 }

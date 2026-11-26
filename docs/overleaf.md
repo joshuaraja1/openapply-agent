@@ -20,7 +20,11 @@ the verified bytes only after checking that hash again. `resume:render` now
 fills the source editor in a private Overleaf project through BrowserOS neo,
 recompiles, downloads the PDF, and verifies it before writing a private
 application package. The raster gate catches visual defects missed by text
-extraction, but it does not yet judge typography, section spacing, or contrast.
+extraction. It now rejects a page with fewer than 100 pixels whose contrast
+against white paper reaches 4.5:1, and runs the real PDF fixture on Linux,
+Windows, and the owned-browser smoke job. This is a whole-page floor: one dark
+heading can coexist with unreadable pale body text, so the check does not yet
+judge contrast per text region, typography, or section spacing.
 Visually review those qualities before enabling unattended submission.
 
 ## One-time setup

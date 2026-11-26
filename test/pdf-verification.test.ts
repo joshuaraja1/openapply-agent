@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PDFDocument, PDFString } from "pdf-lib";
+import { PDFDocument, PDFString, rgb } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
 import { assertNoTextOverlap, verifyResumePdf } from "../src/resume/verify-pdf.js";
@@ -34,14 +34,20 @@ const source: ResumeSource = { latex, renderToken, fingerprint: createHash("sha2
 async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean;
   overlap?: boolean; link?: boolean; subject?: string;
   extraLink?: string; edgeGraphic?: boolean; darkBackground?: boolean;
-  secondPageLines?: number } = {}): Promise<void> {
+  secondPageLines?: number; paleText?: boolean; paleClaim?: boolean;
+  claimRule?: boolean } = {}): Promise<void> {
   const pdf = await PDFDocument.create();
   pdf.setSubject(options.subject ?? `OpenApply:${renderToken}`);
   const page = pdf.addPage([612, 792]);
-  page.drawText("Test Candidate", { x: 40, y: 740 });
-  page.drawText(options.title ?? "Backend Engineer", { x: 40, y: 720 });
-  page.drawText("Example Co", { x: 40, y: 700 });
-  page.drawText(options.claim ?? "Built Python services", { x: options.offPage ? 800 : 40, y: 680 });
+  const textColor = options.paleText ? rgb(0.79, 0.79, 0.79) : rgb(0, 0, 0);
+  page.drawText("Test Candidate", { x: 40, y: 740, color: textColor });
+  page.drawText(options.title ?? "Backend Engineer", { x: 40, y: 720, color: textColor });
+  page.drawText("Example Co", { x: 40, y: 700, color: textColor });
+  page.drawText(options.claim ?? "Built Python services", {
+    x: options.offPage ? 800 : 40, y: 680,
+    color: options.paleClaim ? rgb(0.79, 0.79, 0.79) : textColor,
+  });
+  if (options.claimRule) page.drawLine({ start: { x: 40, y: 685 }, end: { x: 263, y: 685 }, thickness: 1 });
   if (options.edgeGraphic) page.drawRectangle({ x: 0, y: 350, width: 2, height: 50 });
   if (options.darkBackground) page.drawRectangle({ x: 0, y: 0, width: 612, height: 792 });
   if (options.overlap) page.drawText("Overlapping sentence", { x: 40, y: 680 });
@@ -121,9 +127,24 @@ describe("job-bound PDF verification", () => {
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("ink too close");
       await fixture(path, { darkBackground: true });
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("excessive ink");
+      await fixture(path, { paleText: true });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("high-contrast ink");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("pauses for review when one text region is pale despite dark headings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
+    try {
+      const path = join(root, "resume.pdf");
+      await fixture(path, { paleClaim: true });
+      await expect(verifyResumePdf(path, job, candidate, source))
+        .rejects.toThrow("human visual review required");
+      await fixture(path, { paleClaim: true, claimRule: true });
+      await expect(verifyResumePdf(path, job, candidate, source))
+        .rejects.toThrow("human visual review required");
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("rejects a mostly empty overflow page but permits a filled second page", async () => {

@@ -38,6 +38,8 @@ export interface ApplicationCheckpoint {
   artifactSha256?: string;
   sourceFingerprint?: string;
   confirmation?: string;
+  /** One durable identity for the final-click attempt; retained through recovery. */
+  submissionClaimId?: string;
   blocker?: string;
   browserPageId?: number;
   browserPageUrl?: string;
@@ -49,7 +51,13 @@ export interface ApplicationCheckpoint {
   handoffId?: string;
   desktopNotifiedFor?: string;
   emailNotifiedFor?: string;
+  createdAt?: string;
   updatedAt: string;
+}
+
+export const resumeVisualReviewPrefix = "Résumé PDF requires human visual review:";
+export function needsResumeVisualReview(checkpoint: ApplicationCheckpoint): boolean {
+  return checkpoint.stage === "blocked" && checkpoint.blocker?.startsWith(resumeVisualReviewPrefix) === true;
 }
 
 /** An uncertain final click is a new alert even if an earlier human handoff was notified. */
@@ -70,7 +78,8 @@ export class ApplicationWorkflow {
   async markNotification(jobId: string, channel: "desktop" | "email",
     expectedHandoffId: string, deliveryMarker = expectedHandoffId): Promise<ApplicationCheckpoint> {
     const current = await this.store.read(jobId);
-    if (!current || !["waiting-human", "submission-uncertain"].includes(current.state.stage)
+    if (!current || !(["waiting-human", "submission-uncertain"].includes(current.state.stage)
+      || needsResumeVisualReview(current.state))
       || notificationIdentity(current.state) !== expectedHandoffId) {
       throw new Error("Notification belongs to a different handoff checkpoint");
     }
@@ -84,8 +93,9 @@ export class ApplicationWorkflow {
   }
 
   async create(jobId: string, officialUrl: string): Promise<ApplicationCheckpoint> {
+    const now = new Date().toISOString();
     const checkpoint: ApplicationCheckpoint = {
-      jobId, officialUrl, stage: "discovered", updatedAt: new Date().toISOString(),
+      jobId, officialUrl, stage: "discovered", createdAt: now, updatedAt: now,
     };
     const version = await this.store.compareAndSwap(jobId, undefined, checkpoint);
     if (!version) throw new Error(`Application ${jobId} already exists`);
@@ -148,6 +158,7 @@ export class ApplicationWorkflow {
       ...current.state,
       ...details,
       stage,
+      ...(stage === "submit-claimed" ? { submissionClaimId: randomUUID() } : {}),
       ...(stage === "waiting-human" ? { handoffId: randomUUID() } : {}),
       updatedAt: new Date().toISOString(),
     };

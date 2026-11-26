@@ -9,12 +9,15 @@ import { EmailCodeEntry } from "../auth/email-entry.js";
 import { candidateProfileSchema, searchPreferencesSchema } from "../candidate/schema.js";
 import { discoveryInputSchema } from "../config.js";
 import { createJakeResumeSource } from "../resume/jake.js";
+import { readBundledJakeTemplate } from "../resume/bundled-template.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
+import { ResumeVisualReviewRequiredError } from "../resume/visual-qa.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
+import { readPrivateFile } from "../storage/private-path.js";
 import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
@@ -28,16 +31,19 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
 import { queueFileSchema } from "./queue-schema.js";
 import { writeApplicationPackage } from "./package-file.js";
-import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { ApplicationWorkflow, needsResumeVisualReview,
+  type ApplicationCheckpoint } from "./state-machine.js";
+import { recordResumeVisualReview } from "./resume-review.js";
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 import { recoverClaimedSubmission } from "./recover-submission.js";
+import { currentProviderPauseReason } from "./provider-gate.js";
 
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 await holdWorkflowLease();
 const configPath = process.env.OPENAPPLY_QUEUE_CONFIG;
 if (!configPath) throw new Error("Set OPENAPPLY_QUEUE_CONFIG to a private queue-runner configuration");
-const config = queueRunnerConfigSchema.parse(await json(configPath));
+const config = queueRunnerConfigSchema.parse(JSON.parse(await readPrivateFile(configPath)));
 if (config.browserEndpoint) assertLocalBrowserEndpoint(config.browserEndpoint);
 const authPolicy = config.authenticationPolicyPath
   ? await loadAuthenticationPolicy(config.authenticationPolicyPath) : undefined;
@@ -56,8 +62,6 @@ const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
-await assertAutonomousNotificationReady(preferences.applicationPolicy.requireFinalApproval,
-  notificationConfig, secrets);
 const workflow = new ApplicationWorkflow(sqlite?.store<ApplicationCheckpoint>("applications")
   ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(sqlite?.store<DailyQuotaRecord>("quota")
@@ -69,7 +73,7 @@ const postingClaims = new PostingClaimLedger(sqlite?.store<PostingClaim>("postin
 const emailCode = authPolicy?.emailVerification.autoEnter
   ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
     ?? new EncryptedApplicationStateStore(join(root, "email-code-claims.enc.json"), key)) : undefined;
-const template = await readFile("templates/resume/main.tex", "utf8");
+const template = await readBundledJakeTemplate();
 // Replay pending alerts independently of today's queue: a source outage or
 // closed posting must not hide an already-saved human handoff.
 const checkpoints = sqlite
@@ -83,7 +87,8 @@ for (const record of checkpoints) {
   if (record.state?.jobId === record.id) {
     const saved = record.state.stage === "submit-claimed"
       ? await recoverClaimedSubmission(workflow, record.state, root) : record.state;
-    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain") {
+    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain"
+      || needsResumeVisualReview(saved)) {
       await notifyPendingHandoff(workflow, saved, secrets, notificationConfig);
     }
   }
@@ -113,10 +118,12 @@ for (const entry of runnableEntries(queue.queue)) {
     }
   }
 }
-const connection = config.browserRuntime === "browseros"
-  ? await connectBrowserOs(config.browserEndpoint!) : undefined;
-const client: BrowserToolClient | undefined = connection && { callTool: async (request) =>
-  await connection.client.callTool(request) as BrowserToolResult };
+if (eligible.some((job) => config.queueProviderAllowlist.includes(job.provider))) {
+  await assertAutonomousNotificationReady(preferences.applicationPolicy.requireFinalApproval,
+    notificationConfig, secrets);
+}
+let connection: Awaited<ReturnType<typeof connectBrowserOs>> | undefined;
+let client: BrowserToolClient | undefined;
 try {
   const date = () => {
     const now = new Date();
@@ -124,13 +131,36 @@ try {
   };
   const cap = Math.min(preferences.applicationPolicy.dailyTarget, preferences.applicationPolicy.dailyHardCap);
   const outcomes = await runApplicationQueue(eligible, quota, retries, date, cap, async (job) => {
+    // The canonical claim and quota reservation may await storage. Recheck
+    // once more before rendering or opening any employer browser page.
+    let preBrowserReason: string | undefined;
+    try { preBrowserReason = await currentProviderPauseReason(configPath, config, job.provider); }
+    catch { preBrowserReason = "Private queue provider policy is unavailable before browser activity"; }
+    if (preBrowserReason) {
+      return { status: "provider-paused" as const, reason: preBrowserReason };
+    }
+    // A disabled provider never needs a browser connection or a PDF render.
+    if (config.browserRuntime === "browseros" && !connection) {
+      connection = await connectBrowserOs(config.browserEndpoint!);
+      client = { callTool: async (request) =>
+        await connection!.client.callTool(request) as BrowserToolResult };
+    }
     const source = jobSources.get(job.id) ?? sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
-    const artifact = config.browserRuntime === "owned"
-      ? await renderOwnedOverleafResume(config.overleafProjectUrl, job, candidate,
-        resumeSource, config.outputDirectory, { profileDirectory: join(root, "browser-profile") })
-      : await renderOverleafResume(client!, config.overleafProjectUrl, job, candidate,
-        resumeSource, config.outputDirectory);
+    let artifact;
+    try {
+      artifact = config.browserRuntime === "owned"
+        ? await renderOwnedOverleafResume(config.overleafProjectUrl, job, candidate,
+          resumeSource, config.outputDirectory, { profileDirectory: join(root, "browser-profile") })
+        : await renderOverleafResume(client!, config.overleafProjectUrl, job, candidate,
+          resumeSource, config.outputDirectory);
+    } catch (error) {
+      if (!(error instanceof ResumeVisualReviewRequiredError)) throw error;
+      const checkpoint = await recordResumeVisualReview(workflow, job, error);
+      await notifyPendingHandoff(workflow, checkpoint, secrets, notificationConfig);
+      return { status: "resume-review" as const,
+        reason: "Résumé PDF needs human visual review before upload" };
+    }
     const host = new URL(job.applicationUrl).hostname;
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),
@@ -146,13 +176,16 @@ try {
     const packagePath = join(config.outputDirectory, `application-${randomUUID()}.json`);
     await writeApplicationPackage(packagePath, pkg);
     const account = authPolicy ? accountForUrl(authPolicy, job.applicationUrl) : undefined;
+    const activeClient = client;
     const result = await runApplicationPackage(pkg, workflow, join(root, "browser-profile"), {
       packagePath,
+      beforeFinalSubmit: async (activeJob) => await currentProviderPauseReason(configPath, config,
+        activeJob.provider),
       ...(account ? { account, secretStore: secrets } : {}),
       ...(emailCode ? { emailCode } : {}),
-      ...(client ? { browserFactory: async (allowedHosts: ReadonlySet<string>,
+      ...(activeClient ? { browserFactory: async (allowedHosts: ReadonlySet<string>,
         approvedArtifacts: ReadonlyMap<string, string>) => ({
-        browser: new NeoApplicationBrowser(client, allowedHosts, approvedArtifacts),
+        browser: new NeoApplicationBrowser(activeClient, allowedHosts, approvedArtifacts),
         close: async () => {},
       }) } : {}),
     });
@@ -169,7 +202,14 @@ try {
       default:
         return undefined;
     }
-  }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
+  }, async (job) => {
+    const receipt = await postingClaims.claimWithReceipt(job.id, job.applicationUrl);
+    const createdVersion = receipt.createdVersion;
+    return { claimed: receipt.status === "claimed",
+      ...(createdVersion !== undefined ? { releaseBeforeBrowser: async () =>
+        await postingClaims.releaseNewClaim(job.id, job.applicationUrl, createdVersion) } : {}) };
+  },
+  async (job) => await currentProviderPauseReason(configPath, config, job.provider));
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
   await connection?.close();

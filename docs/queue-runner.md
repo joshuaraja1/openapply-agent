@@ -69,6 +69,15 @@ CAPTCHA, and MFA pause for human handling. Queue output reports `submitted`,
 `waiting-human`, `submission-uncertain`, `blocked`, or `skipped` when the
 application workflow reaches one of those stages. `processed` remains the
 fallback for generic queue callers that do not return an application stage.
+If a rendered résumé has a text region with no detectable high-contrast ink,
+the queue stops before opening an employer form and records a durable blocked
+checkpoint. It releases that attempt's daily quota and canonical posting claim,
+then sends the generic attention alert. Run `openapply resume:review` to list
+the exact job and private PDF path on this machine. Inspect the PDF, correct
+the résumé source, and rerun the queue. The PDF must pass verification again;
+review alone does not authorize uploading an uncertain artifact. This raster
+check catches some pale or missing text, but cannot judge wording, spacing,
+font quality, or every visual defect.
 The encrypted checkpoint holds the confirmation or exact handoff reason.
 On macOS, a paused application also triggers a generic desktop notification.
 Optional email alerts use a private
@@ -169,10 +178,14 @@ installation, prior submissions predate this ledger and need a one-time review
 before unattended use. A reused employer URL also needs manual review rather
 than automatic resubmission.
 
-On macOS, build the project, copy `examples/schedule.example.json` to a private
-path, set its paths and interval, then install a LaunchAgent. It runs at login
-and each interval while the user session is active. The installer writes a
-private plist and local logs; it does not store account passwords or cookies.
+On macOS, Windows, and Linux, build the project, copy
+`examples/schedule.example.json` to a private path, set absolute paths and an
+interval of at least 30 minutes, then install the local schedule. It runs in
+the signed-in user's session. macOS uses a LaunchAgent, Linux a systemd user
+timer, and Windows an interactive user Task Scheduler entry. The scheduler
+stores the private queue-config path and writes local logs; it does not store
+account passwords or cookies. Browser and Overleaf sessions must be available
+when a run starts.
 
 ```bash
 npm run build
@@ -180,10 +193,17 @@ OPENAPPLY_SCHEDULE_CONFIG=/private/schedule.json npm run schedule:install
 npm run schedule:remove
 ```
 
-Installing fails if an OpenApply LaunchAgent is already present. Remove it
-before changing the schedule. BrowserOS and Overleaf sessions must remain
-available for unattended runs; an unavailable session produces a failed job
-and eventually quarantines it for review.
+On Windows PowerShell, set `$env:OPENAPPLY_SCHEDULE_CONFIG` to the absolute
+private JSON path before running `openapply schedule:install` (or the npm
+script in a source checkout). Installed CLI users may omit `repositoryPath`
+from the private schedule JSON; OpenApply then uses its current installed
+package directory. Source checkout users should set `repositoryPath` to that
+checkout. `openapply schedule:remove` removes an installed schedule. On Linux, the
+systemd user manager must be running (`systemctl --user`); this does not
+enable lingering after logout. Installing fails if an OpenApply schedule is
+already present. Remove it before changing the schedule. An unavailable
+browser or Overleaf session produces a failed job and eventually quarantines
+it for review.
 
 For unattended final submission, set `requireFinalApproval` to `false` in the
 private preferences and provide an exact employer confirmation string in

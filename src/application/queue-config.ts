@@ -14,6 +14,9 @@ export const queueRunnerConfigSchema = z.object({
   authenticationPolicyPath: absolutePath.optional(),
   notificationConfigPath: absolutePath.optional(),
   overleafProjectUrl: z.url(), outputDirectory: absolutePath,
+  // Explicit local beta policy. Legacy configurations parse to an empty list.
+  queueProviderAllowlist: z.array(z.enum(["greenhouse", "ashby", "lever", "smartrecruiters",
+    "workday", "jsonld"])).max(6).default([]),
   expectedConfirmationByDomain: z.record(z.string(), z.string().min(1)).default({}),
 }).superRefine((config, context) => {
   if (config.browserRuntime === "browseros" && !config.browserEndpoint) {

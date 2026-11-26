@@ -8,10 +8,30 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  scheduler-smoke:
+    name: User scheduler smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --run test/scheduler.test.ts test/scheduler-platforms.test.ts
+
   owned-browser-smoke:
     name: Owned Chromium profile smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -21,7 +41,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run browser:doctor
-      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/provider-portal.e2e.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts
+      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/provider-portal.e2e.test.ts test/provider-completion-matrix.e2e.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts test/first-run-browser-flow.e2e.test.ts test/pdf-verification.test.ts
         env:
           OPENAPPLY_BROWSER_E2E: "1"
 
@@ -36,7 +56,7 @@ jobs:
           cache: npm
       - run: npm ci
       # Each file launches OS ACL checks; serial files avoid competing PowerShell processes.
-      - run: npm test -- --no-file-parallelism test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/application-package-file.test.ts test/setup-init.test.ts test/setup-ui.test.ts test/runtime-readiness.test.ts test/discovery-output.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts test/sqlite-migration.test.ts test/sqlite-runtime.test.ts test/data-controls.test.ts test/queue-handoff-integration.test.ts test/queue-cli.stage.test.ts
+      - run: npm test -- --no-file-parallelism test/windows-credential-store.integration.test.ts test/windows-acl.integration.test.ts test/windows-private-runtime.integration.test.ts test/windows-private-input-output.integration.test.ts test/application-package-file.test.ts test/setup-init.test.ts test/setup-ui.test.ts test/runtime-readiness.test.ts test/discovery-output.test.ts test/owned-overleaf.test.ts test/overleaf-renderer.test.ts test/sqlite-migration.test.ts test/sqlite-runtime.test.ts test/data-controls.test.ts test/queue-handoff-integration.test.ts test/queue-cli.stage.test.ts test/pdf-verification.test.ts
 
   verify:
     name: verify (Node ${{ matrix.node }})

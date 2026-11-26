@@ -24,6 +24,9 @@ async function fixture() {
     { stage: "waiting-human", privateEmail: "fixture@example.com" });
   await applications.compareAndSwap("job:deleted", undefined, { stage: "found" });
   await applications.delete("job:deleted", 1);
+  const beta = new EncryptedApplicationStateStore(join(privateDir, "beta-evidence.enc.json"), key);
+  await beta.compareAndSwap("consent:candidate-1", undefined,
+    { participantId: "candidate-1", privateNote: "do not publish" });
   await writeFile(paths.discoveryStatePath, JSON.stringify({ jobs: {} }), { mode: 0o600 });
   await writeFile(paths.queuePath, JSON.stringify({ queue: [] }), { mode: 0o600 });
   if (process.platform === "win32") {
@@ -57,6 +60,7 @@ describe("private state export and deletion", () => {
       await expect(purgeLocalStateArchive(f.paths, nestedUnderMissingDatabase, true, true))
         .rejects.toThrow("separate");
       expect(exported.records.applications).toHaveLength(2);
+      expect(exported.records.betaEvidence).toHaveLength(1);
       expect(exported.records.applications).toContainEqual({ id: "job:deleted", version: 1 });
       expect(await readFile(f.output, "utf8")).not.toContain(f.key.toString("base64"));
       if (process.platform !== "win32") expect((await lstat(f.output)).mode & 0o077).toBe(0);
@@ -68,7 +72,7 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("Archive path already exists");
       expect(await readFile(join(f.archive, "existing.txt"), "utf8")).toBe("keep me");
       await rm(f.archive, { recursive: true });
-      expect(await quarantineLocalState(f.paths, f.key, f.output, f.archive, true)).toBe(3);
+      expect(await quarantineLocalState(f.paths, f.key, f.output, f.archive, true)).toBe(4);
       expect(await f.applications.read("job:1")).toBeUndefined();
       const unrelated = join(f.archive, "unrelated.txt");
       await writeFile(unrelated, "keep me", { mode: 0o600 });
@@ -86,7 +90,7 @@ describe("private state export and deletion", () => {
       expect((await f.applications.read("job:1"))?.state)
         .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
       await rm(f.paths.queuePath);
-      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(2);
+      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(3);
       expect((await f.applications.read("job:1"))?.state)
         .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
     } finally { await rm(f.root, { recursive: true, force: true }); }
@@ -107,13 +111,13 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("changed since export");
       const freshExport = join(f.privateDir, "fresh-export.json");
       await exportLocalState(f.paths, f.key, freshExport);
-      expect(await quarantineLocalState(f.paths, f.key, freshExport, f.archive, true)).toBe(4);
-      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(4);
+      expect(await quarantineLocalState(f.paths, f.key, freshExport, f.archive, true)).toBe(5);
+      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(5);
       const reopened = (await openActiveSqliteRuntime(f.key, f.paths.databasePath))!;
       expect((await reopened.store("applications").read("job:2"))?.state)
         .toEqual({ stage: "found" });
       reopened.close();
-      expect(await quarantineLocalState(f.paths, f.key, freshExport, f.archive, true)).toBe(4);
+      expect(await quarantineLocalState(f.paths, f.key, freshExport, f.archive, true)).toBe(5);
       await expect(purgeLocalStateArchive(f.paths, f.archive, true, false as true))
         .rejects.toThrow("both confirmations");
       const unrelated = join(f.archive, "unrelated.txt");
