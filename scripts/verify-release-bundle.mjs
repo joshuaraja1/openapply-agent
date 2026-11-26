@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const platforms = ["darwin", "win32", "linux"];
-const extensions = { darwin: ".pkg", win32: ".msi", linux: ".tar.gz" };
+const extensions = { darwin: [".pkg"], win32: [".msi", ".exe"], linux: [".tar.gz"] };
 
 function regularFile(path) {
   const info = lstatSync(path);
@@ -129,7 +129,7 @@ export function verifyReleaseBundle(directory, publicKeyPath, trusted = {}, curr
     for (const item of manifest.artifacts) {
       if (!platforms.includes(item.platform) || byPlatform.has(item.platform)
         || typeof item.file !== "string" || basename(item.file) !== item.file
-        || !item.file.endsWith(extensions[item.platform])
+        || !extensions[item.platform].some((extension) => item.file.endsWith(extension))
         || !/^[a-f0-9]{64}$/.test(item.sha256 ?? "")) {
         throw new Error("Release manifest has an invalid artifact");
       }

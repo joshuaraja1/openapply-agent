@@ -71,7 +71,7 @@ release artifact.
 
 `npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem /absolute/new-verified-output`
 fails unless an Ed25519-signed manifest names one macOS `.pkg`, one Windows
-`.msi`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
+`.msi` or `.exe`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
 that manifest. Keep the signing key outside the repository. Set
 `OPENAPPLY_RELEASE_KEY_SHA256` to the SHA-256 fingerprint of the trusted
 public-key PEM obtained through a separately trusted channel; the command
@@ -99,7 +99,7 @@ The bundle contains `release-manifest.json`, its raw Ed25519 signature in
   "version": "0.1.0",
   "artifacts": [
     { "platform": "darwin", "file": "OpenApply.pkg", "sha256": "<64 lowercase hex characters>" },
-    { "platform": "win32", "file": "OpenApply.msi", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "win32", "file": "OpenApply-Setup.exe", "sha256": "<64 lowercase hex characters>" },
     { "platform": "linux", "file": "OpenApply.tar.gz", "sha256": "<64 lowercase hex characters>" }
   ]
 }
@@ -129,4 +129,6 @@ and uninstall on each supported OS, including browser installation and private
 file permissions. macOS requires validated signing and notarization; Windows
 requires a validated code-signing identity; Linux needs a production
 distribution format and signing process. This preflight covers a portable
-Linux tarball only. No production signing or packaging is configured by this PR.
+Linux tarball only. The supported NSIS Windows build is described in
+[`windows-nsis.md`](windows-nsis.md); it remains a staging path until a real
+certificate-backed signed install and update/rollback drill pass.
