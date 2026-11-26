@@ -95,7 +95,7 @@ export function buildMacOSPkg(tarballPath, outputPath, options = {}, run = comma
     { cwd: runtimePackage });
     const scripts = join(scratch, "scripts");
     mkdirSync(scripts, { mode: 0o700 });
-    writeFileSync(join(scripts, "preinstall"), `#!/bin/sh\nset -eu\nif [ -e "${installPath}" ] || [ -L "${installPath}" ]; then\n  echo 'OpenApply already exists; use a reviewed updater, not this clean-install package.' >&2\n  exit 1\nfi\n`, { mode: 0o755 });
+    writeFileSync(join(scripts, "preinstall"), `#!/bin/sh\nset -eu\n# Installer passes the destination volume as argument 3. Check that volume,\n# including when a clean-install drill targets a disposable macOS volume.\nif [ "$#" -lt 3 ] || [ -z "$3" ]; then\n  echo 'Installer destination volume is missing.' >&2\n  exit 1\nfi\ncase "$3" in\n  /*) target_volume="$3" ;;\n  *) echo 'Installer destination volume is invalid.' >&2; exit 1 ;;\nesac\ntarget="\${target_volume%/}${installPath}"\nif [ -e "$target" ] || [ -L "$target" ]; then\n  echo 'OpenApply already exists; use a reviewed updater, not this clean-install package.' >&2\n  exit 1\nfi\n`, { mode: 0o755 });
     if (!options.unsignedSmoke) {
       for (const file of [...nativeFiles(join(appRoot, "runtime")), node]) {
         run("codesign", ["--force", "--options", "runtime", "--timestamp", "--sign", options.appIdentity, file]);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -51,6 +51,54 @@ test("builds a real unsigned macOS PKG containing the CLI and bundled Node", { s
     assert.match(files.stdout, /Applications\/OpenApply\/bin\/node/);
     assert.match(files.stdout, /Applications\/OpenApply\/bin\/openapply/);
     assert.match(files.stdout, /Applications\/OpenApply\/runtime\/package\/dist\/src\/product-cli\.js/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("unsigned package drill preserves private data and refuses an unsafe upgrade", { skip: process.platform !== "darwin" }, () => {
+  const f = fixture();
+  try {
+    buildMacOSPkg(f.tarball, f.output, {
+      unsignedSmoke: true, nodeBinary: process.env.OPENAPPLY_MAC_TEST_NODE ?? process.execPath,
+    }, undefined, f.install);
+    const expanded = join(f.root, "expanded-full");
+    const unpack = spawnSync("pkgutil", ["--expand-full", f.output, expanded], { encoding: "utf8" });
+    assert.equal(unpack.status, 0, unpack.stderr);
+
+    const target = join(f.root, "disposable-volume");
+    const app = join(target, "Applications", "OpenApply");
+    const privateState = join(f.root, "candidate-home", "Library", "Application Support", "OpenApply", "state.db");
+    mkdirSync(join(target, "Applications"), { recursive: true });
+    mkdirSync(join(f.root, "candidate-home", "Library", "Application Support", "OpenApply"), { recursive: true });
+    writeFileSync(privateState, "private state sentinel");
+    const preinstall = join(expanded, "Scripts", "preinstall");
+    const guard = (volume) => spawnSync("sh", [preinstall, f.output, "/", volume], { encoding: "utf8" });
+    assert.equal(guard(target).status, 0);
+    assert.notEqual(guard("").status, 0);
+    assert.notEqual(guard("relative-volume").status, 0);
+
+    cpSync(join(expanded, "Payload", "Applications", "OpenApply"), app, { recursive: true });
+    const packagedNode = join(app, "bin", "node");
+    const packagedCli = join(app, "runtime", "package", "dist", "src", "product-cli.js");
+    const cli = spawnSync(packagedNode, [packagedCli, "--help"], { encoding: "utf8" });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /OpenApply fixture/);
+    const installedCli = readFileSync(packagedCli, "utf8");
+    assert.notEqual(guard(target).status, 0, "repeat install must fail before altering the runtime");
+    assert.equal(readFileSync(packagedCli, "utf8"), installedCli);
+
+    // Model the documented manual removal and failed-upgrade rollback on the
+    // disposable volume; no host /Applications or package receipt is touched.
+    const backup = join(f.root, "rollback-copy");
+    cpSync(app, backup, { recursive: true });
+    rmSync(app, { recursive: true, force: true });
+    assert.equal(existsSync(app), false);
+    assert.equal(readFileSync(privateState, "utf8"), "private state sentinel");
+    symlinkSync(backup, app);
+    assert.notEqual(guard(target).status, 0, "a symlink at the install path must be refused");
+    rmSync(app);
+    cpSync(backup, app, { recursive: true });
+    assert.equal(readFileSync(packagedCli, "utf8"), installedCli);
+    assert.equal(readFileSync(privateState, "utf8"), "private state sentinel");
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
