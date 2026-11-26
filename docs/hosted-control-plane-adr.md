@@ -36,8 +36,13 @@ Official feeds → discovery ──────┤
    Never derive tenant ownership from a request path alone. Candidate API
    handlers load records by the authenticated subject and recheck ownership.
    Keep access tokens short-lived and out of browser local storage; session
-   renewal and logout need an explicit security-tested design.
-2. **Billing.** Stripe Checkout success redirects are UI signals only. A
+   renewal and logout need an explicit security-tested design. Protect state
+   changes against CSRF, restrict CORS to the product origin, and set a
+   restrictive Content Security Policy for the UI.
+2. **Billing.** The server creates Stripe Checkout for the authenticated
+   subject and binds it to exactly one Stripe customer; enforce uniqueness on
+   that mapping and reject a client-supplied customer ID. Checkout success
+   redirects are UI signals only. A
    separate raw-body signed webhook records an event ID idempotently and
    schedules reconciliation. Read current customer/subscription/invoice state
    from Stripe; atomically replace that candidate's paid entitlement set.
@@ -52,7 +57,10 @@ Official feeds → discovery ──────┤
    Store source hashes and candidate-confirmed fact versions. A fact approval
    request identifies a pending server-side draft; the client cannot supply
    its own authoritative draft, evidence, or `verified` status. Exports and
-   deletion require the same tenant authorization.
+   deletion require the same tenant authorization. Never promote instructions
+   found in a resume, transcript, posting, or web page into agent policy or
+   executable tool calls; the candidate's approved facts and application
+   policy remain the authority.
 4. **Queue and worker.** SQS FIFO groups messages by candidate, allowing
    different candidates to progress independently. FIFO ordering and its
    short deduplication window are not a submission guarantee. A conditional
@@ -61,19 +69,23 @@ Official feeds → discovery ──────┤
    again. Dispatch a bounded Fargate batch when work exists rather than
    maintaining one idle browser per subscriber.
 5. **Browser session.** The user signs into a dedicated cloud browser through
-   an authenticated, private handoff. Do not expose CDP/VNC publicly, copy a
+   an authenticated, private handoff using a short-lived, one-use capability
+   bound to candidate, job, task, and action. Do not expose CDP/VNC publicly, copy a
    daily Chrome profile, or transfer cookies without explicit user action.
    Store session state encrypted and tenant-bound outside the task's ephemeral
    disk. Resume attaches only to the saved candidate/job, takes a new DOM
    snapshot, and rechecks entitlement, consent, posting, and submit intent.
    CAPTCHA and MFA require a human. Browser tasks need a tested Chromium
    sandbox and either tenant-scoped AWS credentials or a narrow broker; a
-   bucket-wide task role is insufficient.
+   bucket-wide task role is insufficient. Respect source-site policy and rate
+   limits; do not bypass CAPTCHA or anti-automation controls.
 6. **Deletion.** Tombstone the candidate first, fence new writes and runs,
    drain active writers, remove every version of candidate artifacts and
-   session state, then verify deletion. Keep any legally required billing
-   records under a distinct retention rule. Test deletion racing with a
-   worker upload or paused handoff.
+   session state, then verify deletion. Inventory backups, DLQ payloads,
+   browser snapshots, derived PDFs, logs, and receipts; either delete each or
+   document a distinct retention rule and access boundary. Keep any legally
+   required billing records under a distinct retention rule. Test deletion
+   racing with a worker upload or paused handoff.
 
 ## Service responsibilities
 
@@ -121,17 +133,21 @@ may depend on the same task restarting.
 ## Implementation sequence and acceptance
 
 1. Add Cognito/app-client and scoped API Gateway routes in a test account;
-   test wrong issuer, audience, scope, expired token, and cross-tenant path.
+   test wrong issuer, audience, scope, expired token, cross-tenant path,
+   CSRF, CORS, CSP, renewal, and logout.
 2. Add tenant-bound candidate/billing stores and signed Stripe webhook endpoint;
    test duplicate/out-of-order events, unpaid `active` subscription, refunds,
-   plan switch, and forged free grants.
+   plan switch, forged free grants, forged Checkout customer IDs, and duplicate
+   customer-to-subject binding.
 3. Add private upload, extraction review, dashboard, export/deletion, and
    policy UI; test PII isolation and stale source-version approvals.
 4. Add queue dispatcher and browser-session broker with no public CDP;
    prove live Fargate sandbox and credential scope, session restore, pause,
-   crash recovery, and no duplicate final click.
+   one-use handoff capability, crash recovery, prompt-injection resistance,
+   site-rate-limit behavior, and no duplicate final click.
 5. Run a consented real-site beta, independent human security assessment,
-   accessibility checks, and cost/performance review before public launch.
+   deletion inventory/recovery tests, accessibility checks, and cost/performance
+   review before public launch.
 
 ## Primary references
 
