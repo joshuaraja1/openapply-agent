@@ -45,7 +45,7 @@ describe("user-level recurring schedule rendering", () => {
   });
 
   it.runIf(process.platform === "linux")("passes systemd's unit verifier", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "openapply-systemd-"));
+    const directory = await mkdtemp(join(tmpdir(), "openapply systemd "));
     try {
       const script = join(directory, "autopilot-cli.js");
       await writeFile(script, "// synthetic executable path");

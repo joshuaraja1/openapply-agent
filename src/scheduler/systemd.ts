@@ -12,14 +12,25 @@ const name = "openapply-agent";
 const marker = "# OpenApply managed schedule v1";
 const unitDirectory = () => join(userInfo().homedir, ".config", "systemd", "user");
 
-function unitValue(value: string): string {
+function checkedValue(value: string): string {
   if (/[\r\n\0$]/.test(value)) throw new Error("Scheduler path contains a control or expansion character");
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
+  return value.replaceAll("%", "%%");
+}
+
+function unitValue(value: string): string {
+  return `"${checkedValue(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function unitPath(value: string): string {
+  // systemd's WorkingDirectory and append: path directives take a single path,
+  // not a command argument. Quotes become literal path characters there.
+  if (/[\\"']/u.test(value)) throw new Error("Scheduler path contains unsupported unit path characters");
+  return checkedValue(value);
 }
 
 export function systemdUnits(config: ScheduleConfig, nodePath: string, script: string,
   logs: string): { service: string; timer: string } {
-  const service = `${marker}\n[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitValue(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitValue(join(logs, "autopilot.out.log"))}\nStandardError=append:${unitValue(join(logs, "autopilot.err.log"))}\n`;
+  const service = `${marker}\n[Unit]\nDescription=OpenApply local autopilot\n\n[Service]\nType=oneshot\nWorkingDirectory=${unitPath(config.repositoryPath)}\nEnvironment=${unitValue(`OPENAPPLY_QUEUE_CONFIG=${config.queueConfigPath}`)}\nExecStart=${unitValue(nodePath)} ${unitValue(script)}\nStandardOutput=append:${unitPath(join(logs, "autopilot.out.log"))}\nStandardError=append:${unitPath(join(logs, "autopilot.err.log"))}\n`;
   const timer = `${marker}\n[Unit]\nDescription=Run OpenApply on a local schedule\n\n[Timer]\nOnStartupSec=1min\nOnUnitInactiveSec=${config.intervalMinutes}min\nUnit=${name}.service\n\n[Install]\nWantedBy=timers.target\n`;
   return { service, timer };
 }
