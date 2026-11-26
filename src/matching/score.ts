@@ -79,7 +79,9 @@ export function scoreJob(
     reviewFlags: ["Review candidate evidence or this role manually"],
   };
   const arrangement = `${job.location ?? ""} ${job.workplaceType ?? ""}`.toLowerCase();
-  const requiredArrangement = /\b(?:on[ -]?site|in[ -]?office|five days? (?:per week )?in (?:the )?office)\b/i.test(`${job.descriptionText} ${arrangement}`)
+  const arrangementTerms = `${job.descriptionText} ${arrangement}`
+    .replace(/\b(?:no\s+on[ -]?site\s+work\s+required|on[ -]?site\s+work\s+not\s+required)\b/gi, "");
+  const requiredArrangement = /\b(?:on[ -]?site|in[ -]?office|five days? (?:per week )?in (?:the )?office)\b/i.test(arrangementTerms)
     ? "on-site" : /\bhybrid\b/i.test(arrangement) ? "hybrid" : /\bremote\b/i.test(arrangement) ? "remote" : null;
   const accepted = [...preferences.workArrangements.preferred, ...preferences.workArrangements.accepted]
     .map((value) => value.toLowerCase().replace(/on\s*site|onsite/, "on-site"));
@@ -87,8 +89,11 @@ export function scoreJob(
   if (requiredArrangement && !accepted.includes(requiredArrangement)) {
     arrangementBlockers.push(`${requiredArrangement} work arrangement is outside candidate preferences`);
   }
+  const candidatePlace = /^\s*([^,]+),\s*([a-z]{2})\b/i.exec(candidate.identity.location);
+  const jobPlace = job.location && /^\s*([^,]+),\s*([a-z]{2})\b/i.exec(job.location);
   if (requiredArrangement && requiredArrangement !== "remote" && job.location
-    && !job.location.toLowerCase().includes(candidate.identity.location.split(",")[0]!.toLowerCase())) {
+    && (!candidatePlace || !jobPlace || candidatePlace[1]!.trim().toLowerCase() !== jobPlace[1]!.trim().toLowerCase()
+      || candidatePlace[2]!.toLowerCase() !== jobPlace[2]!.toLowerCase())) {
     arrangementBlockers.push("Onsite or hybrid location needs candidate confirmation");
   }
   const hardRequirements = assessHardRequirements(job.descriptionText, candidate);

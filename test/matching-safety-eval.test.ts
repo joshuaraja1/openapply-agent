@@ -54,6 +54,16 @@ describe("automatic match safety evaluation", () => {
     expect(result.eligible).toBe(false);
   });
 
+  it("does not confuse two states with the same city name", () => {
+    expect(scoreJob({ ...base, location: "Dallas, GA", workplaceType: "Hybrid" },
+      candidate, preferences).eligible).toBe(false);
+  });
+
+  it("does not treat a negated onsite condition as mandatory onsite work", () => {
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. No onsite work required." },
+      candidate, preferences).eligible).toBe(true);
+  });
+
   it("holds roles requiring sponsorship when the employer will not sponsor", () => {
     const sponsored = candidateProfileSchema.parse({ ...candidate,
       authorization: { countries: ["India"], sponsorshipRequiredNowOrFuture: true } });
@@ -68,6 +78,57 @@ describe("automatic match safety evaluation", () => {
         allowedUses: ["matching"] }] });
     expect(scoreJob({ ...base, descriptionText: "TypeScript. Bachelor's degree and Kubernetes required." },
       educated, preferences).eligible).toBe(false);
+  });
+
+  it("matches the required degree level and field, not any degree", () => {
+    const educated = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "degree", claim: "Bachelor's degree in History", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. Master's degree in Computer Science required." },
+      educated, preferences).eligible).toBe(false);
+  });
+
+  it("requires the exact clearance level", () => {
+    const cleared = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "clearance", claim: "Active Secret clearance", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. Active Top Secret clearance required." },
+      cleared, preferences).eligible).toBe(false);
+  });
+
+  it("checks required clauses independently from preferred clauses", () => {
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. Must have Kubernetes; Python preferred." },
+      candidate, preferences).eligible).toBe(false);
+  });
+
+  it("holds a lowercase unsupported tool after an approved qualification", () => {
+    const qualified = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "degree", claim: "Bachelor's degree", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] },
+      { id: "citizenship", claim: "US citizenship", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    for (const descriptionText of ["TypeScript. Must have a Bachelor's degree and kubernetes.",
+      "TypeScript. Must have US citizenship and kubernetes."]) {
+      expect(scoreJob({ ...base, descriptionText }, qualified, preferences).eligible).toBe(false);
+    }
+  });
+
+  it("accepts either supported tool in an OR requirement", () => {
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. Must have TypeScript or JavaScript." },
+      candidate, preferences).eligible).toBe(true);
+  });
+
+  it("does not accept expired credentials", () => {
+    const expired = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "certificate", claim: "AWS certification expired", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. AWS certification required." },
+      expired, preferences).eligible).toBe(false);
   });
 
   it("keeps supported entry-level roles eligible", () => {
