@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { startSetupUi } from "../src/setup/ui.js";
 
@@ -36,6 +37,21 @@ describe("local first-run setup", () => {
       const compile = () => fetch(`${url.origin}/api/compile`, { method: "POST", headers });
       expect((await compile()).status).toBe(200);
       expect((await compile()).status).toBe(200);
+      const preview = (title: string, description: string) => fetch(`${url.origin}/api/preview`, {
+        method: "POST", headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      });
+      const eligible = await preview("Software Engineer", "Build Python services for early career users");
+      expect(eligible.status).toBe(200);
+      expect(await eligible.json()).toMatchObject({ previewOnly: true,
+        match: { eligible: true, matchedSkills: ["Python"] } });
+      const unsupported = await preview("Software Engineer", "Build C++ firmware");
+      expect(await unsupported.json()).toMatchObject({ previewOnly: true,
+        match: { eligible: false, matchedSkills: [] } });
+      expect((await preview("", "Build Python services")).status).toBe(400);
+      expect((await fetch(`${url.origin}/api/preview`, { method: "POST",
+        headers: { ...headers, origin: "https://evil.example", "content-type": "application/json" },
+        body: JSON.stringify({ title: "Software Engineer", description: "Python" }) })).status).toBe(403);
       const profile = JSON.parse(await readFile(join(destination, "candidate-profile.json"), "utf8")) as
         { identity: { fullName: string } };
       expect(profile.identity.fullName).toBe("Test Candidate");
@@ -58,6 +74,11 @@ describe("local first-run setup", () => {
       const page = await fetch(ui.url);
       expect(page.status).toBe(200);
       expect(page.headers.get("content-security-policy")).toContain("default-src 'none'");
+      const html = await page.text();
+      expect(html).toContain("Try a job match");
+      const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+      expect(script).toBeTruthy();
+      expect(() => new Script(script!)).not.toThrow();
       expect((await fetch(`${origin}/api/templates`)).status).toBe(403);
       const listing = await fetch(`${origin}/api/templates`, { headers: { "x-openapply-token": token } });
       const files = (await listing.json()) as { files: { name: string; content: string; sha256: string }[] };

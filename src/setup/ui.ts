@@ -7,6 +7,8 @@ import { assertPrivateFile, readPrivateFile } from "../storage/private-path.js";
 import { createPrivateOutput } from "../storage/private-output.js";
 import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 import { compileCandidateMarkdown, compileSearchMarkdown } from "../candidate/markdown.js";
+import { scoreJob } from "../matching/score.js";
+import type { DiscoveredJob } from "../types.js";
 import { initializeUserWorkspace, userTemplateFiles } from "./init.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -26,6 +28,15 @@ async function body(request: IncomingMessage): Promise<unknown> {
     if (value.length > limit) throw new Error("Template exceeds the size limit");
   }
   return JSON.parse(value) as unknown;
+}
+
+async function setupProfile(destination: string) {
+  const [profile, work, search] = await Promise.all([
+    readPrivateFile(join(destination, "01-candidate-profile.md")),
+    readPrivateFile(join(destination, "02-work-history.md")),
+    readPrivateFile(join(destination, "03-search-preferences.md")),
+  ]);
+  return { candidate: compileCandidateMarkdown(profile, work), preferences: compileSearchMarkdown(search) };
 }
 
 export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number }) {
@@ -59,13 +70,7 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
         return send(response, 200, { files });
       }
       if (url.pathname === "/api/compile" && request.method === "POST") {
-        const [profile, work, search] = await Promise.all([
-          readPrivateFile(join(destination, "01-candidate-profile.md")),
-          readPrivateFile(join(destination, "02-work-history.md")),
-          readPrivateFile(join(destination, "03-search-preferences.md")),
-        ]);
-        const candidate = compileCandidateMarkdown(profile, work);
-        const preferences = compileSearchMarkdown(search);
+        const { candidate, preferences } = await setupProfile(destination);
         await createPrivateOutput(join(destination, "candidate-profile.json"),
           `${JSON.stringify(candidate, null, 2)}\n`);
         await createPrivateOutput(join(destination, "search-preferences.json"),
@@ -74,6 +79,33 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
           approvedClaims: [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
             ...candidate.projects.flatMap((project) => project.claims)]
             .filter((claim) => claim.status === "verified" || claim.status === "user-confirmed").length });
+      }
+      if (url.pathname === "/api/preview" && request.method === "POST") {
+        if (request.headers["content-type"] !== "application/json") {
+          return send(response, 415, { error: "JSON is required" });
+        }
+        const input = await body(request) as Record<string, unknown> | null;
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+          return send(response, 400, { error: "Invalid preview posting" });
+        }
+        const { title, description, location, compensation } = input;
+        if (typeof title !== "string" || !title.trim() || title.length > 200
+          || typeof description !== "string" || !description.trim() || description.length > 100_000
+          || (location !== undefined && (typeof location !== "string" || location.length > 200))
+          || (compensation !== undefined && (typeof compensation !== "string" || compensation.length > 200))) {
+          return send(response, 400, { error: "Provide a job title and description within the size limits" });
+        }
+        const { candidate, preferences } = await setupProfile(destination);
+        const now = new Date().toISOString();
+        const job: DiscoveredJob = {
+          id: "preview:local", provider: "jsonld", company: "Preview posting", title,
+          descriptionText: description, location: location ?? null, workplaceType: null,
+          compensation: compensation ?? null, department: null, employmentType: null,
+          applicationUrl: "https://preview.invalid/apply", sourceUrl: "https://preview.invalid/job",
+          sourcePublishedAt: null, sourceUpdatedAt: null, firstSeenAt: now, discoveredAt: now,
+          isNew: false, isFresh: false, freshnessBasis: "first-seen", matchedKeywords: [],
+        };
+        return send(response, 200, { previewOnly: true, match: scoreJob(job, candidate, preferences) });
       }
       const name = decodeURIComponent(url.pathname.slice("/api/template/".length));
       if (!url.pathname.startsWith("/api/template/") || !names.has(name) || request.method !== "PUT") {
@@ -144,6 +176,8 @@ section{min-width:0}.section-head{display:flex;align-items:end;justify-content:s
 h2{font:normal clamp(27px,3vw,42px)/1 Georgia,serif;margin:0}.note{color:var(--muted);max-width:650px;margin:12px 0 20px}
 textarea{width:100%;min-height:min(62vh,750px);padding:22px;background:#fffefa;border:1px solid var(--ink);border-radius:2px;color:var(--ink);font:14px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;resize:vertical}
 textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.preview{margin-top:34px;padding-top:24px;border-top:1px solid var(--line)}.preview label{display:block;margin:14px 0 5px}.preview input{width:100%;padding:10px;background:#fffefa;border:1px solid var(--ink);font:inherit}.preview textarea{min-height:150px}
+.preview pre{white-space:pre-wrap;background:#fffefa;padding:14px;border:1px solid var(--line)}
 .actions{display:flex;gap:18px;align-items:center;margin:18px 0;flex-wrap:wrap}.save{border:0;background:var(--ink);color:white;padding:12px 24px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.save:hover{background:var(--accent)}.compile{border:1px solid var(--ink);background:transparent;color:var(--ink);padding:11px 20px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.compile:hover{background:#eee6d7}
 #message{color:var(--muted);font-size:14px}footer{padding:20px clamp(22px,6vw,90px);border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media(max-width:760px){header{display:block}main{display:block;padding-top:22px}nav{display:grid;grid-template-columns:1fr 1fr;margin-bottom:28px}nav button{font-size:13px}}
@@ -151,7 +185,11 @@ textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offs
 <main><nav id="files" aria-label="Setup sections"></nav><section><div class="section-head"><h2 id="title">Loading setup</h2><div class="eyebrow" id="progress"></div></div>
 <p class="note">Complete each template with verified facts. The first three files supply résumé and matching data. Your answers stay in your private OpenApply folder.</p>
 <label for="editor" class="eyebrow">Template contents</label><textarea id="editor" spellcheck="false"></textarea>
-<div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><span id="message" role="status" aria-live="polite"></span></div></section></main>
+<div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><span id="message" role="status" aria-live="polite"></span></div>
+<div class="preview"><h2>Try a job match</h2><p class="note">Paste a posting to check your saved evidence and search preferences. This local preview does not verify the employer posting, create a résumé, or apply.</p>
+<label for="preview-title">Job title</label><input id="preview-title" maxlength="200">
+<label for="preview-description">Job description</label><textarea id="preview-description" maxlength="100000"></textarea>
+<div class="actions"><button class="compile" id="preview-run">Preview match</button></div><pre id="preview-result" role="status" aria-live="polite">No preview yet</pre></div></section></main>
 <footer>Local setup · Close this tab and stop the setup process when finished.</footer>
 <script nonce="${nonce}">
 const token=${JSON.stringify(token)};let files=[],selected=0;const editor=document.getElementById('editor'),message=document.getElementById('message');
@@ -161,6 +199,7 @@ document.getElementById('title').textContent=labels[selected];document.getElemen
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
 document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately'}catch(error){message.textContent=error.message}};
 document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims'}catch(error){message.textContent=error.message}};
+document.getElementById('preview-run').onclick=async()=>{const result=document.getElementById('preview-result');if(editor.value!==files[selected].content){result.textContent='Save this section before previewing';return}result.textContent='Checking…';try{const response=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({title:document.getElementById('preview-title').value,description:document.getElementById('preview-description').value})});const data=await response.json();if(!response.ok)throw Error(data.error);const match=data.match;result.textContent=(match.eligible?'Potential match':'Needs review')+' · score '+match.score+'\\n'+match.reasons.join('\\n')+'\\nMatched skills: '+(match.matchedSkills.join(', ')||'none')+(match.reviewFlags.length?'\\nReview: '+match.reviewFlags.join('; '):'')}catch(error){result.textContent=error.message}};
 load().catch(error=>{message.textContent=error.message});
 </script></html>`;
 }
