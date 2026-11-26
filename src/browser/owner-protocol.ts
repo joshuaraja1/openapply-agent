@@ -20,6 +20,7 @@ export type OwnerEnvelope = { request: OwnerRequest; mac: string };
 export const MAX_OWNER_MESSAGE_BYTES = 16_384;
 export type OwnerClaimBinding = Pick<Extract<OwnerRequest, { action: "inspect-tab" }>,
   "tabId" | "claimId" | "jobId" | "officialUrl" | "packageSha256" | "artifactSha256">;
+const bindingKeys = ["tabId", "claimId", "jobId", "officialUrl", "packageSha256", "artifactSha256"] as const;
 
 /** Call once on every owner process start; never reuse an earlier generation. */
 export function createOwnerIdentity(): { secret: Buffer; generation: string } {
@@ -71,9 +72,10 @@ export class OwnerRequestVerifier {
     if (envelope.request.action === "inspect-tab") {
       // The caller must obtain this binding from the active durable checkpoint
       // under the workflow lease. A valid MAC alone never authorizes inspection.
-      if (!expectedBinding || Object.entries(expectedBinding).length !== 6
-        || Object.entries(expectedBinding).some(([key, value]) =>
-          envelope.request[key as keyof OwnerRequest] !== value)) {
+      const request = envelope.request;
+      if (!expectedBinding || bindingKeys.some((key) =>
+        typeof expectedBinding[key] !== "string" || !expectedBinding[key]
+        || request[key] !== expectedBinding[key])) {
         throw new Error("Browser-owner request does not match the active claim");
       }
     }

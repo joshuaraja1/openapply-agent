@@ -25,6 +25,10 @@ describe("inactive browser-owner request protocol", () => {
     expect(() => verifier.verify(raw(envelope), expected)).toThrow("replay");
     expect(() => new OwnerRequestVerifier(secret, generation).verify(raw(envelope),
       { ...expected, jobId: "ashby:other:123" })).toThrow("active claim");
+    const missingArtifact = { ...expected, unrelated: undefined } as unknown as typeof expected;
+    delete (missingArtifact as Partial<typeof expected>).artifactSha256;
+    expect(() => new OwnerRequestVerifier(secret, generation).verify(raw(envelope),
+      missingArtifact)).toThrow("active claim");
     expect(() => new OwnerRequestVerifier(secret, generation).verify(raw({ ...envelope,
       request: { ...envelope.request, jobId: "ashby:other:123" } }), expected)).toThrow("authentication");
     expect(() => new OwnerRequestVerifier(randomBytes(32), generation).verify(raw(envelope), expected)).toThrow("authentication");
