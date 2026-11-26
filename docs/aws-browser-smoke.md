@@ -2,7 +2,7 @@
 
 `cloud/aws-browser-smoke.yaml` defines an **on-demand smoke task**, not a job
 application worker. It has no ECS service, schedule, candidate-data permissions,
-queue consumer, browser session, exposed port, or public IP configuration. The
+queue consumer, persisted candidate browser session, exposed port, or public IP configuration. The
 image command renders a local HTML page and exits. Its task role is absent; its
 execution role can only pull the staging ECR image and write smoke logs.
 
