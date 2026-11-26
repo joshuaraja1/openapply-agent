@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { link, lstat, readFile, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { EncryptedApplicationStateStore } from "./encrypted-state.js";
 import { createPrivateOutput } from "./private-output.js";
 import { assertPrivateFile, ensurePrivateDirectory, readPrivateFile } from "./private-path.js";
+import { secureWindowsPrivatePath } from "./windows-acl.js";
 import { ENCRYPTED_STATE_FILES, openActiveSqliteRuntime,
   type LegacyStatePaths } from "./sqlite-runtime.js";
 
@@ -103,6 +104,8 @@ export async function quarantineLocalState(paths: LocalStatePaths, key: Uint8Arr
   }
   if (await exists(archivePath)) throw new Error("Archive path already exists");
   await ensurePrivateDirectory(dirname(archivePath));
+  await mkdir(archivePath, { mode: 0o700 }); // Fails if another archive appears after the preflight.
+  if (process.platform === "win32") await secureWindowsPrivatePath(archivePath);
   await ensurePrivateDirectory(archivePath);
   const entries: ArchiveEntry[] = [];
   try {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { link, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -62,6 +62,12 @@ describe("private state export and deletion", () => {
       if (process.platform !== "win32") expect((await lstat(f.output)).mode & 0o077).toBe(0);
       await expect(quarantineLocalState(f.paths, f.key, f.output, f.archive, false as true))
         .rejects.toThrow("confirm inactivity");
+      await mkdir(f.archive);
+      await writeFile(join(f.archive, "existing.txt"), "keep me");
+      await expect(quarantineLocalState(f.paths, f.key, f.output, f.archive, true))
+        .rejects.toThrow("Archive path already exists");
+      expect(await readFile(join(f.archive, "existing.txt"), "utf8")).toBe("keep me");
+      await rm(f.archive, { recursive: true });
       expect(await quarantineLocalState(f.paths, f.key, f.output, f.archive, true)).toBe(3);
       expect(await f.applications.read("job:1")).toBeUndefined();
       const unrelated = join(f.archive, "unrelated.txt");
