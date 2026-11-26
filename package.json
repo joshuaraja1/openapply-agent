@@ -57,6 +57,8 @@
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1178.0",
+    "@aws-sdk/client-s3": "^3.1178.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@napi-rs/canvas": "^1.2.0",
     "@napi-rs/keyring": "^2.1.2",
