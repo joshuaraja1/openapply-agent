@@ -59,6 +59,44 @@ function browserFixture(extraRequired = false) {
 }
 
 describe("application runner", () => {
+  it("saves a direct owned-browser submit claim with its private package before the click", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-direct-claim-"));
+    try {
+      const packagePath = join(root, "application.json");
+      const page = { url: job.applicationUrl, title: "Apply", visibleText: "Example Co Software Engineer",
+        controls: [
+          { ref: "email", tag: "input", role: "textbox", name: "Email", type: "email",
+            value: null, required: true, options: [] },
+          { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+            value: null, required: true, options: [] },
+          { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+            value: null, required: false, options: [] },
+        ] };
+      const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
+        handoff: createApplicationHandoff(job, false),
+        resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
+        resumePdfPath: join(root, "resume.pdf"), expectedConfirmation: "Thank you for applying" });
+      const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+      const submit = vi.fn(async () => {
+        expect(await workflow.current(job.id)).toMatchObject({ stage: "submit-claimed",
+          packagePath, browserPageUrl: job.applicationUrl, officialUrl: job.applicationUrl });
+        throw new Error("synthetic transport loss after final click");
+      });
+      await expect(runApplicationPackage(pkg, workflow, join(root, "profile"), {
+        packagePath, validateOfficial: async () => true,
+        verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+          pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+          verifiedAt: new Date().toISOString() }),
+        browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+          navigate: async () => page, fillBatch: async () => page, act: async () => page, submit },
+        close: async () => {} }),
+      })).rejects.toThrow("synthetic transport loss");
+      expect(submit).toHaveBeenCalledOnce();
+      expect(await workflow.current(job.id)).toMatchObject({ stage: "submission-uncertain",
+        packagePath, browserPageUrl: job.applicationUrl, officialUrl: job.applicationUrl });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("resumes an owned-browser handoff on the verified requisition with a job-bound approved answer", async () => {
     const salary = { ref: "salary", tag: "input", role: "textbox", name: "Salary expectation",
       type: "text", value: "", required: true, options: [] };

@@ -486,7 +486,8 @@ export async function runApplicationPackage(
       } else {
         await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
           pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
-          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined);
+          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
+          dependencies.packagePath);
         checkpoint = (await workflow.current(job.id))!;
       }
     }
