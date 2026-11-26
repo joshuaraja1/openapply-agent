@@ -56,6 +56,15 @@ CAPTCHA, and MFA pause for human handling. Queue output reports `submitted`,
 `waiting-human`, `submission-uncertain`, `blocked`, or `skipped` when the
 application workflow reaches one of those stages. `processed` remains the
 fallback for generic queue callers that do not return an application stage.
+If a rendered résumé has a text region with no detectable high-contrast ink,
+the queue stops before opening an employer form and records a durable blocked
+checkpoint. It releases that attempt's daily quota and canonical posting claim,
+then sends the generic attention alert. Run `openapply resume:review` to list
+the exact job and private PDF path on this machine. Inspect the PDF, correct
+the résumé source, and rerun the queue. The PDF must pass verification again;
+review alone does not authorize uploading an uncertain artifact. This raster
+check catches some pale or missing text, but cannot judge wording, spacing,
+font quality, or every visual defect.
 The encrypted checkpoint holds the confirmation or exact handoff reason.
 On macOS, a paused application also triggers a generic desktop notification.
 Optional email alerts use a private

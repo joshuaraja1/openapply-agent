@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { chromium, type BrowserContext, type Page, type Route } from "playwright";
 import { renderOwnedOverleafResume } from "../src/resume/owned-overleaf.js";
+import { ResumeVisualReviewRequiredError } from "../src/resume/visual-qa.js";
 import { launchBrowser } from "../src/browser/runtime.js";
 import type { VerifiedResumeArtifact } from "../src/resume/verify-pdf.js";
 import type { CandidateProfile } from "../src/candidate/schema.js";
@@ -99,6 +100,28 @@ describe("owned Overleaf renderer", () => {
         verify: async () => { throw new Error("PDF failed verification"); },
       })).rejects.toThrow("PDF failed verification");
       expect(await readdir(output)).toEqual([]);
+      expect(close).toHaveBeenCalledOnce();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 30_000);
+
+  it("retains a private PDF only when visual inspection needs a person", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-"));
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
+    const output = join(root, "output");
+    try {
+      const { context, close } = fixture();
+      let savedPath = "";
+      let caught: unknown;
+      try { await renderOwnedOverleafResume(projectUrl, job, candidate, source, output, {
+        launch: async () => ({ context, close }),
+        verify: async (path) => {
+          savedPath = path;
+          throw new ResumeVisualReviewRequiredError("human visual review required");
+        },
+      }); } catch (error) { caught = error; }
+      expect(caught).toMatchObject({ artifactPath: savedPath });
+      expect(await readFile(savedPath)).toHaveLength(200);
+      if (process.platform === "win32") await assertWindowsPrivatePath(savedPath);
       expect(close).toHaveBeenCalledOnce();
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 30_000);

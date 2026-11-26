@@ -45,4 +45,18 @@ describe("daily application queue", () => {
       () => "2026-11-26", 1, async () => {});
     expect(second.map((entry) => entry.status)).toEqual(["quarantined", "processed"]);
   });
+
+  it("does not consume quota or retries for a pre-browser résumé review", async () => {
+    const quota = new DailyQuota(new MemoryApplicationStateStore());
+    const retries = new RetryLedger(new MemoryApplicationStateStore(), 1);
+    const release = vi.fn(async () => true);
+    const claim = vi.fn(async () => ({ claimed: true, releaseBeforeBrowser: release }));
+    const result = await runApplicationQueue(jobs.slice(0, 2), quota, retries,
+      () => "2026-11-24", 1, async (job) => job.id === "one"
+        ? { status: "resume-review", reason: "Visual review required" } : "submitted", claim);
+    expect(result.map((entry) => entry.status)).toEqual(["resume-review", "submitted"]);
+    expect(release).toHaveBeenCalledOnce();
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(await retries.exhausted("one")).toBe(false);
+  });
 });

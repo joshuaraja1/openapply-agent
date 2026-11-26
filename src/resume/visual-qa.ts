@@ -19,13 +19,28 @@ export interface PageImageInspection {
   clearances: { left: number; right: number; top: number; bottom: number };
 }
 
+export interface TextImageRegion { x: number; y: number; width: number; height: number }
+
+/** A rendered résumé that needs a person to inspect it before any employer upload. */
+export class ResumeVisualReviewRequiredError extends Error {
+  constructor(message: string, readonly artifactPath?: string) { super(message); }
+}
+
+function luminance(pixels: Uint8ClampedArray, offset: number): number {
+  return linearChannel[pixels[offset]!]! * 0.2126
+    + linearChannel[pixels[offset + 1]!]! * 0.7152
+    + linearChannel[pixels[offset + 2]!]! * 0.0722;
+}
+
 /** Render a PDF page and reject blank, clipped, or visually uncertain output. */
-export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImageInspection> {
+export async function inspectPdfPageImage(
+  page: PDFPageProxy, textRegions: readonly TextImageRegion[] = [],
+): Promise<PageImageInspection> {
   const viewport = page.getViewport({ scale });
   const width = Math.ceil(viewport.width);
   const height = Math.ceil(viewport.height);
   if (width < 1 || height < 1 || width * height > 2_000_000) {
-    throw new Error("Résumé page image exceeds the visual inspection budget");
+    throw new ResumeVisualReviewRequiredError("Résumé page image exceeds the visual inspection budget");
   }
   const canvas = createCanvas(width, height);
   const context = canvas.getContext("2d");
@@ -59,10 +74,7 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
       const offset = (y * width + x) * 4;
       if (pixels[offset]! > 245 && pixels[offset + 1]! > 245 && pixels[offset + 2]! > 245) continue;
       inkPixels += 1;
-      const luminance = linearChannel[pixels[offset]!]! * 0.2126
-        + linearChannel[pixels[offset + 1]!]! * 0.7152
-        + linearChannel[pixels[offset + 2]!]! * 0.0722;
-      if (luminance <= maximumReadableLuminance) readableInkPixels += 1;
+      if (luminance(pixels, offset) <= maximumReadableLuminance) readableInkPixels += 1;
       rowHasInk = true;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
@@ -72,10 +84,10 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
     if (rowHasInk) inkRows += 1;
   }
   if (inkPixels < 100 || inkPixels > width * height * 0.5) {
-    throw new Error("Résumé page image is blank or has excessive ink");
+    throw new ResumeVisualReviewRequiredError("Résumé page image is blank or has excessive ink");
   }
   if (readableInkPixels < 100) {
-    throw new Error("Résumé page image has insufficient high-contrast ink");
+    throw new ResumeVisualReviewRequiredError("Résumé page image has insufficient high-contrast ink");
   }
   const clearances = {
     left: minX / scale,
@@ -84,7 +96,50 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
     bottom: (height - 1 - maxY) / scale,
   };
   if (Object.values(clearances).some((distance) => distance < minimumClearancePoints)) {
-    throw new Error("Résumé page image has ink too close to the page edge");
+    throw new ResumeVisualReviewRequiredError("Résumé page image has ink too close to the page edge");
+  }
+  // A dark heading can hide a pale body line in a whole-page count. Check each
+  // extractable text item against the actual page raster. This is a conservative
+  // contrast sanity check, not proof that text reads well or is well laid out.
+  for (const region of textRegions) {
+    if (!Number.isFinite(region.x + region.y + region.width + region.height)
+      || region.width <= 0 || region.height <= 0) {
+      throw new ResumeVisualReviewRequiredError("Résumé text region needs human visual review");
+    }
+    const left = Math.max(0, Math.floor((region.x - 1) * scale));
+    const right = Math.min(width, Math.ceil((region.x + region.width + 1) * scale));
+    const nearestLineAbove = Math.min(...textRegions
+      .filter((other) => other.y > region.y + 0.5 && other.x < region.x + region.width
+        && region.x < other.x + other.width)
+      .map((other) => other.y - region.y), Infinity);
+    const regionHeight = Math.min(region.height, nearestLineAbove * 0.75);
+    const top = Math.max(0, Math.floor((viewport.height / scale - region.y - regionHeight - 1) * scale));
+    const bottom = Math.min(height, Math.ceil((viewport.height / scale - region.y + 1) * scale));
+    let readable = 0;
+    let readableRows = 0;
+    for (let y = top; y < bottom; y += 1) {
+      let rowReadable = 0;
+      let run = 0;
+      let longestRun = 0;
+      for (let x = left; x < right; x += 1) {
+        if (luminance(pixels, (y * width + x) * 4) <= maximumReadableLuminance) {
+          rowReadable += 1;
+          run += 1;
+          longestRun = Math.max(longestRun, run);
+        } else run = 0;
+      }
+      // A rule crossing a pale line of text is not evidence of readable glyphs.
+      if (longestRun >= Math.max(8, (right - left) * 0.45)) continue;
+      readable += rowReadable;
+      if (rowReadable > 0) readableRows += 1;
+    }
+    // Two isolated dark pixels (for example a nearby rule) do not establish
+    // that the text itself rendered. Use a small area floor; uncertain output
+    // goes to review rather than to an employer upload.
+    const minimumReadable = Math.max(4, Math.ceil((right - left) * (bottom - top) * 0.03));
+    if (readable < minimumReadable || readableRows < 4) {
+      throw new ResumeVisualReviewRequiredError("Résumé text region has insufficient contrast; human visual review required");
+    }
   }
   return { width, height, inkPixels, readableInkPixels, inkRows, clearances };
 }
