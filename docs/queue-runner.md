@@ -63,6 +63,8 @@ through stdin. Use a `keychain://`, `credential-manager://`, or
 `secret-service://` reference for macOS, Windows, or Linux respectively. Set
 `notificationConfigPath` in the private queue config; for a
 single package run set `OPENAPPLY_NOTIFICATION_CONFIG` to the same absolute path.
+Queue-created private application packages retain this path so a later resume
+from the local handoff screen can send another alert if the application pauses again.
 The email contains only a generic reminder to open OpenApply. An email failure
 never changes the application checkpoint or marks a submission complete. The
 notification path has synthetic tests; live delivery requires the user's own
