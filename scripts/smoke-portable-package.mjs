@@ -69,7 +69,10 @@ try {
       encoding: "utf8", maxBuffer: 1024 * 1024,
     });
     if (cli.error) throw cli.error;
-    if (cli.status !== 0 || !cli.stdout.includes("  autopilot")) {
+    const requiredCommands = ["autopilot", "queue:run", "application:run",
+      "resume:render", "secret:put", "oauth:connect"];
+    const listedCommands = new Set(cli.stdout.split("\n").map((line) => line.trim()));
+    if (cli.status !== 0 || requiredCommands.some((command) => !listedCommands.has(command))) {
       throw new Error(`Installed CLI failed: ${cli.stderr || cli.stdout}`);
     }
     return installed;
@@ -80,6 +83,16 @@ try {
   // installation. This catches CWD-relative template reads in packaged runs.
   const foreignDirectory = join(root, "foreign-working-directory");
   mkdirSync(foreignDirectory);
+  // Installed modules load native binaries. Run this flow in a child so Windows
+  // releases those binaries before the outer process removes the temporary install.
+  const firstRun = spawnSync(process.execPath,
+    [join(source, "scripts", "installed-first-run-smoke.mjs"), installed, root, foreignDirectory],
+    { encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 180_000 });
+  if (firstRun.error) throw firstRun.error;
+  if (firstRun.status !== 0) {
+    throw new Error(`Installed first-run smoke failed: ${firstRun.stderr || firstRun.stdout}`);
+  }
+  process.stdout.write(firstRun.stdout);
   const templatePath = join(installed, "templates", "resume", "main.tex");
   const expectedHash = createHash("sha256").update(readFileSync(templatePath)).digest("hex");
   const modulePath = join(installed, "dist", "src", "resume", "bundled-template.js");
@@ -93,6 +106,21 @@ try {
   if (check.error) throw check.error;
   if (check.status !== 0 || check.stdout !== expectedHash) {
     throw new Error(`Installed resume template resolution failed outside the package: ${check.stderr || check.stdout}`);
+  }
+  const cleanEnvironment = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => !name.startsWith("OPENAPPLY_")));
+  for (const [command, expected] of [
+    ["secret:put", "Set OPENAPPLY_SECRET_REF"],
+    ["oauth:connect", "Set OPENAPPLY_AUTH_POLICY"],
+    ["resume:render", "Set OPENAPPLY_RENDER_INPUT"],
+  ]) {
+    const invoked = spawnSync(process.execPath,
+      [join(installed, "dist/src/product-cli.js"), command],
+      { cwd: foreignDirectory, encoding: "utf8", env: cleanEnvironment, maxBuffer: 1024 * 1024 });
+    if (invoked.error) throw invoked.error;
+    if (invoked.status === 0 || !(invoked.stderr + invoked.stdout).includes(expected)) {
+      throw new Error(`Installed ${command} did not reach its input validation`);
+    }
   }
   install(priorTarball, "0.0.0");
   console.log(`Portable package ${manifest.version} installs, upgrades, and rolls back on ${process.platform}`);

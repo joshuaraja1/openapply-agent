@@ -46,7 +46,7 @@ afterEach(async () => {
   stageRoot = undefined;
 });
 
-it("runs the production queue CLI into an encrypted handoff and replays it once after restart", async () => {
+it("retries a queue-triggered handoff alert after restart without repeating the application", async () => {
   stageRoot = await mkdtemp(join(tmpdir(), "openapply-queue-cli-stage-"));
   stage.home = join(stageRoot, "synthetic-home");
   const privateRoot = join(stage.home, ".openapply-agent");
@@ -107,9 +107,11 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
     if (process.platform === "win32") await secureWindowsPrivatePath(path);
   }
   const configPath = join(stageRoot, "queue-config.json");
-  await writeFile(configPath, JSON.stringify({ version: 1, ...paths,
-    browserRuntime: "owned", overleafProjectUrl: "https://www.overleaf.com/project/000000000000000000000000",
-    outputDirectory: artifacts, expectedConfirmationByDomain: {} }), { mode: 0o600 });
+  const queueConfig = { version: 1, ...paths,
+    browserRuntime: "browseros", browserEndpoint: "http://127.0.0.1:9210/mcp",
+    overleafProjectUrl: "https://www.overleaf.com/project/000000000000000000000000",
+    outputDirectory: artifacts, expectedConfirmationByDomain: {} };
+  await writeFile(configPath, JSON.stringify(queueConfig), { mode: 0o600 });
   if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
   vi.stubEnv("OPENAPPLY_QUEUE_CONFIG", configPath);
   stage.render.mockResolvedValue({ path: join(artifacts, "synthetic.pdf"), pages: 1,
@@ -125,11 +127,30 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
     });
     return { checkpoint, artifact: { path: pkg.resumePdfPath } };
   });
-  const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
-    new Response('{"id":"synthetic"}', { status: 200 }));
+  const fetcher = vi.fn()
+    .mockResolvedValueOnce(new Response("temporary provider failure", { status: 503 }))
+    .mockResolvedValue(new Response('{"id":"synthetic"}', { status: 200 }));
   vi.stubGlobal("fetch", fetcher);
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
 
+  // Legacy queue configuration defaults to deny, including an already queued
+  // entry whose saved discovery source is enabled.
+  await import("../src/application/queue-cli.js");
+  expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes)
+    .toEqual([{ jobId: job.id, status: "provider-paused",
+      reason: expect.stringContaining("ashby") }]);
+  expect(stage.render).not.toHaveBeenCalled();
+  expect(stage.runPackage).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect((await readdir(artifacts)).filter((name) => name.startsWith("application-"))).toHaveLength(0);
+
+  await rmdir(join(privateRoot, "workflow.lock"));
+  await writeFile(configPath, JSON.stringify({ ...queueConfig, browserRuntime: "owned",
+    browserEndpoint: undefined, queueProviderAllowlist: ["ashby"] }),
+    { mode: 0o600 });
+  if (process.platform === "win32") await secureWindowsPrivatePath(configPath);
+  vi.resetModules();
   await import("../src/application/queue-cli.js");
   expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes)
     .toEqual([{ jobId: job.id, status: "waiting-human" }]);
@@ -145,6 +166,7 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
   });
   expect(String(request?.body)).not.toContain(job.id);
   expect(String(request?.body)).not.toContain(job.applicationUrl);
+  expect(warnings).toHaveBeenCalledWith("Email handoff notification was unavailable");
   const encryptedPath = join(privateRoot, "applications.enc.json");
   expect(await readFile(encryptedPath, "utf8")).not.toContain(job.applicationUrl);
 
@@ -157,5 +179,15 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
   await import("../src/application/queue-cli.js");
   expect(JSON.parse(String(output.mock.calls.at(-1)?.[0])).outcomes).toEqual([]);
   expect(stage.runPackage).toHaveBeenCalledOnce();
-  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const retry = fetcher.mock.calls[1]![1] as RequestInit;
+  expect((retry.headers as Record<string, string>)["Idempotency-Key"])
+    .toBe((request?.headers as Record<string, string>)["Idempotency-Key"]);
+
+  // A further restart sees the durable sent marker and does not alert again.
+  await rmdir(join(privateRoot, "workflow.lock"));
+  vi.resetModules();
+  await import("../src/application/queue-cli.js");
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(stage.runPackage).toHaveBeenCalledOnce();
 }, process.platform === "win32" ? 120_000 : 30_000);

@@ -10,6 +10,13 @@ export async function recoverClaimedSubmission(workflow: ApplicationWorkflow,
   if (!current || current.jobId !== saved.jobId || current.officialUrl !== saved.officialUrl) {
     throw new Error("Interrupted submission no longer matches its saved job and URL");
   }
+  if (current.submissionClaimId !== saved.submissionClaimId) {
+    throw new Error("Interrupted submission claim identity changed before recovery");
+  }
+  if (!current.submissionClaimId && current.stage === "submit-claimed"
+    && current.updatedAt !== saved.updatedAt) {
+    throw new Error("Legacy interrupted submission checkpoint changed before recovery");
+  }
   if (current.stage === "submission-uncertain") return current;
   if (current.stage !== "submit-claimed") throw new Error("Interrupted submission changed before recovery");
   return workflow.advance(saved.jobId, "submission-uncertain", {

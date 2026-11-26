@@ -50,15 +50,50 @@ function browserFixture(extraRequired = false) {
     click: async () => { confirmationVisible = true; },
   }));
   const page = { url: () => job.applicationUrl, title: async () => "Apply", goto: async () => {},
-    evaluate: async () => ({ text: "Example Co Software Engineer application", overflow: false }),
+    evaluate: async () => confirmationVisible ? "Thank you for applying to Example Co as Software Engineer"
+      : { text: "Example Co Software Engineer application", overflow: false },
     locator: () => ({ elementHandles: async () => handles }),
     getByText: () => ({ filter: () => ({ count: async () => confirmationVisible ? 1 : 0,
-      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) }) };
+      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying to Example Co as Software Engineer" }) }) }) };
   const context = { route: async () => {}, newPage: async () => page, pages: () => [page] } as unknown as BrowserContext;
   return { context, close: vi.fn(async () => {}), fields, uploaded };
 }
 
 describe("application runner", () => {
+  it("pauses a claimed queued application if provider policy changes before the final click", async () => {
+    const page = { url: job.applicationUrl, title: "Apply", visibleText: "Example Co Software Engineer",
+      controls: [
+        { ref: "email", tag: "input", role: "textbox", name: "Email", type: "email",
+          value: "", required: true, options: [] },
+        { ref: "resume", tag: "input", role: "button", name: "Resume", type: "file",
+          value: null, required: true, options: [] },
+        { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
+          value: null, required: false, options: [] },
+      ] };
+    const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
+      handoff: createApplicationHandoff(job, false),
+      resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64),
+        claimIds: ["synthetic"] },
+      resumePdfPath: "/tmp/synthetic-provider-gate.pdf", expectedConfirmation: "Thank you for applying" });
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
+    const beforeFinalSubmit = vi.fn(async () => "Private queue policy changed during this run; restart before applying");
+    const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", {
+      validateOfficial: async () => true,
+      verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
+        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
+        verifiedAt: new Date().toISOString() }),
+      beforeFinalSubmit,
+      browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
+        navigate: async () => page, act: async () => page, fillBatch: async () => page, submit },
+      close: async () => {} }),
+    });
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("policy changed");
+    expect(beforeFinalSubmit).toHaveBeenCalledOnce();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("saves a direct owned-browser submit claim with its private package before the click", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-direct-claim-"));
     try {
@@ -112,7 +147,7 @@ describe("application runner", () => {
       resumePdfPath: "/tmp/owned-resume.pdf", expectedConfirmation: "Thank you for applying" });
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     const navigate = vi.fn(async () => page);
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const fillBatch = vi.fn(async () => filled);
     const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
@@ -167,7 +202,7 @@ describe("application runner", () => {
       validateOfficial: async () => true, account, secretStore: { get, put: async () => {}, delete: async () => {} },
       browserFactory: async () => ({ browser: { currentUrl: () => currentUrl,
         navigate: async () => login, authenticate, act: async () => application,
-        fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }) });
+        fillBatch: async () => application, submit: async () => "Thank you for applying to Example Co as Software Engineer" }, close: async () => {} }) });
     expect(result.checkpoint.stage).toBe("submitted");
     expect(get).toHaveBeenCalledWith("keychain://example");
     expect(authenticate).toHaveBeenCalledWith("candidate@example.com", "private-password");
@@ -177,14 +212,14 @@ describe("application runner", () => {
         secretStore: { get, put: async () => {}, delete: async () => {} },
         browserFactory: async () => ({ browser: { currentUrl: () => currentUrl,
           navigate: async () => login, authenticate, act: async () => application,
-          fillBatch: async () => application, submit: async () => "Thank you for applying" }, close: async () => {} }),
+          fillBatch: async () => application, submit: async () => "Thank you for applying to Example Co as Software Engineer" }, close: async () => {} }),
       });
     expect(unmatched.checkpoint.stage).toBe("waiting-human");
     expect(unmatched.checkpoint.blocker).toContain("exact account domain");
     expect(get).toHaveBeenCalledOnce();
     const wrongApplication = { ...application,
       url: "https://jobs.example.com/apply/654321/step-1?source=123456" };
-    const wrongSubmit = vi.fn(async () => "Thank you for applying");
+    const wrongSubmit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const wrong = await runApplicationPackage(pkg, new ApplicationWorkflow(new MemoryApplicationStateStore()),
       "/tmp/profile", { verify: async () => result.artifact, validateOfficial: async () => true,
         account, secretStore: { get, put: async () => {}, delete: async () => {} },
@@ -224,7 +259,7 @@ describe("application runner", () => {
         secretStore: { get, put: async () => {}, delete: async () => {} },
         browserFactory: async () => ({ browser: { currentUrl: () => url,
           navigate: async () => login, authenticate, act: async () => login,
-          fillBatch: async () => login, submit: async () => "Thank you for applying" }, close: async () => {} }),
+          fillBatch: async () => login, submit: async () => "Thank you for applying to Example Co as Software Engineer" }, close: async () => {} }),
       });
       expect(result.checkpoint.stage).toBe("waiting-human");
       expect(result.checkpoint.blocker).toContain("this requisition");
@@ -259,7 +294,7 @@ describe("application runner", () => {
     const get = vi.fn(async () => "private-password");
     const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
       pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
-      fillBatch: async () => application, submit: async () => "Thank you for applying",
+      fillBatch: async () => application, submit: async () => "Thank you for applying to Example Co as Software Engineer",
       authenticate };
     const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
@@ -310,7 +345,7 @@ describe("application runner", () => {
     const attach = vi.fn(async () => { currentUrl = application.url; return application; });
     const browser = { currentUrl: () => currentUrl, navigate: async () => login, attach,
       pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA", act: async () => application,
-      fillBatch: async () => application, submit: async () => "Thank you for applying",
+      fillBatch: async () => application, submit: async () => "Thank you for applying to Example Co as Software Engineer",
       authenticate: async () => login };
     const options = { verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
@@ -360,7 +395,7 @@ describe("application runner", () => {
     const browser = { currentUrl: () => current.url, navigate: async () => upload, attach,
       pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
       act: async () => { current = login; return login; }, fillBatch: async () => current,
-      submit: async () => "Thank you for applying" };
+      submit: async () => "Thank you for applying to Example Co as Software Engineer" };
     const options = { verify: async () => ({ jobId: boundJob.id,
       sourceFingerprint: pkg.resumeSource.fingerprint, pdfSha256: "a".repeat(64),
       path: pkg.resumePdfPath, pages: 1, verifiedAt: new Date().toISOString() }),
@@ -400,7 +435,7 @@ describe("application runner", () => {
         return current;
       },
       act: async () => { steps.push("continue"); current = second; return second; },
-      submit: async () => { steps.push("submit"); return "Thank you for applying"; },
+      submit: async () => { steps.push("submit"); return "Thank you for applying to Example Co as Software Engineer"; },
     };
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: boundJob, source, candidate,
       handoff: createApplicationHandoff(boundJob, false),
@@ -429,7 +464,7 @@ describe("application runner", () => {
         { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
           value: null, required: false, options: [] },
       ] };
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     let current: typeof first | typeof wrong = first;
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: boundJob, source, candidate,
       handoff: createApplicationHandoff(boundJob, false),
@@ -463,7 +498,7 @@ describe("application runner", () => {
           value: null, required: false, options: [] },
       ] };
     let current: typeof first | typeof wrong = first;
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: genericJob, source, candidate,
       handoff: createApplicationHandoff(genericJob, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
@@ -490,7 +525,7 @@ describe("application runner", () => {
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
         value: null, required: false, options: [] },
     ] };
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const fillBatch = vi.fn(async () => page);
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job: genericJob, source, candidate,
       handoff: createApplicationHandoff(genericJob, false),
@@ -517,7 +552,7 @@ describe("application runner", () => {
       { ref: "submit", tag: "button", role: "button", name: "Submit application", type: "submit",
         value: null, required: false, options: [] },
     ] };
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
@@ -566,7 +601,7 @@ describe("application runner", () => {
         }
         return current;
       },
-      submit: async () => "Thank you for applying" };
+      submit: async () => "Thank you for applying to Example Co as Software Engineer" };
     const options = { verify: async () => ({ jobId: boundJob.id, sourceFingerprint: pkg.resumeSource.fingerprint,
       pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
       verifiedAt: new Date().toISOString() }), validateOfficial: async () => true,
@@ -598,7 +633,7 @@ describe("application runner", () => {
       validateOfficial: async () => true,
       browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
         navigate: async () => page, act: click, fillBatch: async () => page,
-        submit: async () => "Thank you for applying" }, close: async () => {} }) });
+        submit: async () => "Thank you for applying to Example Co as Software Engineer" }, close: async () => {} }) });
     expect(click).toHaveBeenCalledOnce();
     expect(result.checkpoint.stage).toBe("waiting-human");
     expect(result.checkpoint.blocker).toContain("did not advance");
@@ -625,7 +660,7 @@ describe("application runner", () => {
         validateOfficial: async () => true,
       });
       expect(result.checkpoint.stage).toBe("submitted");
-      expect(result.checkpoint.confirmation).toBe("Thank you for applying");
+      expect(result.checkpoint.confirmation).toBe("Thank you for applying to Example Co as Software Engineer");
       expect(browser.fields[0]?.value).toBe("test@example.com");
       expect(browser.uploaded[0]).toEqual(bytes);
       expect(browser.close).toHaveBeenCalledOnce();
@@ -759,7 +794,7 @@ describe("application runner", () => {
       const browserFactory = async () => ({ browser: {
           currentUrl: () => job.applicationUrl, navigate: async () => { throw new Error("Opened a new tab"); },
           attach, act: async () => controls(true), fillBatch: async () => controls(true),
-          submit: async () => "Thank you for applying", pageId: () => 7,
+          submit: async () => "Thank you for applying to Example Co as Software Engineer", pageId: () => 7,
           groupId: () => "AAAAAAAAAAAAAAAA",
         }, close: async () => {} });
       await expect(runApplicationPackage(pkg, workflow, join(root, "profile"), {
@@ -810,7 +845,7 @@ describe("application runner", () => {
       codeControl.value = value ?? null;
       return page();
     });
-    const submit = vi.fn(async () => "Thank you for applying");
+    const submit = vi.fn(async () => "Thank you for applying to Example Co as Software Engineer");
     const pkg = applicationPackageSchema.parse({ browserRuntime: "owned", version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, false),
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
@@ -877,7 +912,7 @@ describe("application runner", () => {
       browserFactory: async () => ({ browser: { currentUrl: () => job.applicationUrl,
         navigate: async () => registration, pageId: () => 7, groupId: () => "AAAAAAAAAAAAAAAA",
         register, act: async () => application, fillBatch: async () => application,
-        submit: async () => "Thank you for applying" }, close: async () => {} }),
+        submit: async () => "Thank you for applying to Example Co as Software Engineer" }, close: async () => {} }),
     };
     const result = await runApplicationPackage(pkg, workflow, "/tmp/profile", options);
     expect(result.checkpoint.stage).toBe("waiting-human");
@@ -893,7 +928,7 @@ describe("application runner", () => {
     const ownedOptions = { ...options, browserFactory: async () => ({ browser: {
       currentUrl: () => job.applicationUrl, navigate: async () => registration,
       register: ownedRegister, act: async () => application, fillBatch: async () => application,
-      submit: async () => "Thank you for applying",
+      submit: async () => "Thank you for applying to Example Co as Software Engineer",
     }, close: async () => {} }) };
     const ownedWorkflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     const ownedResult = await runApplicationPackage(ownedPkg, ownedWorkflow, "/tmp/profile", ownedOptions);
