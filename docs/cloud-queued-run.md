@@ -39,7 +39,7 @@ Candidate deletion is also a release gate. S3 purge and DynamoDB tombstoning
 are not one atomic operation. The deletion service must first tombstone the
 candidate, stop and await any active worker, deny new vault writes, then purge
 all artifact versions. A worker may otherwise write an artifact after purge.
-No real candidate vault writes are enabled by this staging module.
+No real candidate vault writes are wired to an executable in this staging slice.
 
 The handler intentionally favors safety over automatic retry: a crash after
 intent but before a click may require a human/provider status check. A future
