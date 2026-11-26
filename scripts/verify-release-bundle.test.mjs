@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -48,11 +48,21 @@ test("a signed manifest and complete artifact hashes are required on every platf
     for (const platform of ["darwin", "win32", "linux"]) {
       assert.deepEqual(verifyReleaseBundle(fixture.root, fixture.keyPath,
         { ...fixture.trusted, appleTeamId: teamId, windowsThumbprint: thumbprint }, platform, run),
-      { version: "0.1.0", platform, verified: true });
+      { version: "0.1.0", platform,
+        artifactSha256: fixture.artifacts.find((item) => item.platform === platform).sha256,
+        verified: true });
     }
     assert.deepEqual(called.map(([program]) => program),
       ["pkgutil", "xcrun", "spctl", "powershell.exe"]);
+    const output = join(fixture.root, "verified");
+    const retained = verifyReleaseBundle(fixture.root, fixture.keyPath,
+      fixture.trusted, "linux", run, output);
+    assert.equal(retained.verifiedDirectory, output);
+    assert.deepEqual(readFileSync(retained.artifactPath), Buffer.from("synthetic linux artifact"));
+    assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
+      fixture.trusted, "linux", run, output), /new absolute directory/);
     writeFileSync(join(fixture.root, "OpenApply.tar.gz"), "tampered");
+    assert.deepEqual(readFileSync(retained.artifactPath), Buffer.from("synthetic linux artifact"));
     assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath, fixture.trusted, "linux", run),
       /artifact hash mismatch/);
   } finally {
@@ -63,6 +73,31 @@ test("a signed manifest and complete artifact hashes are required on every platf
 test("manifest signature, platform coverage, and native identity failures block release", () => {
   const fixture = bundle();
   try {
+    const original = Buffer.from("synthetic darwin artifact");
+    const mutateSource = (program, args) => {
+      if (program === "pkgutil") {
+        writeFileSync(join(fixture.root, "OpenApply.pkg"), "changed source path");
+        assert.deepEqual(readFileSync(args[1]), original);
+        return `Signed with a trusted timestamp\n1. Developer ID Installer: OpenApply (${teamId})`;
+      }
+      return "accepted";
+    };
+    assert.equal(verifyReleaseBundle(fixture.root, fixture.keyPath,
+      { ...fixture.trusted, appleTeamId: teamId }, "darwin", mutateSource).verified, true);
+    writeFileSync(join(fixture.root, "OpenApply.pkg"), original);
+    const mutateDuringNativeCheck = (program, args) => {
+      if (program === "pkgutil") {
+        writeFileSync(args[1], "changed after hash");
+        return `Signed with a trusted timestamp\n1. Developer ID Installer: OpenApply (${teamId})`;
+      }
+      return "accepted";
+    };
+    const rejectedOutput = join(fixture.root, "rejected");
+    assert.throws(() => verifyReleaseBundle(fixture.root, fixture.keyPath,
+      { ...fixture.trusted, appleTeamId: teamId }, "darwin", mutateDuringNativeCheck, rejectedOutput),
+    /changed during signature verification/);
+    assert.equal(existsSync(rejectedOutput), false);
+    assert.equal(readdirSync(fixture.root).some((name) => name.startsWith("openapply-release-")), false);
     const run = (program) => program === "pkgutil"
       ? `Signed with a trusted timestamp\n1. Developer ID Installer: Other (ZZZZZZZZZZ)`
       : JSON.stringify({ Status: "UnknownError", Thumbprint: thumbprint });

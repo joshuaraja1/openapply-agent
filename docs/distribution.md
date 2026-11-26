@@ -69,7 +69,7 @@ release artifact.
 
 ## Release signature preflight
 
-`npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem`
+`npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem /absolute/new-verified-output`
 fails unless an Ed25519-signed manifest names one macOS `.pkg`, one Windows
 `.msi`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
 that manifest. Keep the signing key outside the repository. Set
@@ -83,6 +83,12 @@ signature from `OPENAPPLY_WINDOWS_CERT_THUMBPRINT`. Linux relies on the signed
 manifest and artifact hash for this portable tarball. Run the command on all
 three operating systems before publishing anything. Synthetic CI fixtures
 exercise valid and rejected paths on all three platforms.
+The command copies the bundle into a new owner-only output directory, verifies
+and retains those exact bytes, and prints that directory and the current OS
+artifact path. A future publisher must upload only the retained verified
+files, recheck their recorded SHA-256 digests immediately before upload, and
+remove the output directory afterward. Never publish from the original input
+path after this preflight; its contents can change.
 
 The bundle contains `release-manifest.json`, its raw Ed25519 signature in
 `release-manifest.sig`, and the three files named by the manifest:
