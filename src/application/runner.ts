@@ -143,6 +143,7 @@ export async function runApplicationPackage(
     humanAnswerApproval?: HumanAnswerApproval;
     account?: SiteAccount; secretStore?: SecretStore;
     emailCode?: { resolve(request: ActiveEmailCodeRequest): Promise<string | undefined> };
+    beforeFinalSubmit?: (job: DiscoveredJob) => Promise<string | undefined>;
     browserFactory?: (allowedHosts: ReadonlySet<string>, approvedArtifacts: ReadonlyMap<string, string>) =>
       Promise<{ browser: ApplicationBrowserSurface; close(): Promise<void> }> } = {},
 ): Promise<RunResult> {
@@ -485,11 +486,22 @@ export async function runApplicationPackage(
           blocker: "Final submit control is missing or ambiguous", ...pageDetails,
         });
       } else {
-        await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
-          pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
-          continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
-          dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined);
-        checkpoint = (await workflow.current(job.id))!;
+        let policyBlocker: string | undefined;
+        try { policyBlocker = await dependencies.beforeFinalSubmit?.(job); }
+        catch { policyBlocker = "Private provider policy is unavailable before final submission"; }
+        if (policyBlocker) {
+          checkpoint = await workflow.advance(job.id, "waiting-human", {
+            blocker: policyBlocker, ...pageDetails,
+          });
+        } else {
+          await submitApplication(workflow, browser, job.id, submitControls[0]!.ref,
+            pkg.expectedConfirmation, handoff, pkg.browserEndpoint,
+            continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
+            dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined,
+            dependencies.beforeFinalSubmit
+              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined);
+          checkpoint = (await workflow.current(job.id))!;
+        }
       }
     }
     return { checkpoint, artifact };

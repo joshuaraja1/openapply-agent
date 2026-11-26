@@ -31,4 +31,17 @@ export class DailyQuota {
     }
     throw new Error("Daily quota changed concurrently; retry the run");
   }
+
+  /** Release only a reservation whose job was stopped before browser activity. */
+  async releaseBeforeBrowser(date: string, jobId: string): Promise<void> {
+    const key = `daily-quota:${date}`;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const current = await this.store.read(key);
+      if (!current?.state.reservedJobIds.includes(jobId)) return;
+      const next = { ...current.state,
+        reservedJobIds: current.state.reservedJobIds.filter((id) => id !== jobId) };
+      if (await this.store.compareAndSwap(key, current.version, next)) return;
+    }
+    throw new Error("Daily quota changed concurrently; cannot release pre-browser reservation");
+  }
 }

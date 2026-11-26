@@ -31,6 +31,21 @@ describe("durable official posting claims", () => {
     expect(racing.sort()).toEqual(["claimed", "duplicate"]);
   });
 
+  it("releases only a newly created unchanged claim before any attempt", async () => {
+    const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
+    const created = await claims.claimWithReceipt("board-a", url);
+    expect(created.status).toBe("claimed");
+    expect(created.createdVersion).toEqual(expect.any(Number));
+    expect(await claims.claimWithReceipt("board-a", url)).toEqual({ status: "claimed" });
+    expect(await claims.releaseNewClaim("board-b", url, created.createdVersion!)).toBe(false);
+    expect(await claims.releaseNewClaim("board-a", url, created.createdVersion! + 1)).toBe(false);
+    expect(await claims.releaseNewClaim("board-a", url, created.createdVersion!)).toBe(true);
+    expect(await claims.claim("board-b", url)).toBe("claimed");
+    // A stale release receipt cannot remove the replacement claim.
+    expect(await claims.releaseNewClaim("board-a", url, created.createdVersion!)).toBe(false);
+    expect(await claims.claim("board-c", url)).toBe("duplicate");
+  });
+
   it("skips a cross-source duplicate before consuming the daily quota", async () => {
     const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
     const quota = new DailyQuota(new MemoryApplicationStateStore());
