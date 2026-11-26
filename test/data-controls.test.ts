@@ -40,6 +40,15 @@ describe("private state export and deletion", () => {
     try {
       const exported = await exportLocalState(f.paths, f.key, f.output);
       expect(exported.source).toBe("legacy");
+      await expect(restoreLocalState(f.paths, f.privateDir, true)).rejects.toThrow("separate");
+      await expect(purgeLocalStateArchive(f.paths, f.privateDir, true, true))
+        .rejects.toThrow("separate");
+      // dirname uses the platform separator, so this catches Windows backslash containment.
+      await expect(quarantineLocalState(f.paths, f.key, f.output, f.root, true))
+        .rejects.toThrow("separate");
+      await expect(restoreLocalState(f.paths, f.root, true)).rejects.toThrow("separate");
+      await expect(purgeLocalStateArchive(f.paths, f.root, true, true))
+        .rejects.toThrow("separate");
       expect(exported.records.applications).toHaveLength(2);
       expect(exported.records.applications).toContainEqual({ id: "job:deleted", version: 1 });
       expect(await readFile(f.output, "utf8")).not.toContain(f.key.toString("base64"));
@@ -48,6 +57,12 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("confirm inactivity");
       expect(await quarantineLocalState(f.paths, f.key, f.output, f.archive, true)).toBe(3);
       expect(await f.applications.read("job:1")).toBeUndefined();
+      const unrelated = join(f.archive, "unrelated.txt");
+      await writeFile(unrelated, "keep me", { mode: 0o600 });
+      await expect(restoreLocalState(f.paths, f.archive, true))
+        .rejects.toThrow("unexpected files");
+      expect(await readFile(unrelated, "utf8")).toBe("keep me");
+      await rm(unrelated);
       await writeFile(f.paths.queuePath, JSON.stringify({ queue: [{ id: "new" }] }), { mode: 0o600 });
       if (process.platform === "win32") await secureWindowsPrivatePath(f.paths.queuePath);
       await expect(restoreLocalState(f.paths, f.archive, true))
@@ -84,6 +99,12 @@ describe("private state export and deletion", () => {
       expect(await quarantineLocalState(f.paths, f.key, freshExport, f.archive, true)).toBe(4);
       await expect(purgeLocalStateArchive(f.paths, f.archive, true, false as true))
         .rejects.toThrow("both confirmations");
+      const unrelated = join(f.archive, "unrelated.txt");
+      await writeFile(unrelated, "keep me", { mode: 0o600 });
+      await expect(purgeLocalStateArchive(f.paths, f.archive, true, true))
+        .rejects.toThrow("unexpected files");
+      expect(await readFile(unrelated, "utf8")).toBe("keep me");
+      await rm(unrelated);
       await purgeLocalStateArchive(f.paths, f.archive, true, true);
       await expect(lstat(f.archive)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(lstat(f.paths.databasePath)).rejects.toMatchObject({ code: "ENOENT" });

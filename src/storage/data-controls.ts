@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { mkdir, readFile, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { EncryptedApplicationStateStore } from "./encrypted-state.js";
 import { createPrivateOutput } from "./private-output.js";
@@ -69,12 +69,19 @@ export async function exportLocalState(paths: LocalStatePaths, key: Uint8Array,
   return snapshot;
 }
 
-function assertArchiveLocation(paths: LocalStatePaths, archivePath: string, exportPath: string): void {
-  if (!isAbsolute(archivePath) || !isAbsolute(exportPath)) throw new Error("Use absolute paths");
-  const archive = resolve(archivePath), output = resolve(exportPath);
+function assertArchiveLocation(paths: LocalStatePaths, archivePath: string, exportPath?: string): void {
+  if (!isAbsolute(archivePath) || (exportPath && !isAbsolute(exportPath))) {
+    throw new Error("Use absolute paths");
+  }
+  const archive = resolve(archivePath), output = exportPath && resolve(exportPath);
+  const contains = (parent: string, child: string): boolean => {
+    const fromParent = relative(parent, child);
+    return fromParent === "" || (fromParent !== ".." && !fromParent.startsWith(`..${sep}`)
+      && !isAbsolute(fromParent));
+  };
   if (archive === resolve(paths.encryptedDirectory)
-    || knownFiles(paths).some((file) => archive === file || file.startsWith(`${archive}/`))
-    || archive === output || output.startsWith(`${archive}/`)) {
+    || knownFiles(paths).some((file) => contains(archive, file))
+    || (output && contains(archive, output))) {
     throw new Error("Archive must be separate from state and export paths");
   }
 }
@@ -131,8 +138,13 @@ function parseManifest(raw: string, paths: LocalStatePaths): ArchiveManifest {
 export async function restoreLocalState(paths: LocalStatePaths, archivePath: string,
   confirmedInactive: true): Promise<number> {
   if (confirmedInactive !== true) throw new Error("Stop workers and confirm inactivity first");
+  assertArchiveLocation(paths, archivePath);
   await ensurePrivateDirectory(archivePath);
   const manifest = parseManifest(await readPrivateFile(join(archivePath, "manifest.json")), paths);
+  const allowed = new Set(["manifest.json", ...manifest.entries.map((entry) => entry.saved)]);
+  if ((await readdir(archivePath)).some((name) => !allowed.has(name))) {
+    throw new Error("Archive has unexpected files");
+  }
   const toRestore: ArchiveEntry[] = [];
   // Preflight the entire archive before moving any file; a late conflict must
   // not leave a half-restored state directory.
@@ -156,7 +168,8 @@ export async function restoreLocalState(paths: LocalStatePaths, archivePath: str
     await ensurePrivateDirectory(dirname(entry.original));
     await rename(join(archivePath, entry.saved), entry.original);
   }
-  await rm(archivePath, { recursive: true, force: false });
+  await unlink(join(archivePath, "manifest.json"));
+  await rmdir(archivePath);
   return toRestore.length;
 }
 
@@ -166,6 +179,7 @@ export async function purgeLocalStateArchive(paths: LocalStatePaths, archivePath
   if (confirmedInactive !== true || confirmedPermanent !== true) {
     throw new Error("Permanent deletion needs both confirmations");
   }
+  assertArchiveLocation(paths, archivePath);
   await ensurePrivateDirectory(archivePath);
   const manifest = parseManifest(await readPrivateFile(join(archivePath, "manifest.json")), paths);
   for (const entry of manifest.entries) {
@@ -176,6 +190,11 @@ export async function purgeLocalStateArchive(paths: LocalStatePaths, archivePath
     }
   }
   const names = await readdir(archivePath);
-  if (names.length !== manifest.entries.length + 1) throw new Error("Archive has unexpected files");
-  await rm(archivePath, { recursive: true, force: false });
+  const expected = new Set(["manifest.json", ...manifest.entries.map((entry) => entry.saved)]);
+  if (names.length !== expected.size || names.some((name) => !expected.has(name))) {
+    throw new Error("Archive has unexpected files");
+  }
+  for (const entry of manifest.entries) await unlink(join(archivePath, entry.saved));
+  await unlink(join(archivePath, "manifest.json"));
+  await rmdir(archivePath);
 }
