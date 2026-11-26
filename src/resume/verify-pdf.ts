@@ -104,6 +104,7 @@ export async function verifyResumePdf(
       const text = content.items.flatMap((item) => "str" in item ? [item.str] : []);
       pageTexts.push(text.join(" "));
       const boxes: TextBox[] = [];
+      const visualBoxes: TextBox[] = [];
       for (const item of content.items) {
         if (!("str" in item) || !item.str.trim()) continue;
         const x = item.transform[4] ?? -1;
@@ -113,10 +114,18 @@ export async function verifyResumePdf(
           || y + height > viewport.height + 2) {
           throw new ResumeVisualReviewRequiredError("Résumé PDF contains text outside the page bounds");
         }
-        if (item.width > 0 && height > 0) boxes.push({ x, y, width: item.width, height });
+        if (item.width > 0 && height > 0) {
+          const box = { x, y, width: item.width, height };
+          boxes.push(box);
+          // Narrow separators and bullets are layout marks, not text lines.
+          // PDF.js can rasterize them outside their extracted boxes or within
+          // fewer than four rows. Inspect substantive text separately while
+          // retaining these marks in the overlap and page-wide ink checks.
+          if (!["|", "•"].includes(item.str.trim())) visualBoxes.push(box);
+        }
       }
       assertNoTextOverlap(boxes);
-      const image = await inspectPdfPageImage(page, boxes);
+      const image = await inspectPdfPageImage(page, visualBoxes);
       // A short overflow onto page two can be legible yet still produce an unusable résumé.
       if (index === 2 && image.inkRows / image.height < 0.12) {
         throw new ResumeVisualReviewRequiredError("Résumé PDF has a mostly empty second page");

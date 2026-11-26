@@ -106,6 +106,10 @@ export async function renderOverleafResume(
     requireSuccess(await client.callTool({ name: "act", arguments: {
       page, kind: "fill", ref: editorRef, value: source.latex, sensitive: true, diff: "none",
     } }), "source update");
+    const compileReady = requireSuccess(await client.callTool({ name: "wait", arguments: {
+      page, for: "selector", value: '.compile-button[data-ol-loading="false"]', timeout: 30000,
+    } }), "compile readiness");
+    if (!compileReady.startsWith("matched")) throw new Error("Overleaf Recompile control did not become ready");
     const afterEdit = requireSuccess(await client.callTool({ name: "snapshot", arguments: {
       page, mode: "interactive", depth: 3,
     } }), "compile snapshot");

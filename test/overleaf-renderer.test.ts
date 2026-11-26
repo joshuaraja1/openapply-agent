@@ -68,8 +68,10 @@ describe("Overleaf renderer adapter", () => {
       expect(verify).toHaveBeenCalledOnce();
       const calls = vi.mocked(client.callTool).mock.calls.map(([call]) => call);
       expect(calls.map(({ name }) => name)).toEqual(["name_session", "tabs", "snapshot", "act",
-        "snapshot", "act", "wait", "snapshot", "download", "tabs"]);
+        "wait", "snapshot", "act", "wait", "snapshot", "download", "tabs"]);
       expect(calls[3]?.arguments).toMatchObject({ kind: "fill", sensitive: true, value: source.latex });
+      expect(calls[4]?.arguments).toMatchObject({ for: "selector",
+        value: '.compile-button[data-ol-loading="false"]' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
