@@ -29,13 +29,21 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node --test scripts/assert-queue-benchmark.test.mjs
+      - run: node --test scripts/assert-application-benchmark.test.mjs
       - name: Measure synthetic queue and recovery
         shell: bash
         run: node scripts/benchmark-queue.mjs > queue-benchmark.json
       - run: node scripts/assert-queue-benchmark.mjs queue-benchmark.json "$RUNNER_OS"
         shell: bash
+      - name: Measure synthetic job-bound confirmation and ambiguous retry
+        shell: bash
+        run: node scripts/benchmark-application-stage.mjs > application-benchmark.json
+      - run: node scripts/assert-application-benchmark.mjs application-benchmark.json "$RUNNER_OS"
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: queue-benchmark-${{ matrix.os }}
-          path: queue-benchmark.json
+          path: |
+            queue-benchmark.json
+            application-benchmark.json
           if-no-files-found: error
