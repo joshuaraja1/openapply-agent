@@ -99,8 +99,10 @@ describe("automatic match safety evaluation", () => {
   });
 
   it("checks required clauses independently from preferred clauses", () => {
-    expect(scoreJob({ ...base, descriptionText: "TypeScript. Must have Kubernetes; Python preferred." },
-      candidate, preferences).eligible).toBe(false);
+    for (const descriptionText of ["TypeScript. Must have Kubernetes; Python preferred.",
+      "TypeScript. Must have TypeScript and Kubernetes, Python preferred."]) {
+      expect(scoreJob({ ...base, descriptionText }, candidate, preferences).eligible).toBe(false);
+    }
   });
 
   it("holds a lowercase unsupported tool after an approved qualification", () => {
@@ -143,6 +145,15 @@ describe("automatic match safety evaluation", () => {
       "TypeScript. Bachelor's degree in Computer Science required."]) {
       expect(scoreJob({ ...base, descriptionText }, claims, preferences).eligible).toBe(false);
     }
+  });
+
+  it("does not treat a degree in progress as completed", () => {
+    const studying = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "degree", claim: "Pursuing a Master's degree in Computer Science", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    expect(scoreJob({ ...base, descriptionText: "TypeScript. Master's degree in Computer Science required." },
+      studying, preferences).eligible).toBe(false);
   });
 
   it("keeps supported entry-level roles eligible", () => {

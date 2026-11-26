@@ -40,7 +40,7 @@ export function assessHardRequirements(description: string,
     }
     for (const part of line.split(/[.!?;](?=\s|$)/).flatMap((text) => text.split(/\s+but\s+/i))) {
       const partMandatory = requiredSection || /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(part);
-      for (const fragment of part.split(/\s+and\s+/i)) {
+      for (const fragment of part.split(/\s+and\s+|,\s*(?=[^,]*\bpreferred\b)/i)) {
         const statement = fragment.replace(/^[•*\-]\s*/, "").trim();
         if (!partMandatory || /\b(?:not required|no requirement|preferred|nice to have|optional|no\s+on[ -]?site\s+work\s+required)\b/i.test(statement)) {
           continue;
@@ -84,7 +84,7 @@ export function assessHardRequirements(description: string,
           const requiredLevel = degree[1]!.toLowerCase().replace(/'s$/, "");
           const requiredMajor = degree[2]?.trim().toLowerCase();
         if (!approved.some((claim) => {
-          if (/\b(?:incomplete|unfinished|not|never|withdrawn)\b/i.test(claim)) return false;
+            if (/\b(?:incomplete|unfinished|not|never|withdrawn|pursuing|expected|in progress|working toward)\b/i.test(claim)) return false;
             const documented = /\b(bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate)\s+(?:degree|of\s+science|of\s+arts)(?:\s+in\s+([a-z ]+))?/i.exec(claim);
             return documented?.[1]?.toLowerCase().replace(/'s$/, "") === requiredLevel
               && (!requiredMajor || documented?.[2]?.trim().toLowerCase() === requiredMajor);
