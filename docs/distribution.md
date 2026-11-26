@@ -107,11 +107,35 @@ The bundle contains `release-manifest.json`, its raw Ed25519 signature in
 
 This preflight does not build or sign the installers, authenticate the identity
 of a newly supplied public key, or publish a release. No production release key
-is registered, no native macOS/Windows installers are built, and no signed
+is registered, no signed native macOS/Windows installers are built, and no signed
 Linux distribution artifact is produced. Until those exist and verification
 passes on real artifacts, a public release remains blocked. A Windows
 code-signing certificate or signing service is still needed; do not put its
 private material in repository files or CI logs.
+
+## Windows MSI staging build
+
+The Windows staging workflow builds a per-user-default MSI from the locked
+portable runtime and a bundled `node.exe`, installs it on an ephemeral Windows
+runner, starts the installed CLI, and uninstalls it. It uses WiX 5.0.2, pinned
+to avoid an unreviewed toolchain change. The MSI is **unsigned**, and the
+workflow does not publish it. To reproduce locally, install WiX 5.0.2, create
+a locked runtime payload with `npm run distribution:locked-install --
+<absolute-tarball> <new-payload-directory>`, copy the Node 22 executable to
+`<new-payload-directory>\node.exe`, then run
+`installers/windows/build.ps1 -PayloadRoot <directory> -OutputPath <new-msi>
+-Version 0.1.0` on Windows. The build refuses an incomplete payload or an
+unexpected WiX version. `installers/windows/sign.ps1` requires an existing
+certificate in the Windows store and an HTTPS timestamp service; it checks the
+signed result against the requested thumbprint. No signing key is stored here.
+
+This staging MSI does not implement an updater, signed release, browser
+provisioning, scheduler registration, or rollback across incompatible state
+schemas. Those remain release gates. WiX 5 uses an older .NET 6 build runtime;
+before production packaging, upgrade the toolchain and review its terms.
+WiX's [maintenance-fee policy](https://docs.firegiant.com/wix/osmf/) applies
+from version 6 and has a revenue threshold. The Windows signing certificate
+or signing service is still needed.
 
 ## Requirements for a safe updater
 

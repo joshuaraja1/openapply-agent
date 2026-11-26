@@ -1,0 +1,57 @@
+name: Windows installer staging
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-installer-staging.yml'
+      - 'installers/windows/**'
+      - 'scripts/locked-tarball-install.mjs'
+      - 'scripts/pack-runtime-lock.mjs'
+      - 'src/product-cli.ts'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+jobs:
+  unsigned-msi-smoke:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - name: Install pinned WiX staging tool
+        shell: pwsh
+        run: |
+          dotnet tool install --tool-path "$env:RUNNER_TEMP\wix" wix --version 5.0.2
+          "$env:RUNNER_TEMP\wix" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - run: npm ci
+      - name: Build, install, and remove unsigned MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveName = (npm pack --silent | Select-Object -Last 1).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed' }
+          $archive = (Resolve-Path -LiteralPath $archiveName).Path
+          $payload = Join-Path $env:RUNNER_TEMP 'openapply-msi-payload'
+          npm run distribution:locked-install -- $archive $payload
+          if ($LASTEXITCODE -ne 0) { throw 'Locked package install failed' }
+          Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination (Join-Path $payload 'node.exe')
+          $msi = Join-Path $env:RUNNER_TEMP 'OpenApply-unsigned.msi'
+          & ./installers/windows/build.ps1 -PayloadRoot $payload -OutputPath $msi -Version '0.1.0'
+          $installed = Join-Path $env:LOCALAPPDATA 'OpenApply\runtime'
+          $log = Join-Path $env:RUNNER_TEMP 'openapply-msi-install.log'
+          $process = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "MSI install failed ($($process.ExitCode)); see installer log" }
+          $cli = Join-Path $installed 'package\dist\src\product-cli.js'
+          & (Join-Path $installed 'node.exe') $cli --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed CLI failed to start' }
+          $process = Start-Process msiexec.exe -ArgumentList @('/x', "`"$msi`"", '/qn', '/norestart') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "MSI uninstall failed ($($process.ExitCode))" }
+          if (Test-Path -LiteralPath (Join-Path $installed 'node.exe')) { throw 'Runtime remained after uninstall' }

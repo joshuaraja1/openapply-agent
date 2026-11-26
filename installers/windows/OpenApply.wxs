@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Id="OpenApply.Agent" Name="OpenApply" Manufacturer="OpenApply"
+           Version="$(var.AppVersion)" Scope="perUserOrMachine">
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="OpenApplyFolder" Name="OpenApply">
+        <Directory Id="INSTALLFOLDER" Name="runtime" />
+      </Directory>
+    </StandardDirectory>
+    <Files Include="!(bindpath.Payload)\**" Directory="INSTALLFOLDER" />
+  </Package>
+</Wix>
