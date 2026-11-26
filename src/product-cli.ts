@@ -13,6 +13,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "browser:discover": () => import("./browser/cli.js"),
   autopilot: () => import("./application/autopilot-cli.js"),
   "application:status": () => import("./application/status-cli.js"),
+  handoff: () => import("./application/handoff-ui-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
 };
 

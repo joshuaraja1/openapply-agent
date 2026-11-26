@@ -137,6 +137,9 @@ after fixing the blocker. For an unknown required answer, provide a private
 [`OPENAPPLY_APPROVED_ANSWERS` file](examples/human-answer-approval.example.json)
 that names the exact job, tab, field, and value. The runner attaches to the
 saved tab and rechecks the official posting and résumé before continuing.
+The installed CLI also offers `OPENAPPLY_JOB_ID=<job-id> openapply handoff`:
+its private local screen accepts the exact answer and resumes the saved
+application after the candidate authorizes continuation.
 For the owned runtime, `OPENAPPLY_RESUME_JOB_ID` reopens the original requisition
 in the same private browser profile and refills the verified résumé. An approved
 answers file uses `browserPageId: 0`; its job ID and exact field labels still

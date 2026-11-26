@@ -70,6 +70,13 @@ verified sender domain and API key.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run
+`OPENAPPLY_JOB_ID=<job-id> openapply handoff` to open the private local handoff
+screen. It shows the exact blocker and lets the candidate enter up to ten
+answers, explicitly authorize continuation, and resume this application's
+saved browser context. It accepts an empty answer list when a CAPTCHA or MFA
+was completed directly in the application browser. The screen reads the
+encrypted checkpoint and rejects stale or concurrent resume requests.
+For manual CLI recovery, run
 `OPENAPPLY_PACKAGE=<package-path> OPENAPPLY_RESUME_JOB_ID=<job-id> OPENAPPLY_APPROVED_ANSWERS=<private-answers-file> npm run application:run`.
 The answers file follows `examples/human-answer-approval.example.json`; its
 job ID, BrowserOS page ID, field label, and value must match exactly. Put it
