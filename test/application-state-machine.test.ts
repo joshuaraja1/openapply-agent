@@ -17,9 +17,11 @@ describe("application workflow", () => {
     await expect(workflow.advance("job-1", "rendered")).rejects.toThrow("artifact");
     await workflow.advance("job-1", "rendered", artifact("/private/job-1.pdf"));
     await workflow.advance("job-1", "applying");
-    await workflow.advance("job-1", "submit-claimed");
+    const claimed = await workflow.advance("job-1", "submit-claimed");
+    expect(claimed.submissionClaimId).toMatch(/^[0-9a-f-]{36}$/);
     await expect(workflow.advance("job-1", "submitted")).rejects.toThrow("confirmation");
-    expect((await workflow.advance("job-1", "submitted", { confirmation: "Application 123" })).stage).toBe("submitted");
+    const submitted = await workflow.advance("job-1", "submitted", { confirmation: "Application 123" });
+    expect(submitted).toMatchObject({ stage: "submitted", submissionClaimId: claimed.submissionClaimId });
     await expect(workflow.advance("job-1", "applying")).rejects.toThrow("Invalid");
   });
 
