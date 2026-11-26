@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { installLockedTarball } from "./locked-tarball-install.mjs";
 
 const markerName = ".openapply-staging.json";
 const npmCli = process.env.npm_execpath;
@@ -92,7 +93,7 @@ function managedRuntime(root) {
   if (existsSync(runtime)) {
     if (!lstatSync(runtime).isDirectory()) throw new Error("Staging runtime is not a regular directory");
     const entries = readdirSync(runtime).sort();
-    if (entries.some((entry) => !["node_modules", "package.json"].includes(entry))) {
+    if (entries.some((entry) => !["install", "node_modules", "package.json"].includes(entry))) {
       throw new Error(`Runtime contains unexpected files: ${entries.join(", ")}; inspect before uninstalling`);
     }
   }
@@ -153,11 +154,8 @@ export function installStaging(tarballPath, rootArg, withBrowser = false) {
   const stage = join(root, `.pending-${randomUUID()}`);
   mkdirSync(stage, { mode: 0o700 });
   try {
-    run(process.execPath, [npmCli, "install", "--prefix", stage, "--ignore-scripts", "--no-audit",
-      "--no-fund", "--no-package-lock", tarball]);
-    const installed = join(stage, "node_modules", "openapply-agent");
-    const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
-    const cli = join(installed, "dist", "src", "product-cli.js");
+    const installed = installLockedTarball(tarball, join(stage, "install"));
+    const cli = join(installed.packageRoot, "dist", "src", "product-cli.js");
     if (!statSync(cli).isFile()) throw new Error("Installed package has no OpenApply CLI");
     if (!run(process.execPath, [cli, "--help"]).includes("  browser:install")) {
       throw new Error("Installed OpenApply CLI did not start");
@@ -166,12 +164,11 @@ export function installStaging(tarballPath, rootArg, withBrowser = false) {
       run(process.execPath, [cli, "browser:install"]);
       run(process.execPath, [cli, "browser:doctor"]);
     }
-    const tarballSha256 = createHash("sha256").update(readFileSync(tarball)).digest("hex");
     writeFileSync(join(root, markerName), JSON.stringify({ kind: "openapply-user-staging",
-      version: manifest.version, tarballSha256, browserChecked: withBrowser }), { mode: 0o600, flag: "wx" });
+      version: installed.version, tarballSha256: installed.tarballSha256, browserChecked: withBrowser }), { mode: 0o600, flag: "wx" });
     try { renameSync(stage, join(root, "runtime")); }
     catch (error) { unlinkSync(join(root, markerName)); throw error; }
-    return { version: manifest.version, root, browserChecked: withBrowser };
+    return { version: installed.version, root, browserChecked: withBrowser };
   } finally {
     if (existsSync(stage)) rmSync(stage, { recursive: true, force: true });
   }
