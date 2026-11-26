@@ -12,8 +12,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $payload 'node.exe') -PathType Leaf)
   throw 'Payload must contain node.exe and a locked, built OpenApply package'
 }
 if (Test-Path -LiteralPath $output) { throw 'Output installer already exists' }
-$compiler = Get-Command makensis.exe -ErrorAction Stop
-$versionOutput = (& $compiler.Source -VERSION | Out-String).Trim()
+$compiler = Get-Command makensis.exe -ErrorAction SilentlyContinue
+$binary = if ($compiler) { $compiler.Source } else {
+  Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+}
+if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'NSIS compiler was not found' }
+$versionOutput = (& $binary -VERSION | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $versionOutput -notmatch '^v3\.13(?:\.|$)') {
   throw "NSIS 3.13 is required, found $versionOutput"
 }
@@ -31,7 +35,7 @@ if ($Sign) {
 }
 $args += $script
 try {
-  & $compiler.Source @args
+  & $binary @args
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
     throw 'NSIS installer build failed'
   }
