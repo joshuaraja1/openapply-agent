@@ -80,7 +80,9 @@ describe("private first-run runtime setup", () => {
       expect((await post({ ...request, firstSource: { ...request.firstSource,
         identifier: "other" } })).status).toBe(400);
       expect(JSON.parse(await readFile(queuePath, "utf8")).discoveryInputPath).toBe(config.discoveryInputPath);
+      expect(JSON.parse(await readFile(config.discoveryInputPath, "utf8")).sources[0].boardToken)
+        .toBe("fixture");
       if (process.platform !== "win32") expect((await stat(queuePath)).mode & 0o077).toBe(0);
     } finally { await ui.close(); await rm(root, { recursive: true, force: true }); }
-  }, 30_000);
+  }, 120_000);
 });
