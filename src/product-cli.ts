@@ -23,6 +23,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "resume:render": () => import("./resume/cli.js"),
   "secret:put": () => import("./auth/secret-put-cli.js"),
   "oauth:connect": () => import("./auth/oauth-connect-cli.js"),
+  "oauth:doctor": () => import("./auth/oauth-doctor-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
   "state:control": () => import("./storage/data-controls-cli.js"),
 };

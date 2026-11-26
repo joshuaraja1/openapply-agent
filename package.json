@@ -30,6 +30,7 @@
     "setup:ui": "tsx src/setup/ui-cli.ts",
     "secret:put": "tsx src/auth/secret-put-cli.ts",
     "oauth:connect": "tsx src/auth/oauth-connect-cli.ts",
+    "oauth:doctor": "tsx src/auth/oauth-doctor-cli.ts",
     "schedule:install": "tsx src/scheduler/cli.ts install",
     "schedule:remove": "tsx src/scheduler/cli.ts remove",
     "resume:render": "tsx src/resume/cli.ts",
