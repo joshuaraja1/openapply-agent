@@ -10,6 +10,29 @@ This is a portable CLI preview. It does not install a browser, configure OS
 permissions or schedulers, sign or notarize software, or provide an updater.
 It must not be presented as a consumer installer or unattended public release.
 
+## Unsigned user-level staging install
+
+From a source checkout, run `npm ci`, then `npm pack`. Install the resulting
+absolute `.tgz` path with `npm run distribution:staging -- install /absolute/path/to/openapply-agent-0.1.0.tgz`.
+Add `--with-browser` to install Chromium into Playwright's user cache and run
+`browser:doctor`; without it, the install records that browser readiness was not
+checked. Use `npm run distribution:staging -- status` to inspect the staged
+version and `npm run distribution:staging -- uninstall` to remove it.
+
+The default install directory is user-owned: `~/Library/Application Support/OpenApply/staging`
+on macOS, `%LOCALAPPDATA%/OpenApply/staging` on Windows, and
+`$XDG_DATA_HOME/openapply/staging` (or `~/.local/share/openapply/staging`) on Linux.
+For isolated tests, append `--root /absolute/test/directory` to each command.
+The installed CLI is under `runtime/node_modules/openapply-agent/dist/src/product-cli.js`
+inside that directory and runs with the current Node installation. No admin
+privileges or global npm installation are needed.
+
+Uninstall checks an OpenApply marker and removes only its managed `runtime`
+directory. Candidate files, SQLite state, keychain secrets, and the shared
+Chromium cache are outside that directory and remain in place. This script
+does not create a launcher, register a scheduler, perform upgrades, or verify
+release signatures. Use it only for controlled staging and testing.
+
 ## Requirements for a safe updater
 
 An updater must stop scheduled discovery and application workers before
