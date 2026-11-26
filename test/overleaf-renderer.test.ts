@@ -88,6 +88,7 @@ describe("Overleaf renderer adapter", () => {
       const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
         if (name === "name_session") return result("renamed");
         if (name === "tabs" && args.action === "new") return result("opened page 7");
+        if (name === "tabs" && args.action === "close") return result("closed");
         if (name === "snapshot") {
           snapshots += 1;
           return result(snapshots === 1 ? '- textbox "Source Editor editing" [ref=e3]'
@@ -109,6 +110,42 @@ describe("Overleaf renderer adapter", () => {
       expect(caught).toMatchObject({ artifactPath: savedPath });
       expect(await readFile(savedPath)).toEqual(bytes);
       await expect(readFile(downloaded)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.skipIf(process.platform === "win32")("stops with an actionable review if Downloads cleanup fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-overleaf-cleanup-"));
+    try {
+      const downloads = join(root, "Downloads");
+      const downloaded = join(downloads, "fixture.pdf");
+      const bytes = Buffer.from("%PDF-1.4\n" + "x".repeat(120));
+      await mkdir(downloads);
+      await writeFile(downloaded, bytes);
+      let snapshots = 0;
+      const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+        if (name === "name_session") return result("renamed");
+        if (name === "tabs" && args.action === "new") return result("opened page 7");
+        if (name === "tabs" && args.action === "close") return result("closed");
+        if (name === "snapshot") {
+          snapshots += 1;
+          return result(snapshots === 1 ? '- textbox "Source Editor editing" [ref=e3]'
+            : snapshots === 2 ? '- button "Recompile" [ref=e4]'
+              : '- link "Download PDF" [ref=e5]');
+        }
+        if (name === "act") return result("acted");
+        if (name === "wait") return result("matched (selector)");
+        if (name === "download") return result(`Downloaded fixture to: ${downloaded}`);
+        throw new Error(`Unexpected BrowserOS call ${name}`);
+      }) };
+      const unlinkDownloaded = vi.fn(async () => { throw new Error("file locked"); });
+      await expect(renderOverleafResume(client, projectUrl, job, candidate, source,
+        join(root, "artifacts"), { downloadsDirectory: downloads,
+          verify: async (path) => ({ jobId: job.id, sourceFingerprint: source.fingerprint,
+            pdfSha256: createHash("sha256").update(bytes).digest("hex"), path, pages: 1,
+            verifiedAt: new Date().toISOString() }), unlinkDownloaded }))
+        .rejects.toThrow(`remove ${downloaded} manually`);
+      expect(unlinkDownloaded).toHaveBeenCalledOnce();
+      expect(await readFile(downloaded)).toEqual(bytes);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

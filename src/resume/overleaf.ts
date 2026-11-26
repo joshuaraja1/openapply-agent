@@ -34,6 +34,29 @@ function downloadPath(result: BrowserToolResult, downloadsDirectory: string): st
   return absolute;
 }
 
+async function removeVerifiedDownload(file: { path: string; dev: number; ino: number },
+  artifactPath: string | undefined, remove: typeof unlink): Promise<void> {
+  let current;
+  try { current = await lstat(file.path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new ResumeVisualReviewRequiredError(
+      `Overleaf Downloads copy could not be inspected; remove ${file.path} manually`, artifactPath);
+  }
+  if (!current.isFile() || current.isSymbolicLink()
+    || current.dev !== file.dev || current.ino !== file.ino) {
+    throw new ResumeVisualReviewRequiredError(
+      `Overleaf Downloads copy changed; inspect ${file.path} manually`, artifactPath);
+  }
+  try { await remove(file.path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new ResumeVisualReviewRequiredError(
+        `Overleaf Downloads copy could not be removed; remove ${file.path} manually`, artifactPath);
+    }
+  }
+}
+
 export function assertLocalBrowserEndpoint(endpoint: string): void {
   const url = new URL(endpoint);
   if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
@@ -58,7 +81,8 @@ export async function renderOverleafResume(
   candidate: CandidateProfile,
   source: ResumeSource,
   outputDirectory: string,
-  options: { downloadsDirectory?: string; verify?: typeof verifyResumePdf } = {},
+  options: { downloadsDirectory?: string; verify?: typeof verifyResumePdf;
+    unlinkDownloaded?: typeof unlink } = {},
 ): Promise<VerifiedResumeArtifact> {
   assertOverleafProjectUrl(projectUrl);
   if (process.platform === "win32") {
@@ -73,6 +97,7 @@ export async function renderOverleafResume(
   const page = pageIdFromResult(opened);
   let completed = false;
   let downloadToClean: { path: string; dev: number; ino: number } | undefined;
+  let retainedArtifactPath: string | undefined;
   try {
     const first = requireSuccess(await client.callTool({ name: "snapshot", arguments: {
       page, mode: "interactive", depth: 3,
@@ -124,6 +149,7 @@ export async function renderOverleafResume(
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     const artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
+    retainedArtifactPath = artifactPath;
     let artifact: VerifiedResumeArtifact;
     try { artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source); }
     catch (error) {
@@ -135,13 +161,11 @@ export async function renderOverleafResume(
     completed = true;
     return artifact;
   } finally {
-    if (downloadToClean) {
-      const current = await lstat(downloadToClean.path).catch(() => undefined);
-      if (current?.isFile() && !current.isSymbolicLink()
-        && current.dev === downloadToClean.dev && current.ino === downloadToClean.ino) {
-        await unlink(downloadToClean.path).catch(() => {});
-      }
+    try {
+      if (downloadToClean) await removeVerifiedDownload(downloadToClean,
+        retainedArtifactPath, options.unlinkDownloaded ?? unlink);
+    } finally {
+      if (completed) await client.callTool({ name: "tabs", arguments: { action: "close", page } });
     }
-    if (completed) await client.callTool({ name: "tabs", arguments: { action: "close", page } });
   }
 }
