@@ -66,14 +66,16 @@ export function assessHardRequirements(description: string, candidate: Candidate
         continue;
       }
       if (/\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(statement)) {
-        if (!evidence.claims.some((claim) => /\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(claim)
+        const exact = /^(?:(?:must have|requires?)\s+)?(?:US|United States)\s+citizenship(?:\s+required)?$/i.test(statement);
+        if (!exact || !evidence.claims.some((claim) => /\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(claim)
           && !/\b(?:not|never|formerly)\b/i.test(claim))) {
           blockers.add("US citizenship requirement needs an approved matching claim");
         }
         continue;
       }
       if (/\b(?:work (?:authorization|authorisation|eligibility)|authorized to work|legally work|without (?:visa )?sponsorship|sponsorship (?:is )?not available)\b/i.test(statement)) {
-        if (!/\b(?:us|united states)\b/i.test(statement)
+        const exact = /^must be authorized to work in (?:the )?(?:US|United States) without sponsorship$/i.test(statement);
+        if (!exact
           || !candidate.authorization.countries.some((country) => /^(?:us|u\.?s\.?a?\.?|united states)$/i.test(country))
           || candidate.authorization.sponsorshipRequiredNowOrFuture) {
           blockers.add("US work authorization without sponsorship needs candidate confirmation");

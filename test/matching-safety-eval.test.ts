@@ -137,6 +137,13 @@ describe("automatic match safety evaluation", () => {
     "Must have TypeScript (Kubernetes preferred).",
     "Must have TypeScript, Kubernetes - Python preferred.",
     "Bachelor's degree not required, Kubernetes required.",
+    "Must have US citizenship: Kubernetes.",
+    "Must have US citizenship & Kubernetes.",
+    "Must have US citizenship + Kubernetes.",
+    "Must have US citizenship as well as Kubernetes.",
+    "Must have US citizenship along with Kubernetes.",
+    "Must have US citizenship - Kubernetes.",
+    "Must have work authorization in US: Kubernetes.",
   ])("holds compound mandatory text: %s", (text) => {
     const citizen = candidateProfileSchema.parse({ ...candidate,
       education: [{ id: "citizenship", claim: "US citizenship", skills: [],
