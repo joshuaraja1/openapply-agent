@@ -1,35 +1,24 @@
 import type { CandidateProfile } from "../candidate/schema.js";
 
-export interface HardRequirementResult {
-  blockers: string[];
-}
+export interface HardRequirementResult { blockers: string[] }
 
-function approvedClaims(candidate: CandidateProfile): string[] {
-  return [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
+function approvedEvidence(candidate: CandidateProfile): { claims: string[]; skills: string[] } {
+  const approved = [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
     ...candidate.projects.flatMap((project) => project.claims)]
     .filter((claim) => (claim.status === "verified" || claim.status === "user-confirmed")
-      && claim.allowedUses.includes("matching"))
-    .map((claim) => claim.claim);
+      && claim.allowedUses.includes("matching"));
+  return { claims: approved.map((claim) => claim.claim), skills: approved.flatMap((claim) => claim.skills) };
 }
 
-/** Only explicit mandatory statements are classified. Ambiguous claims need a human review. */
-export function assessHardRequirements(description: string,
-  candidate: CandidateProfile): HardRequirementResult {
-  const approved = approvedClaims(candidate);
-  const skills = [...candidate.education, ...candidate.experience.flatMap((role) => role.claims),
-    ...candidate.projects.flatMap((project) => project.claims)]
-    .filter((claim) => (claim.status === "verified" || claim.status === "user-confirmed")
-      && claim.allowedUses.includes("matching"))
-    .flatMap((claim) => claim.skills);
-  const supported = (pattern: RegExp): boolean => approved.some((claim) =>
-    pattern.test(claim) && !/\b(?:not|never|incomplete|expired|formerly)\b/i.test(claim));
-  const hasSkill = (skill: string): boolean => skills.some((approvedSkill) =>
-    approvedSkill.toLowerCase() === skill.trim().toLowerCase());
+/** Free-text claims do not prove completion, currency, or the exact scope of a credential. */
+export function assessHardRequirements(description: string, candidate: CandidateProfile): HardRequirementResult {
+  const evidence = approvedEvidence(candidate);
+  const hasSkill = (name: string): boolean => evidence.skills.some((skill) =>
+    skill.trim().toLowerCase() === name.trim().toLowerCase());
   const blockers = new Set<string>();
-  const lines = description.replace(/\bU\.S\./gi, "US").replace(/\bPh\.D\./gi, "PhD")
-    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let requiredSection = false;
-  for (const line of lines) {
+  for (const line of description.replace(/\bU\.S\./gi, "US").replace(/\bPh\.D\./gi, "PhD")
+    .split(/\r?\n/).map((part) => part.trim()).filter(Boolean)) {
     if (/^(?:(?:minimum|basic|required)\s+)?(?:qualifications?|requirements?|skills?)\s*:?$/i.test(line)) {
       requiredSection = true;
       continue;
@@ -38,94 +27,62 @@ export function assessHardRequirements(description: string,
       requiredSection = false;
       continue;
     }
-    for (const part of line.split(/[.!?;](?=\s|$)/).flatMap((text) => text.split(/\s+but\s+/i))) {
-      const partMandatory = requiredSection || /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(part);
-      for (const fragment of part.split(/\s+and\s+|,\s*(?=[^,]*\bpreferred\b)/i)) {
-        const statement = fragment.replace(/^[•*\-]\s*/, "").trim();
-        if (!partMandatory || /\b(?:not required|no requirement|preferred|nice to have|optional|no\s+on[ -]?site\s+work\s+required)\b/i.test(statement)) {
+    for (const part of line.split(/[.!?;](?=\s|$)/).map((item) => item.trim()).filter(Boolean)) {
+      const mandatory = requiredSection || /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(part);
+      if (!mandatory) continue;
+      if (/\b(?:not required|no requirement|no\s+on[ -]?site\s+work\s+required)\b/i.test(part)) {
+        if (/\b(?:and|but)\b/i.test(part)) {
+          blockers.add(`Mixed optional and mandatory qualifications need review: ${part.slice(0, 120)}`);
+        }
+        continue;
+      }
+      if (/\b(?:preferred|nice to have|optional)\b/i.test(part)) {
+        blockers.add(`Mixed mandatory and optional qualifications need review: ${part.slice(0, 120)}`);
+        continue;
+      }
+      // An "and" joins mandatory conditions. An "or" is handled only for
+      // simple skill alternatives below; other alternatives need review.
+      for (const clause of part.split(/\s+(?:and|but)\s+/i)) {
+        const statement = clause.replace(/^[•*\-]\s*/, "").trim();
+        if (/\b(?:bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate|degree|diploma)\b/i.test(statement)) {
+          blockers.add("Degree requirement needs structured completion and field evidence");
           continue;
         }
-        let classified = false;
+        if (/\b(?:clearance|secret|top secret|ts\/sci)\b/i.test(statement)) {
+          blockers.add("Clearance requirement needs structured level and active-status evidence");
+          continue;
+        }
+        if (/\b(?:license|licence|certification|certified|certificate)\b/i.test(statement)) {
+          blockers.add("License or certification requirement needs structured currency evidence");
+          continue;
+        }
+        if (/\b\d{1,2}\+?\s+years?\b/i.test(statement)) {
+          blockers.add("Experience-years requirement needs structured duration evidence");
+          continue;
+        }
+        if (/\b(?:itar|export.control|us person|u\.s\. person)\b/i.test(statement)) {
+          blockers.add("Export-control eligibility needs candidate review");
+          continue;
+        }
         if (/\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(statement)) {
-          classified = true;
-          if (!supported(/\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i)) {
+          if (!evidence.claims.some((claim) => /\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(claim)
+            && !/\b(?:not|never|formerly)\b/i.test(claim))) {
             blockers.add("US citizenship requirement needs an approved matching claim");
           }
+          continue;
         }
         if (/\b(?:work (?:authorization|authorisation|eligibility)|authorized to work|legally work|without (?:visa )?sponsorship|sponsorship (?:is )?not available)\b/i.test(statement)) {
-          classified = true;
           if (!/\b(?:us|united states)\b/i.test(statement)
             || !candidate.authorization.countries.some((country) => /^(?:us|u\.?s\.?a?\.?|united states)$/i.test(country))
             || candidate.authorization.sponsorshipRequiredNowOrFuture) {
             blockers.add("US work authorization without sponsorship needs candidate confirmation");
           }
+          continue;
         }
-        if (/\b(?:itar|export.control|us person|u\.s\. person)\b/i.test(statement)) {
-          classified = true;
-          if (!supported(/\b(?:itar|export.control|us person|u\.s\. person)\s+eligib(?:le|ility)\b/i)) {
-            blockers.add("Export-control eligibility needs candidate review");
-          }
-        }
-        const clearance = /\b(?:active\s+)?(?:security\s+)?(top secret|ts\/sci|secret)\s+clearance\b/i.exec(statement);
-        if (clearance) {
-          classified = true;
-          const level = clearance[1]!.toLowerCase();
-        if (!approved.some((claim) => {
-          if (/\b(?:expired|revoked|inactive|suspended|incomplete|not|never)\b/i.test(claim)) return false;
-            const documented = /\bactive\s+(?:security\s+)?(top secret|ts\/sci|secret)\s+clearance\b/i.exec(claim);
-            return documented?.[1]?.toLowerCase() === level;
-          })) {
-            blockers.add("Security clearance requirement needs an approved matching claim");
-          }
-        }
-        const degree = /\b(bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate)\s+(?:degree|of\s+science|of\s+arts)(?:\s+in\s+([a-z ]+?))?(?=\s+(?:required|and|or|with|for)\b|[.!?;]|$)/i.exec(statement);
-        if (degree) {
-          classified = true;
-          const requiredLevel = degree[1]!.toLowerCase().replace(/'s$/, "");
-          const requiredMajor = degree[2]?.trim().toLowerCase();
-        if (!approved.some((claim) => {
-            if (/\b(?:incomplete|unfinished|not|never|withdrawn|pursuing|expected|in progress|working toward)\b/i.test(claim)) return false;
-            const documented = /\b(bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate)\s+(?:degree|of\s+science|of\s+arts)(?:\s+in\s+([a-z ]+))?/i.exec(claim);
-            return documented?.[1]?.toLowerCase().replace(/'s$/, "") === requiredLevel
-              && (!requiredMajor || documented?.[2]?.trim().toLowerCase() === requiredMajor);
-          })) {
-            blockers.add("Degree requirement needs an approved matching claim");
-          }
-        }
-        if (/\b(?:license|licence|certification|certified|certificate)\b/i.test(statement)) {
-          classified = true;
-          const named = /\b([\w+./-]+(?:\s+[\w+./-]+){0,3})\s+(?:license|licence|certification|certificate)\b/i.exec(statement)?.[1];
-          if (!named || !approved.some((claim) => !/\b(?:expired|revoked|inactive|suspended|not|never)\b/i.test(claim)
-            && new RegExp(`${named.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?:license|licence|certification|certificate)`, "i").test(claim))) {
-            blockers.add(`Mandatory license or certification needs review: ${statement.slice(0, 120)}`);
-          }
-        }
-        const years = statement.match(/\b(\d{1,2})\+?\s+years?\s+(?:of\s+)?((?:(?:professional|relevant|software|engineering|development|industry)\s+){0,3})experience\b/i);
-        if (years) {
-          classified = true;
-          const required = Number(years[1]);
-          const domain = years[2]!.trim().toLowerCase();
-          const speciality = /\bexperience\s+(?:with|in|using)\s+([a-z+#./ -]+)/i.exec(statement)?.[1]?.trim();
-          const documented = approved.some((text) =>
-            [...text.matchAll(/\b(\d{1,2})\+?\s+years?\s+(?:of\s+)?((?:(?:professional|relevant|software|engineering|development|industry)\s+){0,3})experience\b/gi)]
-              .some((claim) => Number(claim[1]) >= required
-                && claim[2]!.trim().toLowerCase() === domain
-                && (!speciality || text.toLowerCase().includes(speciality.toLowerCase()))));
-          if (!documented) blockers.add(`${required} years of ${domain ? `${domain} ` : ""}experience needs an approved matching claim`);
-        }
-        // A mandatory line with an unrecognized qualification is unsafe to auto-accept.
-        // Exact approved skills may satisfy a simple tool requirement; compound or
-        // ambiguous statements still need a person to confirm every part.
         const tool = /^(?:must (?:have|know|use)|(?:experience|proficiency|knowledge) (?:with|in|of)|(?:required|minimum) (?:experience|proficiency) (?:with|in))\s+(.+?)(?:\s+(?:experience|skills?))?$/i.exec(statement);
-        if (tool && !classified) {
-          classified = true;
-          const alternatives = tool[1]!.replace(/[.!]$/, "").split(/\s+or\s+/i)
-            .map((option) => option.split(/\s*,\s*|\s*\/\s*/).map((part) => part.trim()).filter(Boolean));
-          if (!alternatives.length || !alternatives.some((option) => option.length > 0 && option.every(hasSkill))) {
-            blockers.add(`Mandatory qualification needs review: ${statement.slice(0, 120)}`);
-          }
-        }
-        if (!classified && !hasSkill(statement.replace(/\s+required\.?$/i, "").trim())) {
+        const names = (tool?.[1] ?? statement).replace(/\s+required\.?$/i, "").replace(/[.!]$/, "")
+          .split(/\s+or\s+/i).map((name) => name.trim());
+        if (!names.length || !names.some(hasSkill)) {
           blockers.add(`Mandatory qualification needs review: ${statement.slice(0, 120)}`);
         }
       }

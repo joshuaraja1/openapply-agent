@@ -35,6 +35,7 @@ describe("automatic match safety evaluation", () => {
     ["export eligibility", "TypeScript. Must be ITAR eligible."],
     ["ambiguous mandatory requirement", "TypeScript. Must satisfy client-specific eligibility rules."],
     ["optional clause cannot hide a required tool", "TypeScript. Bachelor's degree not required but Kubernetes required."],
+    ["negated requirement cannot hide another", "TypeScript. Bachelor's degree not required and Kubernetes required."],
     ["required skills section", "TypeScript\nRequired skills:\n- Kubernetes"],
   ] as const;
   it.each(falseAccepts)("holds %s for review", (_name, descriptionText) => {
@@ -100,7 +101,10 @@ describe("automatic match safety evaluation", () => {
 
   it("checks required clauses independently from preferred clauses", () => {
     for (const descriptionText of ["TypeScript. Must have Kubernetes; Python preferred.",
-      "TypeScript. Must have TypeScript and Kubernetes, Python preferred."]) {
+      "TypeScript. Must have TypeScript and Kubernetes, Python preferred.",
+      "TypeScript. Must have TypeScript and Kubernetes (Python preferred).",
+      "TypeScript. Must have TypeScript and Kubernetes - Python preferred.",
+      "TypeScript. Must have TypeScript and Kubernetes (Python nice to have)."]) {
       expect(scoreJob({ ...base, descriptionText }, candidate, preferences).eligible).toBe(false);
     }
   });
@@ -154,6 +158,20 @@ describe("automatic match safety evaluation", () => {
         allowedUses: ["matching"] }] });
     expect(scoreJob({ ...base, descriptionText: "TypeScript. Master's degree in Computer Science required." },
       studying, preferences).eligible).toBe(false);
+  });
+
+  it("holds credential and duration claims without structured proof", () => {
+    const claims = candidateProfileSchema.parse({ ...candidate,
+      education: ["Graduating May 2027 with a Bachelor's degree", "Formerly Active Top Secret clearance",
+        "AWS certification lapsed", "3 years of software engineering experience"].map((claim, index) => ({
+        id: `claim-${index}`, claim, skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] })) });
+    for (const descriptionText of ["TypeScript. Bachelor's degree required.",
+      "TypeScript. Active Top Secret clearance required.", "TypeScript. AWS certification required.",
+      "TypeScript. Must have 2 years of software engineering experience."]) {
+      expect(scoreJob({ ...base, descriptionText }, claims, preferences).eligible).toBe(false);
+    }
   });
 
   it("keeps supported entry-level roles eligible", () => {

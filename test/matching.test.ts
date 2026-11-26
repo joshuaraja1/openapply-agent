@@ -88,14 +88,14 @@ describe("evidence-backed matching", () => {
     }
   });
 
-  it("accepts an explicit year claim but does not use unapproved claims", () => {
+  it("holds experience-years requirements until structured duration evidence exists", () => {
     const yearClaim = { ...candidate.experience[0]!.claims[0]!,
       claim: "3 years of software engineering experience with TypeScript" };
     const posting = { ...job,
       descriptionText: "TypeScript. Must have 2+ years of software engineering experience with TypeScript." };
     const documented = candidateProfileSchema.parse({ ...candidate,
       experience: [{ ...candidate.experience[0], claims: [yearClaim] }] });
-    expect(scoreJob(posting, documented, preferences).eligible).toBe(true);
+    expect(scoreJob(posting, documented, preferences).eligible).toBe(false);
     const unapproved = candidateProfileSchema.parse({ ...documented,
       experience: [{ ...candidate.experience[0], claims: [{ ...yearClaim, status: "needs-confirmation" }] }] });
     expect(scoreJob(posting, unapproved, preferences).eligible).toBe(false);
@@ -114,7 +114,7 @@ describe("evidence-backed matching", () => {
       "- Active Secret clearance"].join("\n") };
     const result = scoreJob(posting, candidate, preferences);
     expect(result.eligible).toBe(false);
-    expect(result.reasons).toContain("2 years of software engineering experience needs an approved matching claim");
-    expect(result.reasons).not.toContain("Security clearance requirement needs an approved matching claim");
+    expect(result.reasons).toContain("Experience-years requirement needs structured duration evidence");
+    expect(result.reasons).not.toContain("Clearance requirement needs structured level and active-status evidence");
   });
 });
