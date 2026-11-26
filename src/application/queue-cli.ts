@@ -31,6 +31,7 @@ import { writeApplicationPackage } from "./package-file.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
+import { recoverClaimedSubmission } from "./recover-submission.js";
 
 const json = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"));
 await holdWorkflowLease();
@@ -76,8 +77,15 @@ const checkpoints = sqlite
   : await new EncryptedApplicationStateStore<ApplicationCheckpoint>(
     join(root, "applications.enc.json"), key).snapshotRecords();
 for (const record of checkpoints) {
-  if (record.state?.stage === "waiting-human" && record.state.jobId === record.id) {
-    await notifyPendingHandoff(workflow, record.state, secrets, notificationConfig);
+  if (record.state?.stage === "submit-claimed" && record.state.jobId !== record.id) {
+    throw new Error("Interrupted submission record does not match its job ID");
+  }
+  if (record.state?.jobId === record.id) {
+    const saved = record.state.stage === "submit-claimed"
+      ? await recoverClaimedSubmission(workflow, record.state, root) : record.state;
+    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain") {
+      await notifyPendingHandoff(workflow, saved, secrets, notificationConfig);
+    }
   }
 }
 const eligible: DiscoveredJob[] = [];
