@@ -116,6 +116,7 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("unexpected files");
       expect(await readFile(unrelated, "utf8")).toBe("keep me");
       await rm(unrelated);
+      await rm(join(f.archive, "0-state.sqlite")); // Interrupted prior purge.
       await purgeLocalStateArchive(f.paths, f.archive, true, true);
       await expect(lstat(f.archive)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(lstat(f.paths.databasePath)).rejects.toMatchObject({ code: "ENOENT" });

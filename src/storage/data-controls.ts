@@ -197,17 +197,25 @@ export async function purgeLocalStateArchive(paths: LocalStatePaths, archivePath
   const manifest = parseManifest(await readPrivateFile(join(archivePath, "manifest.json")), paths);
   for (const entry of manifest.entries) {
     const saved = join(archivePath, entry.saved);
-    await assertPrivateFile(saved);
-    if (sha256(await readFile(saved)) !== entry.digest || await exists(entry.original)) {
+    if (await exists(entry.original)) {
       throw new Error("Archive is incomplete or state has been restored");
+    }
+    if (await exists(saved)) {
+      await assertPrivateFile(saved);
+      if (sha256(await readFile(saved)) !== entry.digest) {
+        throw new Error("Archive is incomplete or state has been restored");
+      }
     }
   }
   const names = await readdir(archivePath);
   const expected = new Set(["manifest.json", ...manifest.entries.map((entry) => entry.saved)]);
-  if (names.length !== expected.size || names.some((name) => !expected.has(name))) {
+  if (names.some((name) => !expected.has(name))) {
     throw new Error("Archive has unexpected files");
   }
-  for (const entry of manifest.entries) await unlink(join(archivePath, entry.saved));
+  for (const entry of manifest.entries) {
+    const saved = join(archivePath, entry.saved);
+    if (await exists(saved)) await unlink(saved);
+  }
   await unlink(join(archivePath, "manifest.json"));
   await rmdir(archivePath);
 }
