@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext } from "playwright";
 import { verifyResumePdf } from "../resume/verify-pdf.js";
 import type { DiscoveredJob } from "../types.js";
 import { hasStableRequisitionPath } from "./requisition.js";
@@ -44,7 +44,7 @@ export async function inspectOwnedReceipt(
   }
   const reference = pkg.job.id.split(":").at(-1)!;
   const original = new URL(pkg.job.applicationUrl);
-  const matches: Page[] = [];
+  const matches: string[] = [];
   for (const page of context.pages()) {
     if (page.isClosed()) continue;
     let receipt: URL;
@@ -62,13 +62,13 @@ export async function inspectOwnedReceipt(
     const receiptLines = await page.locator(receiptSelector).allInnerTexts().catch(() => []);
     if (!receiptLines.some((line) => phrase(line, pkg.expectedConfirmation!))) continue;
     if (page.url() !== receipt.href) continue;
-    matches.push(page);
+    matches.push(receipt.href);
   }
   if (matches.length !== 1) {
     throw new Error(matches.length ? "More than one job-bound employer receipt is open"
       : "No job-bound employer receipt is visible in the owned browser");
   }
-  return matches[0]!.url();
+  return matches[0]!;
 }
 
 /** A candidate-assisted fallback after tab loss; no uncertain claim is ever resubmitted. */
