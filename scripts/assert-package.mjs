@@ -7,10 +7,10 @@ export function assertPackageManifest(manifest) {
   }
   const files = manifest[0].files.map((entry) => entry.path);
   for (const required of ["dist/src/product-cli.js", "templates/user/01-candidate-profile.md",
-    "templates/resume/main.tex", "README.md", "LICENSE"]) {
+    "templates/resume/main.tex", "README.md", "LICENSE", "runtime-package-lock.json"]) {
     if (!files.includes(required)) throw new Error(`Portable package is missing ${required}`);
   }
-  const allowed = /^(?:dist\/src|templates|examples|docs)\/|^(?:README\.md|LICENSE|package\.json)$/;
+  const allowed = /^(?:dist\/src|templates|examples|docs)\/|^(?:README\.md|LICENSE|package\.json|runtime-package-lock\.json)$/;
   const forbidden = files.filter((path) => !allowed.test(path)
     || /(?:^|\/)\.env(?:\.|$)|\.(?:pdf|zip|pem|key|p12|pfx|sqlite|db)$/i.test(path));
   if (forbidden.length) throw new Error(`Private or generated files entered the package: ${forbidden.join(", ")}`);

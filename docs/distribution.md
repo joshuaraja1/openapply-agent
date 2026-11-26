@@ -47,6 +47,22 @@ release signatures. `npm install` can resolve runtime dependencies from mutable
 registry metadata; this script does not pin or independently verify them before
 starting the CLI. Use it only for controlled staging and testing with trusted
 artifacts; do not publish it as a public installer.
+## Locked tarball install for staging
+
+`npm pack` now adds `runtime-package-lock.json` to the portable tarball. From a
+source checkout, run `npm run distribution:locked-install -- /absolute/path/to/openapply-agent-0.1.0.tgz /absolute/empty/destination`.
+The helper rejects archive paths outside `package/` and archive links, validates
+the package against its lock, then runs `npm ci --omit=dev --ignore-scripts` in
+the extracted package before starting its CLI. npm verifies downloaded archive
+bytes against the lock's integrity hashes. If extraction or installation fails,
+the destination is removed. CI checks this path on macOS, Windows, and Linux,
+including altered-hash and missing-dependency archives.
+
+The existing portable `npm install <tarball>` smoke remains a compatibility
+check; it does not pin transitive dependency resolution. The separate user-level
+staging installer must call this locked path before it can claim dependency
+integrity. The lock itself is inside an unsigned tarball, so this is still a
+controlled staging check, not a verified public release artifact.
 
 ## Requirements for a safe updater
 
