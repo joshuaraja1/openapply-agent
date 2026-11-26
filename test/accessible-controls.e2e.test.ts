@@ -12,7 +12,8 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
     '<span id="location-label">Work location</span>' +
     '<button type="button" role="combobox" aria-labelledby="location-label" aria-expanded="false">Choose</button>' +
     '<div role="listbox" hidden><div role="option">Remote</div><div role="option">Dallas</div></div>' +
-    '<form><button role="combobox" aria-label="Unsafe role">Choose</button></form>' +
+    '<form><button role="combobox" aria-label="Unsafe role">Choose</button>' +
+    '<input type="submit" role="combobox" aria-label="Unsafe input"></form>' +
     '<button id="next" type="button">Next</button>';
   const combo = root.querySelector('[role=combobox]');
   const list = root.querySelector('[role=listbox]');
@@ -61,6 +62,10 @@ describe("owned browser accessible controls", () => {
         expect(afterSelect.controls.find((control) => control.role === "combobox")?.value).toBe("Remote");
         const unsafe = afterSelect.controls.find((control) => control.name === "Unsafe role")!;
         await expect(browser.act(unsafe.ref, "select", "Remote"))
+          .rejects.toThrow("Submission requires");
+        const beforeUnsafeInput = await browser.snapshot();
+        const unsafeInput = beforeUnsafeInput.controls.find((control) => control.name === "Unsafe input")!;
+        await expect(browser.act(unsafeInput.ref, "select", "Remote"))
           .rejects.toThrow("Submission requires");
         const applicationPage = context.pages().find((page) => page.url().startsWith("https://jobs.example.com"))!;
         await applicationPage.evaluate(() => { (window as Window & { duplicateOptions?: boolean }).duplicateOptions = true; });

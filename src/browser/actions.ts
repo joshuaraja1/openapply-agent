@@ -142,8 +142,9 @@ export class AgentBrowser {
         const selected = await handle.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label.trim());
         if (selected !== value) throw new Error("Selected option was not accepted");
       } else if (await handle.getAttribute("role") === "combobox") {
-        if (await handle.evaluate((element) => element.tagName === "BUTTON"
-          && (element as HTMLButtonElement).type === "submit")) {
+        if (await handle.getAttribute("type") === "submit"
+          || await handle.evaluate((element) => element.tagName === "BUTTON"
+            && (element as HTMLButtonElement).type === "submit")) {
           throw new Error("Submission requires a separate approved action");
         }
         await handle.click();
