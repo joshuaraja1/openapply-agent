@@ -7,11 +7,14 @@ synthetic jobs. These runs exercise quota reservations, retry checks, canonical
 claim callbacks, and queue outcomes using in-memory stores and no network.
 
 The recovery measurement starts a child process, writes an encrypted durable
-`submit-claimed` checkpoint and one **simulated** final-click marker, kills that
-process, then starts a separate process. The second process reads the checkpoint
-and records `submission-uncertain` without another marker. Its time includes
-process startup and checkpoint recovery. Temporary state and its synthetic key
-are removed at the end of the run.
+`submit-claimed` checkpoint and one **simulated** final-click marker. A second
+process is refused while the first holds the workflow lease. The fixture then
+kills the first process, confirms it exited, clears only its synthetic stale
+lock, and starts a separate process. That process invokes the production
+recovery helper to record `submission-uncertain` without another marker. Its
+time includes process startup and checkpoint recovery. Production requires
+operator inspection before clearing a stale lock; this fixture can prove its
+own child exited. Temporary state and its synthetic key are removed afterward.
 
 These timings do **not** measure discovery fetch, ranking, résumé tailoring,
 Overleaf PDF rendering, browser actions, employer portal waits, real final

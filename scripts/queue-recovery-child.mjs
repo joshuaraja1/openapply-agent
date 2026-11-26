@@ -2,11 +2,17 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { EncryptedApplicationStateStore } from "../dist/src/storage/encrypted-state.js";
 import { ApplicationWorkflow } from "../dist/src/application/state-machine.js";
+import { recoverClaimedSubmission } from "../dist/src/application/recover-submission.js";
+import { holdWorkflowLease } from "../dist/src/storage/workflow-lease.js";
 
 const [mode, root] = process.argv.slice(2);
 const key = Buffer.from(process.env.OPENAPPLY_BENCHMARK_KEY_HEX ?? "", "hex");
-if (!root || key.length !== 32 || !["claim", "recover"].includes(mode)) {
+if (!root || key.length !== 32 || !["claim", "probe", "recover"].includes(mode)) {
   throw new Error("Invalid synthetic recovery fixture arguments");
+}
+await holdWorkflowLease(root);
+if (mode === "probe") {
+  throw new Error("A second worker unexpectedly acquired the active workflow lease");
 }
 const id = "synthetic-requisition";
 const workflow = new ApplicationWorkflow(
@@ -29,7 +35,6 @@ if (mode === "claim") {
   if (checkpoint?.stage !== "submit-claimed") throw new Error("Durable submit claim was lost");
   const clickCount = Number(await readFile(marker, "utf8"));
   if (clickCount !== 1) throw new Error("Synthetic final click was repeated or lost");
-  const uncertain = await workflow.advance(id, "submission-uncertain",
-    { blocker: "Process terminated after submit claim; inspect employer confirmation" });
+  const uncertain = await recoverClaimedSubmission(workflow, checkpoint, root);
   process.stdout.write(`${JSON.stringify({ stage: uncertain.stage, clickCount })}\n`);
 }

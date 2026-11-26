@@ -18,6 +18,7 @@ export function assertQueueBenchmark(report, runnerOs) {
   const recovery = report.recovery;
   if (recovery?.stage !== "submission-uncertain" || recovery.clickCount !== 1
     || recovery.separateProcess !== true || recovery.terminatedByParent !== true
+    || recovery.activeWorkerFenced !== true || recovery.staleLockClearedAfterExit !== true
     || !Number.isFinite(recovery.processRestartMs)
     || recovery.processRestartMs <= 0) {
     throw new Error("Separate-process recovery evidence is incomplete");

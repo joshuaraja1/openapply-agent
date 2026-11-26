@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,45 +45,76 @@ async function measureQueue() {
   return { ...summary(durations), completedJobsPerRun: jobCount, failures: 0 };
 }
 
-function child(mode, root, key, killOnReady = false) {
+function runChild(mode, root, key) {
   return new Promise((resolve, reject) => {
     const started = performance.now();
-    const processChild = spawn(process.execPath, [childPath, mode, root], {
+    const worker = spawn(process.execPath, [childPath, mode, root], {
       env: { ...process.env, OPENAPPLY_BENCHMARK_KEY_HEX: key },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
-    let killed = false;
-    const timer = setTimeout(() => processChild.kill("SIGKILL"), 15_000);
-    processChild.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-      if (killOnReady && stdout.includes("READY\n") && !killed) {
-        killed = processChild.kill("SIGKILL");
-      }
-    });
-    processChild.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    processChild.on("error", reject);
-    processChild.on("close", (code, signal) => {
+    const timer = setTimeout(() => worker.kill("SIGKILL"), 15_000);
+    worker.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    worker.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    worker.on("error", reject);
+    worker.on("close", (code, signal) => {
       clearTimeout(timer);
-      if (killOnReady ? !killed || !stdout.includes("READY\n") : code !== 0) {
-        reject(new Error(`Synthetic ${mode} process failed: ${stderr || signal || code}`));
-      } else resolve({ stdout: stdout.trim(), elapsedMs: performance.now() - started,
-        terminatedByParent: killOnReady && killed });
+      resolve({ code, signal, stdout: stdout.trim(), stderr,
+        elapsedMs: performance.now() - started });
     });
   });
 }
 
+function startClaim(root, key) {
+  const worker = spawn(process.execPath, [childPath, "claim", root], {
+    env: { ...process.env, OPENAPPLY_BENCHMARK_KEY_HEX: key },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const closed = new Promise((resolve) => worker.once("close", (code, signal) => resolve({ code, signal })));
+  const ready = new Promise((resolve, reject) => {
+    let output = "";
+    const timer = setTimeout(() => { worker.kill("SIGKILL"); reject(new Error("Claim worker timed out")); }, 15_000);
+    worker.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+      if (output.includes("READY\n")) { clearTimeout(timer); resolve(); }
+    });
+    worker.once("error", (error) => { clearTimeout(timer); reject(error); });
+    worker.once("close", (code) => {
+      if (!output.includes("READY\n")) {
+        clearTimeout(timer);
+        reject(new Error(`Claim worker exited before READY: ${code}`));
+      }
+    });
+  });
+  return { worker, closed, ready };
+}
+
 async function measureRecovery() {
   const root = await mkdtemp(join(tmpdir(), "openapply-recovery-benchmark-"));
+  let holder;
   try {
     if (process.platform === "win32") await secureWindowsPrivatePath(root);
     const key = randomBytes(32).toString("hex");
-    const claimed = await child("claim", root, key, true);
-    const recovered = await child("recover", root, key);
+    holder = startClaim(root, key);
+    await holder.ready;
+    const probe = await runChild("probe", root, key);
+    const activeWorkerFenced = probe.code !== 0 && probe.stderr.includes("Another workflow is active");
+    if (!activeWorkerFenced) throw new Error("A second worker was not fenced by the active lease");
+    const terminatedByParent = holder.worker.kill("SIGKILL");
+    await holder.closed;
+    if (!terminatedByParent) throw new Error("Claim worker did not terminate");
+    // This fixture has proved the child exited. Production requires operator inspection
+    // before clearing a stale workflow lock after an unclean exit.
+    await rmdir(join(root, "workflow.lock"));
+    const recovered = await runChild("recover", root, key);
+    if (recovered.code !== 0) throw new Error(`Recovery worker failed: ${recovered.stderr}`);
     return { ...JSON.parse(recovered.stdout), processRestartMs: recovered.elapsedMs,
-      separateProcess: true, terminatedByParent: claimed.terminatedByParent };
+      separateProcess: true, terminatedByParent, activeWorkerFenced,
+      staleLockClearedAfterExit: true };
   } finally {
+    holder?.worker.kill("SIGKILL");
+    if (holder) await holder.closed;
     await rm(root, { recursive: true, force: true });
   }
 }
