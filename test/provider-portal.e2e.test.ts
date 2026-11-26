@@ -59,7 +59,9 @@ function portal(provider: Provider, scenario: Scenario): string {
 
 async function run(provider: Provider, scenario: Scenario) {
   const root = await mkdtemp(join(tmpdir(), "openapply-provider-e2e-"));
-  const resumePath = join(root, "verified-resume.pdf");
+  const resumePath = join(root, "fixture-resume.pdf");
+  // This byte string is only an upload fixture. The injected verifier below
+  // supplies a synthetic receipt and does not inspect PDF validity or layout.
   const resumeBytes = Buffer.from("%PDF-1.4\nsynthetic fixture\n%%EOF\n");
   await writeFile(resumePath, resumeBytes);
   const pdfSha256 = createHash("sha256").update(resumeBytes).digest("hex");
@@ -114,7 +116,7 @@ async function run(provider: Provider, scenario: Scenario) {
 
 describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider portal", () => {
   for (const provider of ["greenhouse", "ashby", "lever", "smartrecruiters", "workday"] as const) {
-    it(`${provider} submits a two-step job-bound form with the verified résumé`, async () => {
+    it(`${provider} uploads a fixture file and recognizes a local two-step confirmation`, async () => {
       const result = await run(provider, "success");
       expect(result.checkpoint.stage).toBe("submitted");
       expect(result.checkpoint.confirmation).toContain("Thank you for applying");
@@ -122,7 +124,7 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       expect(result.emailValue).toBe("test@example.com");
       if (provider === "smartrecruiters") expect(result.phoneValue).toBe("555-0100");
       expect(result.authorizationValue).toBe("Yes");
-      expect(result.fileName).toBe("verified-resume.pdf");
+      expect(result.fileName).toBe("fixture-resume.pdf");
       expect(result.confirmationVisible).toBe(true);
     }, 30_000);
 
@@ -130,7 +132,7 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       const result = await run(provider, "unknown-required");
       expect(result.checkpoint.stage).toBe("waiting-human");
       expect(result.checkpoint.blocker).toContain("Unanswered legal question");
-      expect(result.fileName).toBe("verified-resume.pdf");
+      expect(result.fileName).toBe("fixture-resume.pdf");
       expect(result.confirmationVisible).toBe(false);
     }, 30_000);
 
@@ -142,28 +144,30 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
     }, 30_000);
   }
 
-  it("greenhouse pauses when filling reveals a new required question", async () => {
-    const result = await run("greenhouse", "conditional-required");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
-    expect(result.fileName).toBeUndefined();
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+  for (const provider of ["greenhouse", "ashby"] as const) {
+    it(`${provider} pauses when filling reveals a new required question`, async () => {
+      const result = await run(provider, "conditional-required");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
+      expect(result.fileName).toBeUndefined();
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
 
-  it("greenhouse pauses when Continue leaves a validation error on the same step", async () => {
-    const result = await run("greenhouse", "validation-error");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("Continue did not advance");
-    expect(result.fileName).toBe("verified-resume.pdf");
-    expect(result.validationVisible).toBe(true);
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+    it(`${provider} pauses when Continue leaves a validation error on the same step`, async () => {
+      const result = await run(provider, "validation-error");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("Continue did not advance");
+      expect(result.fileName).toBe("fixture-resume.pdf");
+      expect(result.validationVisible).toBe(true);
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
 
-  it("greenhouse pauses on an unrecognized required identity label", async () => {
-    const result = await run("greenhouse", "identity-drift");
-    expect(result.checkpoint.stage).toBe("waiting-human");
-    expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
-    expect(result.fileName).toBeUndefined();
-    expect(result.confirmationVisible).toBe(false);
-  }, 30_000);
+    it(`${provider} pauses on an unrecognized required identity label`, async () => {
+      const result = await run(provider, "identity-drift");
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
+      expect(result.fileName).toBeUndefined();
+      expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
+  }
 });
