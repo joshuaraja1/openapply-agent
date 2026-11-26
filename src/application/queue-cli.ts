@@ -20,7 +20,7 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
-import { loadHandoffNotificationConfig, notifyHumanHandoff, sendHandoffEmail } from "./notification.js";
+import { loadHandoffNotificationConfig, notifyPendingHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { runnableEntries } from "./queue-reconcile.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
@@ -66,6 +66,17 @@ const emailCode = authPolicy?.emailVerification.autoEnter
   ? new EmailCodeEntry(authPolicy, secrets, sqlite?.store("emailClaims")
     ?? new EncryptedApplicationStateStore(join(root, "email-code-claims.enc.json"), key)) : undefined;
 const template = await readFile("templates/resume/main.tex", "utf8");
+// Replay pending alerts independently of today's queue: a source outage or
+// closed posting must not hide an already-saved human handoff.
+const checkpoints = sqlite
+  ? sqlite.snapshot("applications") as Array<{ id: string; state?: ApplicationCheckpoint }>
+  : await new EncryptedApplicationStateStore<ApplicationCheckpoint>(
+    join(root, "applications.enc.json"), key).snapshotRecords();
+for (const record of checkpoints) {
+  if (record.state?.stage === "waiting-human" && record.state.jobId === record.id) {
+    await notifyPendingHandoff(workflow, record.state, secrets, notificationConfig);
+  }
+}
 const eligible: DiscoveredJob[] = [];
 const needsReview: { jobId: string; reasons: string[] }[] = [];
 const sources = new Map<string, (typeof discovery.sources)[number]>();
@@ -133,11 +144,7 @@ try {
       }) } : {}),
     });
     if (result.checkpoint.stage === "waiting-human") {
-      await notifyHumanHandoff().catch(() => console.warn("Desktop handoff notification was unavailable"));
-      if (notificationConfig) {
-        await sendHandoffEmail(notificationConfig, result.checkpoint, secrets)
-          .catch(() => console.warn("Email handoff notification was unavailable"));
-      }
+      await notifyPendingHandoff(workflow, result.checkpoint, secrets, notificationConfig);
     }
   }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));

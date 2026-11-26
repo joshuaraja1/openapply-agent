@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SecretStore } from "../src/storage/contracts.js";
+import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import { handoffNotificationSchema, loadHandoffNotificationConfig,
-  sendHandoffEmail } from "../src/application/notification.js";
-import type { ApplicationCheckpoint } from "../src/application/state-machine.js";
+  notifyPendingHandoff, sendHandoffEmail } from "../src/application/notification.js";
+import { ApplicationWorkflow, type ApplicationCheckpoint } from "../src/application/state-machine.js";
 
 const config = handoffNotificationSchema.parse({ version: 1, email: {
   provider: "resend", from: "alerts@example.org", to: "user@example.net",
@@ -22,6 +23,49 @@ function memorySecrets(): SecretStore {
 }
 
 describe("human handoff email", () => {
+  it("replays unsent alerts once per durable handoff, including a second pause in the same millisecond", async () => {
+    const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();
+    const workflow = new ApplicationWorkflow(store);
+    const first = { ...checkpoint, handoffId: "af77eec9-8ab1-4f01-97f0-e30f69f297ab",
+      artifactPath: "/private/resume.pdf", artifactSha256: "a".repeat(64),
+      sourceFingerprint: "b".repeat(64) };
+    await store.compareAndSwap(first.jobId, undefined, first);
+    const desktop = vi.fn(async () => {});
+    const email = vi.fn(async () => {});
+    const options = { desktopEnabled: true, desktop, email };
+    const secrets = memorySecrets();
+    await notifyPendingHandoff(workflow, first, secrets, config, options);
+    expect(await workflow.current(first.jobId)).toMatchObject({
+      desktopNotifiedFor: first.handoffId, emailNotifiedFor: first.handoffId });
+    await notifyPendingHandoff(workflow, (await workflow.current(first.jobId))!, secrets, config, options);
+    expect(desktop).toHaveBeenCalledTimes(1);
+    expect(email).toHaveBeenCalledTimes(1);
+    await workflow.advance(first.jobId, "applying");
+    const second = await workflow.advance(first.jobId, "waiting-human", { blocker: "New question" });
+    expect(second.handoffId).not.toBe(first.handoffId);
+    await expect(workflow.markNotification(first.jobId, "email", first.handoffId)).rejects.toThrow("different");
+    await notifyPendingHandoff(workflow, second, secrets, config, options);
+    expect(desktop).toHaveBeenCalledTimes(2);
+    expect(email).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a failed alert pending for the next run", async () => {
+    const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();
+    const workflow = new ApplicationWorkflow(store);
+    await store.compareAndSwap(checkpoint.jobId, undefined, checkpoint);
+    const secrets = memorySecrets();
+    const email = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await notifyPendingHandoff(workflow, checkpoint, secrets, config,
+        { desktopEnabled: false, email });
+      expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBeUndefined();
+      await notifyPendingHandoff(workflow, checkpoint, secrets, config,
+        { desktopEnabled: false, email });
+      expect((await workflow.current(checkpoint.jobId))?.emailNotifiedFor).toBe(checkpoint.updatedAt);
+      expect(email).toHaveBeenCalledTimes(2);
+    } finally { warning.mockRestore(); }
+  });
   it("sends only generic content with a stable retry key", async () => {
     const secrets = memorySecrets();
     await secrets.put(config.email!.apiKeySecretRef, "test-secret");

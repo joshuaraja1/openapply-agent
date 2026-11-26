@@ -67,6 +67,11 @@ The email contains only a generic reminder to open OpenApply. An email failure
 never changes the application checkpoint or marks a submission complete. The
 notification path has synthetic tests; live delivery requires the user's own
 verified sender domain and API key.
+The next scheduled run replays an alert still pending in encrypted application
+state even if the job is absent from today's queue. Delivery is recorded only
+after the provider accepts the request. A crash between acceptance and that
+record can cause a duplicate reminder after the provider's 24-hour idempotency
+window; it cannot cause another application submission.
 Use `OPENAPPLY_JOB_ID=<job-id> npm run application:status` to read the exact
 blocker and private package path from encrypted local state. The BrowserOS tab
 stays open for the user. After resolving an unknown field, run

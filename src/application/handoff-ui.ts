@@ -10,7 +10,8 @@ const reply = (response: ServerResponse, status: number, data: unknown): void =>
   response.end(JSON.stringify(data));
 };
 const requestSchema = z.strictObject({
-  updatedAt: z.string().datetime(), authorizeContinuation: z.literal(true),
+  updatedAt: z.string().datetime(), handoffId: z.string().uuid().optional(),
+  authorizeContinuation: z.literal(true),
   answers: z.array(z.strictObject({ field: z.string().trim().min(1).max(300),
     value: z.string().trim().min(1).max(4000) })).max(10),
 }).superRefine((value, context) => {
@@ -68,6 +69,7 @@ export async function startHandoffUi(options: {
           stage: checkpoint.stage,
           blocker: checkpoint.stage === "waiting-human" ? checkpoint.blocker : null,
           officialUrl: checkpoint.officialUrl, updatedAt: checkpoint.updatedAt,
+          handoffId: checkpoint.handoffId,
           busy, ...(lastError ? { error: lastError } : {}) });
       }
       if (url.pathname !== "/api/resume" || request.method !== "POST") {
@@ -83,7 +85,7 @@ export async function startHandoffUi(options: {
         || checkpoint.stage !== "waiting-human" || !checkpoint.packagePath) {
         return reply(response, 409, { error: "No resumable handoff exists" });
       }
-      if (checkpoint.updatedAt !== input.updatedAt) {
+      if (checkpoint.updatedAt !== input.updatedAt || checkpoint.handoffId !== input.handoffId) {
         return reply(response, 409, { error: "Application changed; reload before continuing" });
       }
       if (busy) return reply(response, 409, { error: "Application is already resuming" });
@@ -132,7 +134,7 @@ const token=${JSON.stringify(token)};let checkpoint;
 const status=document.getElementById('status'),blocker=document.getElementById('blocker');
 async function refresh(){const response=await fetch('/api/handoff',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok){status.textContent=data.error;return}checkpoint=data;document.getElementById('job').textContent=data.jobLabel;status.textContent=data.busy?'Resuming application…':'Application status: '+data.stage+(data.error?' · '+data.error:'');blocker.textContent=data.blocker||'';if(data.busy)setTimeout(refresh,1500)}
 document.getElementById('add').onclick=()=>{const box=document.getElementById('answers');if(box.children.length>=10)return;const row=box.firstElementChild.cloneNode(true);row.querySelector('.field').value='';row.querySelector('.value').value='';box.append(row)};
-document.getElementById('resume').onclick=async()=>{if(!checkpoint||checkpoint.stage!=='waiting-human'){status.textContent='No pending handoff';return}if(!document.getElementById('authorize').checked){status.textContent='Review and authorize continuation first';return}const answers=[];for(const row of document.querySelectorAll('#answers .row')){const field=row.querySelector('.field').value.trim(),value=row.querySelector('.value').value.trim();if(Boolean(field)!==Boolean(value)){status.textContent='Provide both a field label and answer';return}if(field)answers.push({field,value})}status.textContent='Starting…';const response=await fetch('/api/resume',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({updatedAt:checkpoint.updatedAt,authorizeContinuation:true,answers})});const data=await response.json();if(!response.ok){status.textContent=data.error;return}document.getElementById('authorize').checked=false;refresh()};
+document.getElementById('resume').onclick=async()=>{if(!checkpoint||checkpoint.stage!=='waiting-human'){status.textContent='No pending handoff';return}if(!document.getElementById('authorize').checked){status.textContent='Review and authorize continuation first';return}const answers=[];for(const row of document.querySelectorAll('#answers .row')){const field=row.querySelector('.field').value.trim(),value=row.querySelector('.value').value.trim();if(Boolean(field)!==Boolean(value)){status.textContent='Provide both a field label and answer';return}if(field)answers.push({field,value})}status.textContent='Starting…';const response=await fetch('/api/resume',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({updatedAt:checkpoint.updatedAt,handoffId:checkpoint.handoffId,authorizeContinuation:true,answers})});const data=await response.json();if(!response.ok){status.textContent=data.error;return}document.getElementById('authorize').checked=false;refresh()};
 refresh().catch(()=>{status.textContent='Unable to read handoff'});
 </script>`;
 }
