@@ -4,11 +4,11 @@ Status: proposed product architecture. No candidate browser or application is ru
 
 ## Decision
 
-Use a shared AWS control plane and start an isolated browser worker for each
-candidate batch. The candidate's laptop is a setup and handoff client, never a
-required scheduler or application host. A single always-on VM per candidate is
-not the product architecture. A small shared VM can run the same worker image
-for a private beta, but the worker must not assume local-only state or credentials.
+Use a shared AWS control plane and start an isolated ECS Fargate browser task
+for each candidate batch. The candidate's laptop is a setup and handoff client,
+never a required scheduler or application host. No always-on candidate VM is
+part of the product architecture. Start with low concurrency in the private
+beta and scale the same task contract after recovery and isolation tests pass.
 
 The Cloudflare `openapply-wake` Worker is an optional single-user prototype. It
 does not host Chromium, preserve browser sessions, or provide the product queue.
@@ -47,7 +47,7 @@ Do not merge or market it as the cloud application runner.
 | Layer | First private beta | Scale path |
 | --- | --- | --- |
 | Jobs | SQS FIFO plus a durable run lease and exact-job journal | Same, with worker concurrency limits |
-| Worker | One container on a shared AWS host, on demand | ECS Fargate task per candidate batch |
+| Worker | ECS Fargate task per candidate batch, low concurrency | Same task contract with measured autoscaling |
 | Browser | Non-root Chromium, local encrypted task disk | Same image and task contract |
 | State | DynamoDB for leases, quota, handoffs, submit intent; S3 for encrypted artifacts/profile snapshots | Same with tenant-scoped IAM and measured capacity |
 | Identity and secrets | Product login and KMS-encrypted candidate vault; AWS workload identity | Per-tenant key and access isolation audit |
@@ -64,7 +64,8 @@ that a job application was submitted exactly once.
 
 - No shared provider accounts or browser profiles between candidates. Test
   tenant isolation and a malicious page attempting to read another tenant's
-  files or metadata.
+  files or metadata. Verify Chromium sandbox support in Fargate; document and
+  review the task isolation boundary before browsing untrusted sites.
 - Restore a browser profile and application checkpoint after task termination.
   Crash at every submit boundary and prove zero duplicate final clicks.
 - Test login, upload, conditional questions, CAPTCHA/MFA handoff, and exact-job
