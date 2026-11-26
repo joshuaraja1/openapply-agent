@@ -6,6 +6,16 @@ export interface DailyQuotaRecord { date: string; reservedJobIds: string[] }
 export class DailyQuota {
   constructor(private readonly store: ApplicationStateStore<DailyQuotaRecord>) {}
 
+  async availability(date: string, jobId: string, cap: number): Promise<"available" | "duplicate" | "full"> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !jobId || !Number.isInteger(cap) || cap < 1) {
+      throw new Error("Invalid daily quota request");
+    }
+    const current = await this.store.read(`daily-quota:${date}`);
+    const ids = current?.state.reservedJobIds ?? [];
+    if (ids.includes(jobId)) return "duplicate";
+    return ids.length >= cap ? "full" : "available";
+  }
+
   async reserve(date: string, jobId: string, cap: number): Promise<"reserved" | "duplicate" | "full"> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !jobId || !Number.isInteger(cap) || cap < 1) {
       throw new Error("Invalid daily quota request");

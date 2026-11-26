@@ -43,4 +43,23 @@ describe("durable official posting claims", () => {
     expect(outcomes.map((outcome) => outcome.status)).toEqual(["processed", "duplicate", "processed"]);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+
+  it("does not claim a posting when the daily cap prevents an attempt", async () => {
+    const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
+    const quota = new DailyQuota(new MemoryApplicationStateStore());
+    const retries = new RetryLedger(new MemoryApplicationStateStore());
+    const first = { id: "first", applicationUrl: url } as DiscoveredJob;
+    const capped = { id: "board-a", applicationUrl: "https://jobs.example.com/apply/987654" } as DiscoveredJob;
+    const samePostingTomorrow = { ...capped, id: "board-b" };
+    const execute = vi.fn(async () => {});
+    const claim = async (job: DiscoveredJob) => await claims.claim(job.id, job.applicationUrl) === "claimed";
+
+    expect((await runApplicationQueue([first, capped], quota, retries,
+      () => "2026-11-24", 1, execute, claim)).map((result) => result.status))
+      .toEqual(["processed", "cap-reached"]);
+    expect((await runApplicationQueue([samePostingTomorrow], quota, retries,
+      () => "2026-11-25", 1, execute, claim)).map((result) => result.status))
+      .toEqual(["processed"]);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
 });
