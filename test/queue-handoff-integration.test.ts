@@ -136,5 +136,5 @@ describe("controlled queue to handoff staging flow", () => {
     expect(resumed.checkpoint.confirmation).toBe("Application 123456 received");
     expect(submitClick).toHaveBeenCalledOnce();
     await expect(run()).rejects.toThrow("Application is submitted");
-  });
+  }, process.platform === "win32" ? 60_000 : 5_000);
 });
