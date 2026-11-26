@@ -1,3 +1,5 @@
+import { Parser } from "htmlparser2";
+
 export function asString(value: unknown): string | null {
   if (typeof value === "string") return value.trim() || null;
   if (typeof value === "number") return String(value);
@@ -5,18 +7,27 @@ export function asString(value: unknown): string | null {
 }
 
 export function htmlToText(value: string): string {
-  return value
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&#39;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/\s+/g, " ")
-    .trim();
+  const parts: string[] = [];
+  let hiddenDepth = 0;
+  const parser = new Parser({
+    onopentag(name) {
+      if (name === "script" || name === "style") {
+        if (!hiddenDepth) parts.push(" ");
+        hiddenDepth += 1;
+      } else if (!hiddenDepth) parts.push(" ");
+    },
+    ontext(text) {
+      if (!hiddenDepth) parts.push(text);
+    },
+    onclosetag(name) {
+      if (name === "script" || name === "style") {
+        hiddenDepth = Math.max(0, hiddenDepth - 1);
+        if (!hiddenDepth) parts.push(" ");
+      } else if (!hiddenDepth) parts.push(" ");
+    },
+  }, { decodeEntities: true });
+  parser.end(value);
+  return parts.join("").replace(/\s+/g, " ").trim();
 }
 
 export function isoOrNull(value: unknown): string | null {
