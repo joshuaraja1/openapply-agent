@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { assertPackageManifest } from "./assert-package.mjs";
+import { smokeInstalledFirstRun } from "./installed-first-run-smoke.mjs";
 
 const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("Run this smoke with npm run distribution:smoke");
@@ -80,6 +81,7 @@ try {
   // installation. This catches CWD-relative template reads in packaged runs.
   const foreignDirectory = join(root, "foreign-working-directory");
   mkdirSync(foreignDirectory);
+  await smokeInstalledFirstRun(installed, root, foreignDirectory);
   const templatePath = join(installed, "templates", "resume", "main.tex");
   const expectedHash = createHash("sha256").update(readFileSync(templatePath)).digest("hex");
   const modulePath = join(installed, "dist", "src", "resume", "bundled-template.js");
