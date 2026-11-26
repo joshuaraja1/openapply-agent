@@ -40,8 +40,12 @@ try {
     throw 'NSIS installer build failed'
   }
   if ($Sign) {
-    & (Join-Path $PSScriptRoot 'sign.ps1') $output
-    if ($LASTEXITCODE -ne 0) { throw 'Signed installer verification failed' }
+    $signature = Get-AuthenticodeSignature -LiteralPath $output
+    if ($signature.Status -ne 'Valid' -or
+        $signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne
+          $env:OPENAPPLY_WINDOWS_CERT_THUMBPRINT.ToUpperInvariant()) {
+      throw 'Signed installer verification failed'
+    }
   }
   Write-Output $output
 } finally {
