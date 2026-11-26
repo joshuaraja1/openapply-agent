@@ -24,6 +24,12 @@ long browser work, and route unresolved messages to a durable human review path
 before SQS dead-lettering. Cloud logs should use event codes and opaque run IDs;
 never print profile contents, application answers, receipt bodies, or tokens.
 
+Candidate deletion is also a release gate. S3 purge and DynamoDB tombstoning
+are not one atomic operation. The deletion service must first tombstone the
+candidate, stop and await any active worker, deny new vault writes, then purge
+all artifact versions. A worker may otherwise write an artifact after purge.
+No real candidate vault writes are enabled by this staging module.
+
 The handler intentionally favors safety over automatic retry: a crash after
 intent but before a click may require a human/provider status check. A future
 worker must not infer that a click did not happen from a closed tab or timeout.

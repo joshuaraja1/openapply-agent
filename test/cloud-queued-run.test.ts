@@ -20,6 +20,7 @@ function harness() {
   const events: string[] = [];
   let status: "not_started" | "needs_reconciliation" | "confirmed" = "not_started";
   let busy = false;
+  let leaseRenewalSucceeds = true;
   let authorized = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
   let clickThrows = false;
@@ -30,7 +31,7 @@ function harness() {
     authorization: { async authorize() { events.push("authorize"); return authorized; } },
     journal: {
       async acquireLease() { events.push("lease"); return busy ? null : "lease-token"; },
-      async renewLease() { events.push("renew"); return true; },
+      async renewLease() { events.push("renew"); return leaseRenewalSucceeds; },
       async releaseLease() { events.push("release"); },
       async submissionStatus() { events.push("status"); return status; },
       async beginSubmission() {
@@ -73,6 +74,7 @@ function harness() {
   return {
     ports, events,
     setBusy(value: boolean) { busy = value; },
+    setLeaseRenewalSucceeds(value: boolean) { leaseRenewalSucceeds = value; },
     setAuthorized(value: boolean) { authorized = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
     setFailsBeforeClick(value: boolean) { failsBeforeClick = value; },
@@ -110,6 +112,16 @@ describe("cloud queued application bridge", () => {
     h.setBusy(true);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("lease_busy");
     expect(h.events).toEqual(["authorize", "lease"]);
+  });
+
+  it("never writes intent or clicks when the candidate lease was lost during preparation", async () => {
+    const h = harness();
+    h.setLeaseRenewalSucceeds(false);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
+    expect(h.events).toContain("cleanup");
+    expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
   });
 
   it("leaves the message unacknowledged when preflight crashes before intent", async () => {
