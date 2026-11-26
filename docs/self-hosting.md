@@ -20,7 +20,10 @@ to the operating-system secret store, never to this repository or JSON files.
    profile** in the local editor or run [`profile:compile`](../templates/user/README.md)
    with paths to those private files. Each usable matching skill needs an
    approved work-history claim. Changed source facts require moving the old
-   compiled outputs before compiling again.
+   compiled outputs before compiling again. **Check readiness** reports whether
+   those three templates validate and whether both compiled files still match
+   the saved sources. It does not check browser sessions, account consent, or
+   the remaining setup steps.
 4. Configure your own target roles, official source list, daily cap, Overleaf
    project, and browser-search URLs. Sign in through your dedicated local
    browser profile. A company portal may require its own account.

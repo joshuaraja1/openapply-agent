@@ -52,10 +52,11 @@ its snapshots do not prove where credentials would be submitted. The owned
 browser can use configured exact-domain credentials only for a verified
 same-origin POST form. Scoped email-code entry can proceed when its safety
 checks pass. Unknown questions, unsupported account forms or email codes,
-CAPTCHA, and MFA pause for human handling. The queue
-output reports a job as `processed` when the
-application workflow ran; inspect its encrypted checkpoint to distinguish a
-confirmed submission from a human handoff.
+CAPTCHA, and MFA pause for human handling. Queue output reports `submitted`,
+`waiting-human`, `submission-uncertain`, `blocked`, or `skipped` when the
+application workflow reaches one of those stages. `processed` remains the
+fallback for generic queue callers that do not return an application stage.
+The encrypted checkpoint holds the confirmation or exact handoff reason.
 On macOS, a paused application also triggers a generic desktop notification.
 Optional email alerts use a private
 [`handoff-notification.json`](../examples/handoff-notification.example.json) with

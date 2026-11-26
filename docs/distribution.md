@@ -2,9 +2,16 @@
 
 `npm run distribution:smoke` builds the portable npm tarball, checks that it
 contains the CLI and public templates without private runtime files, installs
-it into a temporary directory, and starts the installed CLI. CI runs this
-check on macOS, Windows, and Linux. It exercises the artifact users would
-install rather than only `npm pack --dry-run`.
+it into a temporary directory, and starts the installed CLI. It also installs
+a synthetic prior version, replaces it with the current tarball, and reinstalls
+the prior version. Each phase verifies the CLI, public templates, and an isolated
+private-state sentinel. CI runs this check on macOS, Windows, and Linux. It
+exercises package replacement rather than only `npm pack --dry-run`.
+
+The prior version differs only in package metadata; this smoke cannot prove
+compatibility with a genuinely older runtime or database schema. It also does
+not exercise failed-update recovery. Those require real versioned artifacts and
+state migration fixtures before an updater can ship.
 
 This is a portable CLI preview. It does not install a browser, configure OS
 permissions or schedulers, sign or notarize software, or provide an updater.
