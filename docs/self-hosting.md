@@ -52,6 +52,8 @@ to the operating-system secret store, never to this repository or JSON files.
    `npm run secret:put` using stdin. If enabling email-code entry, register your
    own OAuth desktop client, add its client ID to the policy, and run the
    consent flow. Do not put passwords or client secrets in environment variables.
+   Run `npm run oauth:doctor` with `OPENAPPLY_AUTH_POLICY` set to verify the grant
+   and mailbox identity. A configured client ID alone does not establish consent.
 6. Run discovery and a prepare-only application first. Enable automatic final
    submission only after reviewing the candidate's policy and testing the
    target portals.
