@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -135,9 +135,14 @@ it("runs the production queue CLI into an encrypted handoff and replays it once 
     .toEqual([{ jobId: job.id, status: "waiting-human" }]);
   expect(stage.render).toHaveBeenCalledOnce();
   expect(stage.runPackage).toHaveBeenCalledOnce();
+  expect((await readdir(artifacts)).filter((name) => name.startsWith("application-"))).toHaveLength(1);
   expect(fetcher).toHaveBeenCalledOnce();
   const [endpoint, request] = fetcher.mock.calls[0]!;
   expect(endpoint).toBe("https://api.resend.com/emails");
+  expect(JSON.parse(String(request?.body))).toMatchObject({
+    subject: "OpenApply needs your attention",
+    text: "An application is paused. Open OpenApply on your device to review and continue it.",
+  });
   expect(String(request?.body)).not.toContain(job.id);
   expect(String(request?.body)).not.toContain(job.applicationUrl);
   const encryptedPath = join(privateRoot, "applications.enc.json");
