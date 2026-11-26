@@ -117,6 +117,9 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("owned receipt recove
       html = receipt("123456", "Example Co", "Senior Software Engineer");
       await page.reload();
       await expect(inspectOwnedReceipt(context, pkg)).rejects.toThrow("No job-bound employer receipt");
+      html = '<h1>Thank you for applying</h1><p>Software Engineer</p><footer>Example Co</footer><p>123456</p>';
+      await page.reload();
+      await expect(inspectOwnedReceipt(context, pkg)).rejects.toThrow("No job-bound employer receipt");
       html = "<p>Thank you for applying</p><p>Example Co Software Engineer 123456</p>";
       await page.reload();
       await expect(inspectOwnedReceipt(context, pkg)).rejects.toThrow("No job-bound employer receipt");

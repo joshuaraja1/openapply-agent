@@ -30,7 +30,7 @@ function exactRoleLine(text: string, company: string, role: string): boolean {
   const lines = text.toLocaleLowerCase().split("\n").map((line) => line.trim().replace(/\s+/g, " "));
   const title = role.toLocaleLowerCase().trim().replace(/\s+/g, " ");
   const employer = company.toLocaleLowerCase().trim().replace(/\s+/g, " ");
-  return lines.some((line) => line === title || line === `${employer} — ${title}`
+  return lines.some((line) => line === `${employer} — ${title}`
     || line === `${employer} - ${title}` || line === `${title} at ${employer}`
     || line === `you applied to ${title} at ${employer}`);
 }
