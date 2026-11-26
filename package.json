@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "A privacy-first, human-in-the-loop job discovery and application workflow.",
   "bin": { "openapply": "dist/src/product-cli.js" },
-  "files": ["dist/src", "templates", "examples", "docs", "README.md", "LICENSE"],
+  "files": ["dist/src", "templates", "examples", "docs", "README.md", "LICENSE", "runtime-package-lock.json"],
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -32,7 +32,12 @@
     "resume:render": "tsx src/resume/cli.ts",
     "build": "tsc -p tsconfig.json",
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
-    "prepack": "npm run build",
+    "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
+    "distribution:staging": "node scripts/staging-user-install.mjs",
+    "distribution:locked-smoke": "node --test scripts/locked-tarball-install.test.mjs",
+    "distribution:locked-install": "node scripts/locked-tarball-install.mjs",
+    "prepack": "npm run build && node scripts/pack-runtime-lock.mjs prepare",
+    "postpack": "node scripts/pack-runtime-lock.mjs remove",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -8,6 +8,7 @@ export interface PageImageInspection {
   width: number;
   height: number;
   inkPixels: number;
+  inkRows: number;
   clearances: { left: number; right: number; top: number; bottom: number };
 }
 
@@ -39,20 +40,24 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
   }
   const pixels = context.getImageData(0, 0, width, height).data;
   let inkPixels = 0;
+  let inkRows = 0;
   let minX = width;
   let minY = height;
   let maxX = -1;
   let maxY = -1;
   for (let y = 0; y < height; y += 1) {
+    let rowHasInk = false;
     for (let x = 0; x < width; x += 1) {
       const offset = (y * width + x) * 4;
       if (pixels[offset]! > 245 && pixels[offset + 1]! > 245 && pixels[offset + 2]! > 245) continue;
       inkPixels += 1;
+      rowHasInk = true;
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);
       maxY = Math.max(maxY, y);
     }
+    if (rowHasInk) inkRows += 1;
   }
   if (inkPixels < 100 || inkPixels > width * height * 0.5) {
     throw new Error("Résumé page image is blank or has excessive ink");
@@ -66,5 +71,5 @@ export async function inspectPdfPageImage(page: PDFPageProxy): Promise<PageImage
   if (Object.values(clearances).some((distance) => distance < minimumClearancePoints)) {
     throw new Error("Résumé page image has ink too close to the page edge");
   }
-  return { width, height, inkPixels, clearances };
+  return { width, height, inkPixels, inkRows, clearances };
 }

@@ -10,6 +10,8 @@ import { compileCandidateMarkdown, compileSearchMarkdown } from "../candidate/ma
 import { scoreJob } from "../matching/score.js";
 import type { DiscoveredJob } from "../types.js";
 import { initializeUserWorkspace, userTemplateFiles } from "./init.js";
+import { inspectRuntimeReadiness, runSetupBrowserDoctor } from "./runtime-readiness.js";
+import { checkOwnedBrowser } from "../browser/doctor.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const names = new Set<string>(userTemplateFiles);
@@ -70,8 +72,10 @@ async function profileReadiness(destination: string): Promise<{ valid: boolean; 
   }
 }
 
-export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number }) {
+export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number;
+  queueConfigPath?: string; browserDoctor?: typeof checkOwnedBrowser }) {
   const destination = options.destination ?? join(userInfo().homedir, ".openapply-agent", "onboarding");
+  const queueConfigPath = options.queueConfigPath ?? process.env.OPENAPPLY_QUEUE_CONFIG;
   await initializeUserWorkspace(destination, options.repositoryRoot);
   const token = randomBytes(32).toString("hex");
   const busy = new Set<string>();
@@ -102,6 +106,17 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
       }
       if (url.pathname === "/api/readiness" && request.method === "GET") {
         return send(response, 200, await profileReadiness(destination));
+      }
+      if (url.pathname === "/api/runtime-readiness" && request.method === "GET") {
+        return send(response, 200, await inspectRuntimeReadiness(queueConfigPath, destination));
+      }
+      if (url.pathname === "/api/browser-doctor" && request.method === "POST") {
+        try {
+          return send(response, 200, { browser: await runSetupBrowserDoctor(queueConfigPath,
+            options.browserDoctor) });
+        } catch {
+          return send(response, 409, { error: "Browser check failed. Run npm run browser:doctor locally for details." });
+        }
       }
       if (url.pathname === "/api/compile" && request.method === "POST") {
         const { candidate, preferences } = await setupProfile(destination);
@@ -212,6 +227,7 @@ textarea{width:100%;min-height:min(62vh,750px);padding:22px;background:#fffefa;b
 textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 .preview{margin-top:34px;padding-top:24px;border-top:1px solid var(--line)}.preview label{display:block;margin:14px 0 5px}.preview input{width:100%;padding:10px;background:#fffefa;border:1px solid var(--ink);font:inherit}.preview textarea{min-height:150px}
 .preview pre{white-space:pre-wrap;background:#fffefa;padding:14px;border:1px solid var(--line)}
+.runtime{margin-top:28px;padding:20px;border:1px solid var(--line);background:#fffefa}.runtime p{white-space:pre-line}
 .actions{display:flex;gap:18px;align-items:center;margin:18px 0;flex-wrap:wrap}.save{border:0;background:var(--ink);color:white;padding:12px 24px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.save:hover{background:var(--accent)}.compile{border:1px solid var(--ink);background:transparent;color:var(--ink);padding:11px 20px;font:700 14px "Avenir Next",sans-serif;cursor:pointer}.compile:hover{background:#eee6d7}
 #message{color:var(--muted);font-size:14px}footer{padding:20px clamp(22px,6vw,90px);border-top:1px solid var(--line);color:var(--muted);font-size:13px}
 @media(max-width:760px){header{display:block}main{display:block;padding-top:22px}nav{display:grid;grid-template-columns:1fr 1fr;margin-bottom:28px}nav button{font-size:13px}}
@@ -221,6 +237,9 @@ textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offs
 <label for="editor" class="eyebrow">Template contents</label><textarea id="editor" spellcheck="false"></textarea>
 <div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><button class="compile" id="readiness-check">Check readiness</button><span id="message" role="status" aria-live="polite"></span></div>
 <p id="readiness" role="status" aria-live="polite">Profile readiness has not been checked.</p>
+<div class="runtime"><h2>Runtime setup</h2><p class="note">Check the private queue configuration, daily limit, browser, Overleaf, alerts, and optional mailbox client. This does not sign in, send email, or submit an application.</p>
+<div class="actions"><button class="compile" id="runtime-check">Check runtime setup</button><button class="compile" id="browser-doctor">Check browser installation</button></div>
+<p id="runtime-status" role="status" aria-live="polite">Runtime setup has not been checked.</p></div>
 <div class="preview"><h2>Try a job match</h2><p class="note">Paste a posting to check your saved evidence and search preferences. This local preview does not verify the employer posting, create a résumé, or apply.</p>
 <label for="preview-title">Job title</label><input id="preview-title" maxlength="200">
 <label for="preview-description">Job description</label><textarea id="preview-description" maxlength="100000"></textarea>
@@ -234,6 +253,8 @@ document.getElementById('title').textContent=labels[selected];document.getElemen
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
 async function checkReadiness(){const output=document.getElementById('readiness');if(editor.value!==files[selected].content){output.textContent='Save this section before checking readiness.';return}output.textContent='Checking private profile…';try{const response=await fetch('/api/readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=!data.valid?'Complete and validate templates 01–03 before compiling.':!data.compiled?'Templates 01–03 are valid. Compile the profile to create private output files.':!data.current?'Compiled profile is stale. Move the old private output files aside, then compile again.':'Profile is compiled and current. Continue with source, browser, and account setup.'}catch(error){output.textContent=error.message}}
 document.getElementById('readiness-check').onclick=checkReadiness;
+document.getElementById('runtime-check').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking runtime setup…';try{const response=await fetch('/api/runtime-readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.queueConfig==='missing'?'Set OPENAPPLY_QUEUE_CONFIG to a private queue configuration, then restart setup.':['Queue configuration: '+data.queueConfig,'Compiled candidate profile and paths: '+data.profilePaths,'Search preferences: '+data.preferences+(data.dailyLimit===null?'':' · effective daily limit '+data.dailyLimit),'Browser: '+data.browser+' (use the installation check below for owned Chromium)','Overleaf project: '+data.overleaf,'Handoff email: '+data.notification+' (sending key and delivery are not tested)','Mailbox OAuth: '+data.mailbox+' (client ID only; consent is not tested)'].join('\\n')}catch(error){output.textContent=error.message}};
+document.getElementById('browser-doctor').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking browser installation…';try{const response=await fetch('/api/browser-doctor',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.browser==='ready'?'Owned Chromium started in a temporary profile. Saved sessions were not opened.':'BrowserOS is configured separately. Verify its running endpoint and signed-in profile before applying.'}catch(error){output.textContent=error.message}};
 document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('preview-run').onclick=async()=>{const result=document.getElementById('preview-result');if(editor.value!==files[selected].content){result.textContent='Save this section before previewing';return}result.textContent='Checking…';try{const response=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({title:document.getElementById('preview-title').value,description:document.getElementById('preview-description').value})});const data=await response.json();if(!response.ok)throw Error(data.error);const match=data.match;result.textContent=(match.eligible?'Potential match':'Needs review')+' · score '+match.score+'\\n'+match.reasons.join('\\n')+'\\nMatched skills: '+(match.matchedSkills.join(', ')||'none')+(match.reviewFlags.length?'\\nReview: '+match.reviewFlags.join('; '):'')}catch(error){result.textContent=error.message}};
