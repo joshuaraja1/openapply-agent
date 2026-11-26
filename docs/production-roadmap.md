@@ -12,7 +12,7 @@ Its owned browser supports individual applications and PDF rendering. Main
 branch protection requires Node 22/24 verification, browser and Windows smoke
 tests, secret scanning, dependency audit, and CodeQL.
 
-As of November 24, 2026, the draft PR stack adds owned-browser scheduled runs
+As of November 25, 2026, the draft PR stack adds owned-browser scheduled runs
 [#81](https://github.com/joshuaraja1/openapply-agent/pull/81), limited owned
 handoff recovery [#87](https://github.com/joshuaraja1/openapply-agent/pull/87),
 dead-process profile-lock recovery [#88](https://github.com/joshuaraja1/openapply-agent/pull/88),
@@ -21,11 +21,16 @@ verified ATS board leads [#84](https://github.com/joshuaraja1/openapply-agent/pu
 [#85](https://github.com/joshuaraja1/openapply-agent/pull/85), and a private
 first-run editor [#89](https://github.com/joshuaraja1/openapply-agent/pull/89)
 with profile compilation [#91](https://github.com/joshuaraja1/openapply-agent/pull/91).
+Optional private email alerts [#118](https://github.com/joshuaraja1/openapply-agent/pull/118)
+and a local, job-bound handoff screen [#119](https://github.com/joshuaraja1/openapply-agent/pull/119)
+are also draft work. The screen resumes an existing checkpoint after the user
+provides exact answers and authorizes continuation; it does not solve CAPTCHA
+or MFA on behalf of the user.
 These changes are **drafts, not merged into `main`**. Their combined local tree
 passes tests, but independent reviews and live beta validation are pending.
 
 The product promise below is **not yet a release claim**. Complete provider
-adapters, a full first-run setup and handoff UI, signed installer and updater,
+adapters, a complete first-run setup, signed installer and updater,
 broader deduplication, live site coverage measurements, and the beta gates in
 the [release requirements](autonomy-release-requirements.md) remain open. The
 browser is not bundled into a consumer app. BrowserOS neo remains optional only
