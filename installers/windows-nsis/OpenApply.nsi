@@ -43,7 +43,8 @@ SectionEnd
 
 Function un.onInit
   SetShellVarContext current
-  StrCpy $INSTDIR "$EXEDIR"
+  ; NSIS sets $INSTDIR to the original uninstaller location, even after copying
+  ; the running uninstaller to a temporary directory.
   StrCmp $INSTDIR "$LOCALAPPDATA\OpenApply\runtime" +2 0
     Abort "Uninstaller is outside the OpenApply runtime folder."
   IfFileExists "$INSTDIR\openapply-install.marker" +2 0
