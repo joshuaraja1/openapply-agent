@@ -5,7 +5,7 @@ import { NeoApplicationBrowser } from "../browser/neo-application.js";
 import { accountForUrl, loadAuthenticationPolicy } from "../auth/schema.js";
 import { EmailCodeEntry } from "../auth/email-entry.js";
 import { assertLocalBrowserEndpoint } from "../resume/overleaf.js";
-import { loadApprovedHumanAnswers } from "./human-answers.js";
+import { loadApprovedHumanAnswers, loadApprovedHumanAnswersFromStream } from "./human-answers.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import { holdWorkflowLease } from "../storage/workflow-lease.js";
@@ -46,10 +46,16 @@ const store = sqlite?.store<ApplicationCheckpoint>("applications")
   ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
 const workflow = new ApplicationWorkflow(store);
 const answerPath = process.env.OPENAPPLY_APPROVED_ANSWERS;
-if (answerPath && !resumedJobId) throw new Error("Approved answers require an explicit human resume");
+const answerFromStdin = process.env.OPENAPPLY_APPROVED_ANSWERS_STDIN === "1";
+if ((answerPath || answerFromStdin) && !resumedJobId) {
+  throw new Error("Approved answers require an explicit human resume");
+}
+if (answerPath && answerFromStdin) throw new Error("Use one approved-answer channel per run");
 const pending = resumedJobId ? await workflow.current(resumedJobId) : undefined;
-const humanAnswerApproval = answerPath
-  ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
+const humanAnswerApproval = answerFromStdin
+  ? await loadApprovedHumanAnswersFromStream(process.stdin, resumedJobId!, pending?.browserPageId ?? 0)
+  : answerPath
+    ? await loadApprovedHumanAnswers(answerPath, resumedJobId!, pending?.browserPageId ?? 0) : undefined;
 const endpoint = savedBrowserEndpoint(pkg, process.env.OPENAPPLY_BROWSER_ENDPOINT);
 if (endpoint) assertLocalBrowserEndpoint(endpoint);
 if (pkg.browserEndpoint && endpoint !== pkg.browserEndpoint) {
