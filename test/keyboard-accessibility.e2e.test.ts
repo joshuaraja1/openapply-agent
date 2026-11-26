@@ -32,7 +32,10 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("local keyboard acces
     try {
       const page = await context.newPage();
       await page.goto(ui.url);
-      await expect.poll(() => page.locator("#files button").count()).toBe(8);
+      // Windows validates each private template through OS ACL checks before
+      // the navigation is rendered; allow the same bounded setup time as CI.
+      await expect.poll(() => page.locator("#files button").count(),
+        { timeout: 120_000, interval: 500 }).toBe(8);
       expect(await page.locator("#message").getAttribute("aria-live")).toBe("polite");
       expect(await page.locator("#readiness").getAttribute("role")).toBe("status");
       expect(await page.locator("#runtime-status").getAttribute("role")).toBe("status");
