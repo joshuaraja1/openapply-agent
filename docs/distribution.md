@@ -67,6 +67,52 @@ installer now calls this locked path. The lock itself is inside an unsigned
 tarball, so this remains a controlled staging check, not a verified public
 release artifact.
 
+## Release signature preflight
+
+`npm run distribution:verify-release -- /absolute/bundle /absolute/trusted-public-key.pem /absolute/new-verified-output`
+fails unless an Ed25519-signed manifest names one macOS `.pkg`, one Windows
+`.msi`, and one Linux `.tar.gz`; all three files must match SHA-256 hashes in
+that manifest. Keep the signing key outside the repository. Set
+`OPENAPPLY_RELEASE_KEY_SHA256` to the SHA-256 fingerprint of the trusted
+public-key PEM obtained through a separately trusted channel; the command
+refuses an absent or different key. The command then checks the native
+signature for **the current OS**: macOS requires a trusted-timestamp Developer
+ID Installer signature from `OPENAPPLY_APPLE_TEAM_ID`, a stapled notarization
+ticket, and Gatekeeper acceptance; Windows requires a valid Authenticode
+signature from `OPENAPPLY_WINDOWS_CERT_THUMBPRINT`. Linux relies on the signed
+manifest and artifact hash for this portable tarball. Run the command on all
+three operating systems before publishing anything. Synthetic CI fixtures
+exercise valid and rejected paths on all three platforms.
+The command copies the bundle into a new owner-only output directory, verifies
+and retains those exact bytes, and prints that directory and the current OS
+artifact path. A future publisher must upload only the retained verified
+files, recheck their recorded SHA-256 digests immediately before upload, and
+remove the output directory afterward. Never publish from the original input
+path after this preflight; its contents can change.
+
+The bundle contains `release-manifest.json`, its raw Ed25519 signature in
+`release-manifest.sig`, and the three files named by the manifest:
+
+```json
+{
+  "schemaVersion": 1,
+  "version": "0.1.0",
+  "artifacts": [
+    { "platform": "darwin", "file": "OpenApply.pkg", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "win32", "file": "OpenApply.msi", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "linux", "file": "OpenApply.tar.gz", "sha256": "<64 lowercase hex characters>" }
+  ]
+}
+```
+
+This preflight does not build or sign the installers, authenticate the identity
+of a newly supplied public key, or publish a release. No production release key
+is registered, no native macOS/Windows installers are built, and no signed
+Linux distribution artifact is produced. Until those exist and verification
+passes on real artifacts, a public release remains blocked. A Windows
+code-signing certificate or signing service is still needed; do not put its
+private material in repository files or CI logs.
+
 ## Requirements for a safe updater
 
 An updater must stop scheduled discovery and application workers before
@@ -81,5 +127,6 @@ an old binary must never run against a newer, incompatible state schema.
 Before consumer release, test clean install, update, failed update, rollback,
 and uninstall on each supported OS, including browser installation and private
 file permissions. macOS requires validated signing and notarization; Windows
-requires a validated code-signing identity; Linux needs a chosen signed
-package format and verification mechanism. None is configured by this PR.
+requires a validated code-signing identity; Linux needs a production
+distribution format and signing process. This preflight covers a portable
+Linux tarball only. No production signing or packaging is configured by this PR.
