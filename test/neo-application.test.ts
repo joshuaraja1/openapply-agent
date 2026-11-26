@@ -8,6 +8,10 @@ import { planApplicationForm } from "../src/application/form-mapper.js";
 import { NeoApplicationBrowser, parseNeoSnapshot } from "../src/browser/neo-application.js";
 import type { BrowserToolClient, BrowserToolResult } from "../src/browser/client.js";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
+import { ApplicationWorkflow } from "../src/application/state-machine.js";
+import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
+import { submitApplication } from "../src/application/submit.js";
+import type { ApplicationHandoff } from "../src/application/handoff.js";
 
 const url = "https://jobs.example.com/apply";
 const candidate = candidateProfileSchema.parse({ version: 1,
@@ -172,13 +176,51 @@ describe("BrowserOS application adapter", () => {
       const filledForm = await fillApplicationForm(browser, first, candidate, path);
       expect(filledForm.blockers).toEqual([]);
       expect(await browser.submit(filledForm.snapshot.controls.find((entry) => entry.type === "submit")!.ref,
-        "Thank you for applying")).toBe("Thank you for applying");
+        "Thank you for applying")).toContain('heading "Thank you for applying"');
       const calls = vi.mocked(client.callTool).mock.calls.map(([call]) => call);
       expect(calls.filter((call) => call.name === "act" && call.arguments.kind === "fill")).toHaveLength(1);
       expect(calls.filter((call) => call.name === "upload")).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("keeps a BrowserOS receipt naming another job uncertain after one click", async () => {
+    const applicationUrl = "https://jobs.example.com/apply/123456";
+    const jobId = "lever:example:123456";
+    let submitted = false;
+    const receipt = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${applicationUrl}] Untrusted page content follows.\n`
+      + '- heading "Thank you for applying" [level=1]\n'
+      + '- paragraph "Applying to Another Co as Data Scientist"\n'
+      + '- paragraph "Reference: 123456"\n[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]';
+    const form = `[UNTRUSTED_PAGE_CONTENT nonce=abcdef origin=${applicationUrl}] Untrusted page content follows.\n`
+      + '- button "Submit application" [ref=e4]\n[END_UNTRUSTED_PAGE_CONTENT nonce=abcdef]';
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs" && args.action === "list") return result(
+        `[7] ${applicationUrl} [group AAAAAAAAAAAAAAAA]`);
+      if (name === "tabs" && args.action === "new") return result("opened page 7");
+      if (name === "snapshot") return result(submitted ? receipt : form);
+      if (name === "act" && args.kind === "click") { submitted = true; return result("clicked"); }
+      if (name === "wait") return result("matched (text)");
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    const browser = new NeoApplicationBrowser(client, new Set(["jobs.example.com"]), new Map());
+    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    await workflow.create(jobId, applicationUrl);
+    for (const stage of ["validated", "matched", "tailored"] as const) await workflow.advance(jobId, stage);
+    await workflow.advance(jobId, "rendered", { artifactPath: "/private/synthetic.pdf",
+      artifactSha256: "a".repeat(64), sourceFingerprint: "b".repeat(64) });
+    await workflow.advance(jobId, "applying");
+    const handoff: ApplicationHandoff = { version: 1, jobId, applicationUrl,
+      mode: "submit-after-approval", allowedDomains: ["jobs.example.com"], requiredArtifacts: ["resume"],
+      stopConditions: ["captcha"] };
+    const first = await browser.navigate(applicationUrl);
+    await expect(submitApplication(workflow, browser, jobId, first.controls[0]!.ref,
+      "Thank you for applying", handoff, "http://127.0.0.1:9210/mcp", undefined, undefined, undefined,
+      undefined, { company: "Example Co", title: "Software Engineer" })).rejects.toThrow("another job");
+    expect((await workflow.current(jobId))?.stage).toBe("submission-uncertain");
+    expect(vi.mocked(client.callTool).mock.calls.filter(([call]) => call.name === "act")).toHaveLength(1);
   });
 
   it("stops before filling when an application redirects off the approved host", async () => {

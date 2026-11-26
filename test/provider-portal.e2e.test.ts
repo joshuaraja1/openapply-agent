@@ -13,7 +13,8 @@ import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import type { Provider, DiscoveredJob } from "../src/types.js";
 
 type Scenario = "success" | "unknown-required" | "wrong-requisition"
-  | "conditional-required" | "validation-error" | "identity-drift";
+  | "conditional-required" | "validation-error" | "identity-drift"
+  | "receipt-other-job" | "receipt-url-drift";
 
 const candidate = candidateProfileSchema.parse({
   version: 1,
@@ -52,9 +53,11 @@ function portal(provider: Provider, scenario: Scenario): string {
       <label>Are you legally authorized to work in the United States?
         <select required><option value="">Select</option><option>Yes</option><option>No</option></select></label>
       ${unknown}
-      <button type="submit" onclick="document.getElementById('done').hidden=false;this.hidden=true">
+      <button type="submit" onclick="document.getElementById('done').hidden=false;this.hidden=true;${scenario === "receipt-url-drift"
+        ? "history.pushState({}, '', '/apply/654321')" : ""}">
         Submit application</button></section>
-    <p id="done" hidden>Thank you for applying to Example Co as Software Engineer</p>`;
+    <p id="done" hidden>Thank you for applying to ${scenario === "receipt-other-job"
+      ? "Another Co as Data Scientist" : "Example Co as Software Engineer"}</p>`;
 }
 
 async function run(provider: Provider, scenario: Scenario) {
@@ -89,6 +92,7 @@ async function run(provider: Provider, scenario: Scenario) {
       contentType: "text/html", body: portal(provider, scenario),
     }));
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
+    let failure: Error | undefined;
     const result = await runApplicationPackage(pkg, workflow, join(root, "profile"), {
       validateOfficial: async () => true,
       verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
@@ -96,9 +100,12 @@ async function run(provider: Provider, scenario: Scenario) {
       browserFactory: async (hosts, artifacts) => ({
         browser: new AgentBrowser(context, hosts, artifacts), close: async () => {},
       }),
+    }).catch((error: unknown) => {
+      failure = error instanceof Error ? error : new Error(String(error));
+      return undefined;
     });
     const page = context.pages().at(-1)!;
-    return { checkpoint: result.checkpoint,
+    return { checkpoint: result?.checkpoint ?? (await workflow.current(job.id))!, failure,
       nameValue: await page.locator('input[name="name"]').inputValue(),
       emailValue: await page.locator('input[name="email"]').inputValue(),
       phoneValue: await page.locator('input[name="phone"]').count()
@@ -168,6 +175,24 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
       expect(result.fileName).toBeUndefined();
       expect(result.confirmationVisible).toBe(false);
+    }, 30_000);
+  }
+
+  for (const scenario of ["conditional-required", "validation-error", "identity-drift"] as const) {
+    it(`lever pauses on ${scenario} instead of submitting`, async () => {
+      const result = await run("lever", scenario);
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.confirmationVisible).toBe(false);
+      expect(result.failure).toBeUndefined();
+    }, 30_000);
+  }
+
+  for (const scenario of ["receipt-other-job", "receipt-url-drift"] as const) {
+    it(`lever keeps ${scenario} submission uncertain`, async () => {
+      const result = await run("lever", scenario);
+      expect(result.failure).toBeDefined();
+      expect(result.checkpoint.stage).toBe("submission-uncertain");
+      expect(result.confirmationVisible).toBe(true);
     }, 30_000);
   }
 });
