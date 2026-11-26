@@ -12,6 +12,7 @@ import { createJakeResumeSource } from "../resume/jake.js";
 import { readBundledJakeTemplate } from "../resume/bundled-template.js";
 import { assertLocalBrowserEndpoint, renderOverleafResume } from "../resume/overleaf.js";
 import { renderOwnedOverleafResume } from "../resume/owned-overleaf.js";
+import { ResumeVisualReviewRequiredError } from "../resume/visual-qa.js";
 import { getOrCreateStateKey } from "../storage/mac-keychain.js";
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
@@ -30,7 +31,9 @@ import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
 import { applicationPackageSchema, runApplicationPackage } from "./runner.js";
 import { queueFileSchema } from "./queue-schema.js";
 import { writeApplicationPackage } from "./package-file.js";
-import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { ApplicationWorkflow, needsResumeVisualReview,
+  type ApplicationCheckpoint } from "./state-machine.js";
+import { recordResumeVisualReview } from "./resume-review.js";
 import { scoreJob } from "../matching/score.js";
 import { PostingClaimLedger, type PostingClaim } from "./posting-claims.js";
 import { recoverClaimedSubmission } from "./recover-submission.js";
@@ -84,7 +87,8 @@ for (const record of checkpoints) {
   if (record.state?.jobId === record.id) {
     const saved = record.state.stage === "submit-claimed"
       ? await recoverClaimedSubmission(workflow, record.state, root) : record.state;
-    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain") {
+    if (saved.stage === "waiting-human" || saved.stage === "submission-uncertain"
+      || needsResumeVisualReview(saved)) {
       await notifyPendingHandoff(workflow, saved, secrets, notificationConfig);
     }
   }
@@ -143,11 +147,20 @@ try {
     }
     const source = jobSources.get(job.id) ?? sources.get(`${job.provider}:${job.company}`)!;
     const resumeSource = createJakeResumeSource(template, job, candidate);
-    const artifact = config.browserRuntime === "owned"
-      ? await renderOwnedOverleafResume(config.overleafProjectUrl, job, candidate,
-        resumeSource, config.outputDirectory, { profileDirectory: join(root, "browser-profile") })
-      : await renderOverleafResume(client!, config.overleafProjectUrl, job, candidate,
-        resumeSource, config.outputDirectory);
+    let artifact;
+    try {
+      artifact = config.browserRuntime === "owned"
+        ? await renderOwnedOverleafResume(config.overleafProjectUrl, job, candidate,
+          resumeSource, config.outputDirectory, { profileDirectory: join(root, "browser-profile") })
+        : await renderOverleafResume(client!, config.overleafProjectUrl, job, candidate,
+          resumeSource, config.outputDirectory);
+    } catch (error) {
+      if (!(error instanceof ResumeVisualReviewRequiredError)) throw error;
+      const checkpoint = await recordResumeVisualReview(workflow, job, error);
+      await notifyPendingHandoff(workflow, checkpoint, secrets, notificationConfig);
+      return { status: "resume-review" as const,
+        reason: "Résumé PDF needs human visual review before upload" };
+    }
     const host = new URL(job.applicationUrl).hostname;
     const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
       handoff: createApplicationHandoff(job, preferences.applicationPolicy.requireFinalApproval),

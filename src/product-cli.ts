@@ -21,6 +21,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "application:verify-owned": () => import("./application/owned-confirm-cli.js"),
   handoff: () => import("./application/handoff-ui-cli.js"),
   "resume:render": () => import("./resume/cli.js"),
+  "resume:review": () => import("./resume/review-cli.js"),
   "secret:put": () => import("./auth/secret-put-cli.js"),
   "oauth:connect": () => import("./auth/oauth-connect-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),

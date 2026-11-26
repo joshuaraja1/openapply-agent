@@ -9,6 +9,7 @@ import type { DiscoveredJob } from "../types.js";
 import type { ResumeSource } from "./jake.js";
 import { assertOverleafProjectUrl } from "./overleaf.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "./verify-pdf.js";
+import { ResumeVisualReviewRequiredError } from "./visual-qa.js";
 import { ensurePrivateDirectory } from "../storage/private-path.js";
 import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 
@@ -31,6 +32,7 @@ export async function renderOwnedOverleafResume(
   let artifactPath: string | undefined;
   let downloadDirectory: string | undefined;
   let verified = false;
+  let needsVisualReview = false;
   try {
     await runtime.context.route("**/*", async (route) => {
       if (route.request().isNavigationRequest()) {
@@ -124,7 +126,15 @@ export async function renderOwnedOverleafResume(
     artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
     if (process.platform === "win32") await secureWindowsPrivatePath(artifactPath);
-    const artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source);
+    let artifact: VerifiedResumeArtifact;
+    try { artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source); }
+    catch (error) {
+      if (error instanceof ResumeVisualReviewRequiredError) {
+        needsVisualReview = true;
+        throw new ResumeVisualReviewRequiredError(error.message, artifactPath);
+      }
+      throw error;
+    }
     if (artifact.path !== artifactPath || artifact.jobId !== job.id
       || artifact.sourceFingerprint !== source.fingerprint
       || artifact.pdfSha256 !== createHash("sha256").update(bytes).digest("hex")) {
@@ -135,7 +145,7 @@ export async function renderOwnedOverleafResume(
   } finally {
     try { await runtime.close(); }
     finally {
-      if (!verified && artifactPath) await unlink(artifactPath).catch(() => {});
+      if (!verified && !needsVisualReview && artifactPath) await unlink(artifactPath).catch(() => {});
       if (downloadDirectory) await rm(downloadDirectory, { recursive: true, force: true });
     }
   }

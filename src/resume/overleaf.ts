@@ -8,6 +8,7 @@ import type { CandidateProfile } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
 import type { ResumeSource } from "./jake.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "./verify-pdf.js";
+import { ResumeVisualReviewRequiredError } from "./visual-qa.js";
 
 function requireSuccess(result: BrowserToolResult, step: string): string {
   if (result.isError) throw new Error(`Overleaf ${step} failed`);
@@ -123,7 +124,14 @@ export async function renderOverleafResume(
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     const artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
-    const artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source);
+    let artifact: VerifiedResumeArtifact;
+    try { artifact = await (options.verify ?? verifyResumePdf)(artifactPath, job, candidate, source); }
+    catch (error) {
+      if (error instanceof ResumeVisualReviewRequiredError) {
+        throw new ResumeVisualReviewRequiredError(error.message, artifactPath);
+      }
+      throw error;
+    }
     const currentDownload = await lstat(downloaded);
     if (currentDownload.isFile() && !currentDownload.isSymbolicLink()
       && currentDownload.dev === downloadedIdentity.dev && currentDownload.ino === downloadedIdentity.ino) {

@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { SecretStore } from "../storage/contracts.js";
 import { readPrivateFile } from "../storage/private-path.js";
-import { ApplicationWorkflow, notificationIdentity, type ApplicationCheckpoint } from "./state-machine.js";
+import { ApplicationWorkflow, needsResumeVisualReview, notificationIdentity,
+  type ApplicationCheckpoint } from "./state-machine.js";
 
 const exec = promisify(execFile);
 const secretRef = z.string().regex(
@@ -48,7 +49,8 @@ export async function assertAutonomousNotificationReady(requireFinalApproval: bo
 /** Generic text only: job titles, answers, URLs, and candidate details stay on the device. */
 export async function sendHandoffEmail(config: HandoffNotificationConfig, checkpoint: ApplicationCheckpoint,
   secrets: SecretStore, fetcher: typeof fetch = fetch): Promise<void> {
-  if (!config.email || !["waiting-human", "submission-uncertain"].includes(checkpoint.stage)) return;
+  if (!config.email || !(["waiting-human", "submission-uncertain"].includes(checkpoint.stage)
+    || needsResumeVisualReview(checkpoint))) return;
   const key = await secrets.get(config.email.apiKeySecretRef);
   if (!key) throw new Error("Notification sending key is unavailable in the OS secret store");
   const idempotency = createHash("sha256")
@@ -62,6 +64,8 @@ export async function sendHandoffEmail(config: HandoffNotificationConfig, checkp
       subject: "OpenApply needs your attention",
       text: checkpoint.stage === "submission-uncertain"
         ? "An application needs review. On your device, run openapply application:review to inspect its status. Do not submit again before checking the employer confirmation."
+        : needsResumeVisualReview(checkpoint)
+          ? "A résumé PDF needs visual review before upload. On your device, run openapply resume:review, inspect the saved PDF, then correct the source and rerun."
         : "An application is paused. Open OpenApply on your device to review and continue it." }),
   });
   if (!response.ok) throw new Error(`Handoff email failed with HTTP ${response.status}`);
@@ -79,7 +83,8 @@ export async function notifyPendingHandoff(workflow: ApplicationWorkflow,
   config?: HandoffNotificationConfig,
   options: { desktopEnabled?: boolean; desktop?: () => Promise<void>;
     email?: typeof sendHandoffEmail } = {}): Promise<void> {
-  if (!["waiting-human", "submission-uncertain"].includes(checkpoint.stage)) return;
+  if (!(["waiting-human", "submission-uncertain"].includes(checkpoint.stage)
+    || needsResumeVisualReview(checkpoint))) return;
   const handoffId = notificationIdentity(checkpoint);
   const desktopEnabled = options.desktopEnabled ?? process.platform === "darwin";
   if (desktopEnabled && checkpoint.desktopNotifiedFor !== handoffId) {
