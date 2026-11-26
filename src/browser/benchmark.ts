@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import { AgentBrowser } from "./actions.js";
 import { launchBrowser } from "./runtime.js";
 import { summarizeTimings } from "../performance/summary.js";
+import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 
 export interface BrowserBenchmarkReport {
   fixture: "owned-browser-synthetic-v1";
@@ -29,6 +30,7 @@ export async function benchmarkOwnedBrowser(sampleCount = 30): Promise<BrowserBe
   let actionFailures = 0;
   let peakRssBytes = process.memoryUsage().rss;
   try {
+    if (process.platform === "win32") await secureWindowsPrivatePath(root);
     const launchStarted = performance.now();
     const runtime = await launchBrowser({ profileDirectory: join(root, "profile"), headless: true });
     const startupMs = performance.now() - launchStarted;

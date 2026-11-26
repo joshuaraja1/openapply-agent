@@ -15,6 +15,12 @@ failures, median, nearest-rank p95, and peak process RSS. A failed sample makes
 the command exit nonzero. Keep the raw JSON with the release evidence; run on
 macOS, Windows, and Linux under comparable conditions.
 
+The `Cross-platform browser benchmark` workflow runs this fixed fixture on
+GitHub's macOS, Windows, and Linux runners and uploads one JSON report per OS.
+Keep the reports with the exact commit and CI run. Hosted runner measurements
+are a repeatable smoke, not a substitute for a controlled release-machine
+measurement; compare hardware and browser versions before drawing conclusions.
+
 This measures local browser overhead only. It does not establish job discovery,
 résumé rendering, employer network wait, crash recovery, or end-to-end
 application latency. Those need separate fixed fixtures and stage reports before
