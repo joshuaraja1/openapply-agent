@@ -44,6 +44,9 @@ export function installLockedTarball(tarballPath, destination) {
     if (!run(process.execPath, [cli, "--help"]).includes("  autopilot")) {
       throw new Error("Locked OpenApply CLI did not start");
     }
+    run(process.execPath, ["--input-type=module", "-e",
+      "await Promise.all(['playwright','@napi-rs/canvas','@napi-rs/keyring','@modelcontextprotocol/sdk/client/index.js'].map(name => import(name)))"],
+    { cwd: packageRoot });
     return { packageRoot, version: pkg.version };
   } catch (error) {
     rmSync(target, { recursive: true, force: true });

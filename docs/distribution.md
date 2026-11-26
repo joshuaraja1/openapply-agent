@@ -53,10 +53,12 @@ artifacts; do not publish it as a public installer.
 source checkout, run `npm run distribution:locked-install -- /absolute/path/to/openapply-agent-0.1.0.tgz /absolute/empty/destination`.
 The helper rejects archive paths outside `package/` and archive links, validates
 the package against its lock, then runs `npm ci --omit=dev --ignore-scripts` in
-the extracted package before starting its CLI. npm verifies downloaded archive
-bytes against the lock's integrity hashes. If extraction or installation fails,
-the destination is removed. CI checks this path on macOS, Windows, and Linux,
-including altered-hash and missing-dependency archives.
+the extracted package before starting its CLI and importing runtime/native
+dependencies. npm verifies downloaded archive bytes against the lock's
+integrity hashes. If extraction or installation fails, the destination is
+removed. CI checks this path on macOS, Windows, and Linux, including a separate
+synthetic prior-version install that remains runnable for manual rollback and
+altered-hash and missing-dependency archives.
 
 The existing portable `npm install <tarball>` smoke remains a compatibility
 check; it does not pin transitive dependency resolution. The separate user-level

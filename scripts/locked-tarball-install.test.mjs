@@ -27,7 +27,21 @@ test("packed CLI installs only from its integrity-checked lock", () => {
       sourceLock.packages["node_modules/zod"].integrity);
 
     command("tar", ["-xzf", archive, "-C", root]);
+    const packagePath = join(root, "package", "package.json");
     const tamperedLockPath = join(root, "package", "runtime-package-lock.json");
+    const priorPackage = JSON.parse(readFileSync(packagePath, "utf8"));
+    priorPackage.version = "0.0.0";
+    writeFileSync(packagePath, JSON.stringify(priorPackage));
+    const priorLock = JSON.parse(readFileSync(tamperedLockPath, "utf8"));
+    priorLock.version = "0.0.0";
+    priorLock.packages[""].version = "0.0.0";
+    writeFileSync(tamperedLockPath, JSON.stringify(priorLock));
+    command("tar", ["-czf", join(root, "prior.tgz"), "-C", root, "package"]);
+    const prior = installLockedTarball(join(root, "prior.tgz"), join(root, "prior"));
+    assert.equal(prior.version, "0.0.0");
+    assert.equal(JSON.parse(readFileSync(join(prior.packageRoot, "package.json"), "utf8")).version, "0.0.0");
+
+    command("tar", ["-xzf", archive, "-C", root]);
     const lock = JSON.parse(readFileSync(tamperedLockPath, "utf8"));
     lock.packages["node_modules/zod"].integrity = `sha512-${Buffer.alloc(64).toString("base64")}`;
     writeFileSync(tamperedLockPath, JSON.stringify(lock));
