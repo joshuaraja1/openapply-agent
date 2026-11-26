@@ -84,6 +84,21 @@ manifest and artifact hash for this portable tarball. Run the command on all
 three operating systems before publishing anything. Synthetic CI fixtures
 exercise valid and rejected paths on all three platforms.
 
+The bundle contains `release-manifest.json`, its raw Ed25519 signature in
+`release-manifest.sig`, and the three files named by the manifest:
+
+```json
+{
+  "schemaVersion": 1,
+  "version": "0.1.0",
+  "artifacts": [
+    { "platform": "darwin", "file": "OpenApply.pkg", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "win32", "file": "OpenApply.msi", "sha256": "<64 lowercase hex characters>" },
+    { "platform": "linux", "file": "OpenApply.tar.gz", "sha256": "<64 lowercase hex characters>" }
+  ]
+}
+```
+
 This preflight does not build or sign the installers, authenticate the identity
 of a newly supplied public key, or publish a release. No production release key
 is registered, no native macOS/Windows installers are built, and no signed
@@ -106,5 +121,6 @@ an old binary must never run against a newer, incompatible state schema.
 Before consumer release, test clean install, update, failed update, rollback,
 and uninstall on each supported OS, including browser installation and private
 file permissions. macOS requires validated signing and notarization; Windows
-requires a validated code-signing identity; Linux needs a chosen signed
-package format and verification mechanism. None is configured by this PR.
+requires a validated code-signing identity; Linux needs a production
+distribution format and signing process. This preflight covers a portable
+Linux tarball only. No production signing or packaging is configured by this PR.
