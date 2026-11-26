@@ -11,9 +11,19 @@ export interface BrowserRuntime {
   close(): Promise<void>;
 }
 
+const blockedServiceWorkerContexts = new WeakSet<BrowserContext>();
+
+/** Only contexts launched here with service workers disabled may back the owner proxy. */
+export function assertServiceWorkersBlocked(context: BrowserContext): void {
+  if (!blockedServiceWorkerContexts.has(context)) {
+    throw new Error("Owner browser must block service workers at launch");
+  }
+}
+
 export interface BrowserLaunchOptions {
   profileDirectory: string;
   headless?: boolean;
+  serviceWorkers?: "allow" | "block";
   launch?: typeof chromium.launchPersistentContext;
 }
 
@@ -146,6 +156,7 @@ export async function launchBrowser(options: BrowserLaunchOptions): Promise<Brow
     const launchOptions = {
       headless: options.headless ?? false,
       acceptDownloads: true,
+      serviceWorkers: options.serviceWorkers ?? "allow",
     };
     context = options.launch
       ? await options.launch(profileDirectory, launchOptions)
@@ -154,7 +165,24 @@ export async function launchBrowser(options: BrowserLaunchOptions): Promise<Brow
     await release();
     throw error;
   }
+  if (options.serviceWorkers === "block") {
+    try {
+      // A persistent profile can restore a page before the owner installs its
+      // request gate. Never return that context as a claim-capable owner.
+      const startupPages = context.pages();
+      const restored = startupPages.some((page) => page.url() !== "about:blank")
+        || context.backgroundPages().length > 0;
+      await Promise.all(startupPages.map((page) => page.close()));
+      if (restored || context.pages().length > 0) {
+        throw new Error("Browser-owner profile restored a page before request controls were installed");
+      }
+    } catch (error) {
+      try { await context.close(); } finally { await release(); }
+      throw error;
+    }
+  }
   let closed = false;
+  if (options.serviceWorkers === "block") blockedServiceWorkerContexts.add(context);
   return {
     context,
     async close() {

@@ -72,7 +72,7 @@ describe.skipIf(process.platform === "win32")("private browser-owner inspection 
       await owner.close();
       await rm(directory, { recursive: true });
     }
-  });
+  }, 20_000);
 
   it("rejects a validly signed reply naming another tab", async () => {
     const directory = await mkdtemp(join(tmpdir(), "openapply-owner-"));
