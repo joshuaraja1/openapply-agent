@@ -89,8 +89,9 @@ inspection in [the state guide](sqlite-state.md) before manually removing that
 lock and restarting. Check the employer confirmation before recording success.
 An owned-browser submission can be reconciled only while its exact employer
 confirmation tab is still open in the saved private browser profile. The
-candidate must attest to the saved job, official and pre-submit URLs, verified
-résumé digest, profile path, confirmation URL, and expected confirmation text.
+candidate must attest to the saved job, official and pre-submit URLs, private
+package path, verified résumé digest, profile path, confirmation URL, and
+expected confirmation text.
 Use `examples/owned-confirmation-attestation.example.json` as the private file
 template. The browser inspection never navigates or clicks Submit. It requires
 the exact confirmation URL on the approved employer host, a visible confirmation

@@ -78,7 +78,7 @@ try {
     const attestationPath = process.env.OPENAPPLY_CONFIRMATION_ATTESTATION;
     if (!attestationPath) throw new Error("Manual confirmation requires a private job-bound attestation file");
     if (runtimePackage.browserRuntime === "owned") {
-      await confirmOwnedSubmission(runtimePackage, workflow,
+      await confirmOwnedSubmission(runtimePackage, packagePath, workflow,
         await loadOwnedConfirmationAttestation(attestationPath), profileDirectory,
         async (directory) => launchBrowser({ profileDirectory: directory, headless: false }));
     } else {

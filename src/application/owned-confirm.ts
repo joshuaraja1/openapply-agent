@@ -10,6 +10,7 @@ import { ApplicationWorkflow } from "./state-machine.js";
 
 const ownedAttestationSchema = z.object({ version: z.literal(1), jobId: z.string().min(1),
   officialUrl: z.url(), preSubmitUrl: z.url(), confirmationUrl: z.url(),
+  packagePath: z.string().refine(isAbsolute),
   browserProfileDirectory: z.string().refine(isAbsolute), artifactSha256: z.string().regex(/^[a-f0-9]{64}$/),
   expectedConfirmation: z.string().min(1), attestCorrectJob: z.literal(true) });
 export type OwnedConfirmationAttestation = z.infer<typeof ownedAttestationSchema>;
@@ -20,7 +21,8 @@ export async function loadOwnedConfirmationAttestation(path: string): Promise<Ow
 }
 
 /** Inspect only already-open profile tabs. Never navigate or click on an uncertain submission. */
-export async function confirmOwnedSubmission(input: ApplicationPackage, workflow: ApplicationWorkflow,
+export async function confirmOwnedSubmission(input: ApplicationPackage, packagePath: string,
+  workflow: ApplicationWorkflow,
   attestation: OwnedConfirmationAttestation, profileDirectory: string,
   launch: (profileDirectory: string) => Promise<{ context: Pick<BrowserContext, "pages">;
     close(): Promise<void> }>, verify: typeof verifyResumePdf = verifyResumePdf): Promise<void> {
@@ -31,12 +33,14 @@ export async function confirmOwnedSubmission(input: ApplicationPackage, workflow
   if (pkg.browserRuntime !== "owned" || pkg.browserEndpoint || !pkg.expectedConfirmation
     || !checkpoint || checkpoint.stage !== "submission-uncertain"
     || checkpoint.jobId !== pkg.job.id || checkpoint.officialUrl !== pkg.job.applicationUrl
-    || !checkpoint.browserPageUrl || !checkpoint.ownedProfileDirectory
+    || !checkpoint.browserPageUrl || !checkpoint.ownedProfileDirectory || !checkpoint.packagePath
     || checkpoint.browserPageId || checkpoint.browserEndpoint) {
     throw new Error("No matching uncertain owned-browser application awaits confirmation");
   }
   if (approved.jobId !== pkg.job.id || approved.officialUrl !== pkg.job.applicationUrl
     || approved.preSubmitUrl !== checkpoint.browserPageUrl
+    || !isAbsolute(packagePath) || resolve(approved.packagePath) !== resolve(checkpoint.packagePath)
+    || resolve(packagePath) !== resolve(checkpoint.packagePath)
     || approved.expectedConfirmation !== pkg.expectedConfirmation
     || resolve(approved.browserProfileDirectory) !== resolve(checkpoint.ownedProfileDirectory)
     || resolve(profileDirectory) !== resolve(checkpoint.ownedProfileDirectory)) {

@@ -23,6 +23,7 @@ const candidate = candidateProfileSchema.parse({ version: 1,
   authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
   skills: {}, education: [], experience: [], projects: [] });
 const pdfSha256 = "b".repeat(64);
+const packagePath = "/private/application-package.json";
 const pkg = applicationPackageSchema.parse({ version: 1, browserRuntime: "owned", job, candidate,
   source: { provider: "greenhouse", company: "Example Co", boardToken: "example", enabled: true,
     allowedApplicationHosts: ["jobs.example.com"] }, handoff: createApplicationHandoff(job, false),
@@ -42,10 +43,11 @@ async function setup() {
     sourceFingerprint: pkg.resumeSource.fingerprint });
   await workflow.advance(job.id, "applying");
   await workflow.advance(job.id, "submit-claimed", { browserPageUrl: job.applicationUrl,
-    ownedProfileDirectory: profile });
+    ownedProfileDirectory: profile, packagePath });
   await workflow.advance(job.id, "submission-uncertain", { blocker: "Submission outcome is unknown" });
   const attestation: OwnedConfirmationAttestation = { version: 1, jobId: job.id,
     officialUrl: job.applicationUrl, preSubmitUrl: job.applicationUrl,
+    packagePath,
     confirmationUrl: "https://jobs.example.com/confirmation/123456", browserProfileDirectory: profile,
     artifactSha256: pdfSha256, expectedConfirmation: pkg.expectedConfirmation!, attestCorrectJob: true };
   return { root, profile, workflow, attestation };
@@ -59,14 +61,15 @@ describe("owned-browser uncertain submission confirmation", () => {
     try {
       for (const change of [{ jobId: "another-job" }, { officialUrl: "https://jobs.example.com/apply/999999" },
         { preSubmitUrl: "https://jobs.example.com/apply/999999" },
+        { packagePath: "/private/another-package.json" },
         { browserProfileDirectory: join(root, "other-profile") }, { artifactSha256: "c".repeat(64) }]) {
-        await expect(confirmOwnedSubmission(pkg, workflow, { ...attestation, ...change }, profile,
+        await expect(confirmOwnedSubmission(pkg, packagePath, workflow, { ...attestation, ...change }, profile,
           launch as never, verify)).rejects.toThrow();
       }
       expect(launches).toBe(0);
-      await expect(confirmOwnedSubmission(pkg, workflow, attestation, join(root, "missing"),
+      await expect(confirmOwnedSubmission(pkg, packagePath, workflow, attestation, join(root, "missing"),
         launch as never, verify)).rejects.toThrow();
-      await expect(confirmOwnedSubmission(pkg, workflow, attestation, profile,
+      await expect(confirmOwnedSubmission(pkg, packagePath, workflow, attestation, profile,
         launch as never, verify)).rejects.toThrow("tab is missing");
       expect((await workflow.current(job.id))?.stage).toBe("submission-uncertain");
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -82,7 +85,7 @@ describe("owned-browser uncertain submission confirmation", () => {
         const page = await context.newPage();
         await page.goto(attestation.confirmationUrl);
         const launch = async () => ({ context, close: async () => {} });
-        await confirmOwnedSubmission(pkg, workflow, attestation, profile, launch, verify);
+        await confirmOwnedSubmission(pkg, packagePath, workflow, attestation, profile, launch, verify);
         expect((await workflow.current(job.id))?.stage).toBe("submitted");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
     }, 30_000);
@@ -96,7 +99,7 @@ describe("owned-browser uncertain submission confirmation", () => {
           body: '<h1>Thank you for applying</h1><p>Another Co Software Engineer</p>' }));
         const page = await context.newPage();
         await page.goto(attestation.confirmationUrl);
-        await expect(confirmOwnedSubmission(pkg, workflow, attestation, profile,
+        await expect(confirmOwnedSubmission(pkg, packagePath, workflow, attestation, profile,
           async () => ({ context, close: async () => {} }), verify)).rejects.toThrow("exact requisition, company, and role");
         expect((await workflow.current(job.id))?.stage).toBe("submission-uncertain");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
@@ -111,7 +114,7 @@ describe("owned-browser uncertain submission confirmation", () => {
           body: '<h1>Application in progress</h1><p>Example Co Software Engineer requisition 123456</p>' }));
         const page = await context.newPage();
         await page.goto(attestation.confirmationUrl);
-        await expect(confirmOwnedSubmission(pkg, workflow, attestation, profile,
+        await expect(confirmOwnedSubmission(pkg, packagePath, workflow, attestation, profile,
           async () => ({ context, close: async () => {} }), verify)).rejects.toThrow("not visibly present");
         expect((await workflow.current(job.id))?.stage).toBe("submission-uncertain");
       } finally { await context.close(); await rm(root, { recursive: true, force: true }); }

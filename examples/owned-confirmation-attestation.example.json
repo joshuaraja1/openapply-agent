@@ -3,6 +3,7 @@
   "jobId": "greenhouse:example:123456",
   "officialUrl": "https://jobs.example.com/apply/123456",
   "preSubmitUrl": "https://jobs.example.com/apply/123456",
+  "packagePath": "/absolute/private/path/to/application-package.json",
   "confirmationUrl": "https://jobs.example.com/confirmation/123456",
   "browserProfileDirectory": "/absolute/private/path/to/browser-profile",
   "artifactSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
