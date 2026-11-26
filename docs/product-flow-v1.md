@@ -11,7 +11,8 @@ usable without a paid account; hosted access is a separate entitlement.
    the planned hosted billing provider. The server records Stripe customer and
    subscription IDs, never card data.
    A verified billing webhook updates a local entitlement record. The server
-   checks that record before accepting a new run and again before a worker starts.
+   checks that record before accepting a new run, again before a worker starts,
+   and as part of the atomic final-submit authorization fence.
    Expiry stops new work; an already claimed submission follows its recovery
    protocol rather than being clicked again.
 2. **Guided intake.** Ask whether the user is studying, graduating soon, a new
