@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateRuntimeLock } from "./pack-runtime-lock.mjs";
@@ -21,17 +21,21 @@ export function installLockedTarball(tarballPath, destination) {
   }
   const target = resolve(destination);
   if (existsSync(target)) throw new Error("Locked install destination already exists");
-  const listing = run("tar", ["-tzf", tarballPath]).trim().split(/\r?\n/);
-  const safe = (path) => path.startsWith("package/") && !path.includes("\\")
-    && !path.split("/").includes("..") && !path.includes("\0");
-  if (!listing.length || listing.some((path) => !safe(path))) throw new Error("Unsafe package archive path");
-  const verbose = run("tar", ["-tvzf", tarballPath]).trim().split(/\r?\n/);
-  if (verbose.length !== listing.length || verbose.some((line) => !/^[-d]/.test(line))) {
-    throw new Error("Package archive contains a link or unsupported entry");
-  }
   mkdirSync(target, { mode: 0o700 });
   try {
-    run("tar", ["-xzf", tarballPath, "-C", target]);
+    // Validate and extract the same private copy, even if the caller's path changes.
+    const archive = join(target, "artifact.tgz");
+    copyFileSync(tarballPath, archive);
+    const listing = run("tar", ["-tzf", archive]).trim().split(/\r?\n/);
+    const safe = (path) => path.startsWith("package/") && !path.includes("\\")
+      && !path.split("/").includes("..") && !path.includes("\0");
+    if (!listing.length || listing.some((path) => !safe(path))) throw new Error("Unsafe package archive path");
+    const verbose = run("tar", ["-tvzf", archive]).trim().split(/\r?\n/);
+    if (verbose.length !== listing.length || verbose.some((line) => !/^[-d]/.test(line))) {
+      throw new Error("Package archive contains a link or unsupported entry");
+    }
+    run("tar", ["-xzf", archive, "-C", target]);
+    unlinkSync(archive);
     const packageRoot = join(target, "package");
     const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
     const lockFile = join(packageRoot, "runtime-package-lock.json");
