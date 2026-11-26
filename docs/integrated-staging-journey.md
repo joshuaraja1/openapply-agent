@@ -3,7 +3,7 @@
 `test/queue-handoff-integration.test.ts` now runs one synthetic candidate and
 Greenhouse-shaped job through the private Markdown compiler, evidence-backed
 matching, Jake-template source generation, job-bound PDF verification, queue
-quota, known form upload, unknown-question handoff, generic email alert,
+quota, simulated form upload, unknown-question handoff, generic email alert,
 encrypted checkpoint restart, approved answer, exact-job confirmation, and
 duplicate-submit refusal. The PDF is a controlled fixture carrying the source
 token; it is **not** an Overleaf render. The browser and Resend sender are local
