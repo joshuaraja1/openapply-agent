@@ -3,7 +3,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pageIdFromResult, resultText, type BrowserToolClient, type BrowserToolResult } from "./client.js";
 import type { BrowserControl, BrowserSnapshot } from "./actions.js";
-import type { FormAction } from "../application/form-mapper.js";
+import type { BatchFillResult, FormAction } from "../application/form-mapper.js";
 
 function success(result: BrowserToolResult, step: string): string {
   if (result.isError) throw new Error(`BrowserOS ${step} failed`);
@@ -156,7 +156,7 @@ export class NeoApplicationBrowser {
     throw new Error("Unsupported BrowserOS application action");
   }
 
-  async fillBatch(actions: FormAction[]): Promise<BrowserSnapshot> {
+  async fillBatch(actions: FormAction[]): Promise<BatchFillResult> {
     if (this.page === undefined || !this.latest) throw new Error("Application page is not open");
     if (actions.some((action) => action.action === "select")) {
       throw new Error("BrowserOS cannot verify select options on this page");
@@ -182,14 +182,33 @@ export class NeoApplicationBrowser {
         throw new Error(`BrowserOS did not retain ${field.name}`);
       }
     }
+    const beforeCounts = new Map<string, number>();
+    for (const control of before.controls) {
+      if (control.required) {
+        const name = `${control.tag}:${control.type ?? ""}:${control.name}`;
+        beforeCounts.set(name, (beforeCounts.get(name) ?? 0) + 1);
+      }
+    }
+    const afterCounts = new Map<string, number>();
+    for (const control of after.controls) {
+      if (!control.required) continue;
+      const name = `${control.tag}:${control.type ?? ""}:${control.name}`;
+      const count = (afterCounts.get(name) ?? 0) + 1;
+      afterCounts.set(name, count);
+      if (count > (beforeCounts.get(name) ?? 0)) {
+        return { snapshot: after, uploaded: false };
+      }
+    }
+    let uploaded = false;
     for (const action of actions.filter((entry) => entry.action === "upload")) {
       const controls = after.controls.filter((entry) => entry.name === action.name && entry.type === "file");
       if (controls.length !== 1) throw new Error("Résumé upload control changed");
       await this.upload(controls[0]!.ref, action.value);
+      uploaded = true;
       after = await this.snapshot();
       if (after.url !== before.url) throw new Error("Application page changed during résumé upload");
     }
-    return after;
+    return { snapshot: after, uploaded };
   }
 
   private async upload(ref: string, path: string): Promise<void> {

@@ -195,4 +195,33 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       expect(result.confirmationVisible).toBe(true);
     }, 30_000);
   }
+
+  for (const scenario of ["conditional-required", "validation-error", "identity-drift"] as const) {
+    it(`smartrecruiters pauses on ${scenario} instead of submitting`, async () => {
+      const result = await run("smartrecruiters", scenario);
+      expect(result.checkpoint.stage).toBe("waiting-human");
+      expect(result.confirmationVisible).toBe(false);
+      expect(result.failure).toBeUndefined();
+      if (scenario === "conditional-required") {
+        expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
+        expect(result.fileName).toBeUndefined();
+      }
+      if (scenario === "validation-error") {
+        expect(result.checkpoint.blocker).toContain("Continue did not advance");
+        expect(result.validationVisible).toBe(true);
+      }
+      if (scenario === "identity-drift") {
+        expect(result.checkpoint.blocker).toContain("Required field needs an answer: Candidate name");
+      }
+    }, 30_000);
+  }
+
+  for (const scenario of ["receipt-other-job", "receipt-url-drift"] as const) {
+    it(`smartrecruiters keeps ${scenario} submission uncertain`, async () => {
+      const result = await run("smartrecruiters", scenario);
+      expect(result.failure).toBeDefined();
+      expect(result.checkpoint.stage).toBe("submission-uncertain");
+      expect(result.confirmationVisible).toBe(true);
+    }, 30_000);
+  }
 });
