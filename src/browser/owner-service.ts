@@ -79,8 +79,8 @@ export async function startOwnerInspectionService(input: {
               || hasUnboundReceiptUrl(request.jobId, request.officialUrl, actual.href)) {
               throw new Error("Browser tab is no longer bound to the official requisition");
             }
-            result = inspectResult.parse({ tabId: request.tabId, generation: request.generation,
-              ...snapshot });
+            result = inspectResult.parse({ url: snapshot.url, title: snapshot.title,
+              visibleText: snapshot.visibleText, tabId: request.tabId, generation: request.generation });
           }
           const reply: OwnerReply = { status: "ok", requestId: request.requestId, result };
           connection.end(JSON.stringify({ reply, mac: replyMac(reply, input.secret) }) + "\n");
@@ -145,8 +145,9 @@ export async function inspectOwnedTab(input: { socketPath: string; secret: Buffe
   const expected = Buffer.from(replyMac(parsed.reply, input.secret), "hex");
   if (!timingSafeEqual(actual, expected)) throw new Error("Browser-owner reply authentication failed");
   if (parsed.reply.status === "error") throw new Error(parsed.reply.error);
-  if (parsed.reply.result !== "pong" && parsed.reply.result.generation !== input.request.generation) {
-    throw new Error("Browser-owner generation changed");
+  if (parsed.reply.result !== "pong" && (parsed.reply.result.generation !== input.request.generation
+    || input.request.action !== "inspect-tab" || parsed.reply.result.tabId !== input.request.tabId)) {
+    throw new Error("Browser-owner tab identity changed");
   }
   return parsed.reply.result;
 }

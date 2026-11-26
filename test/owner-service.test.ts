@@ -1,4 +1,5 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createServer } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, lstat, rm } from "node:fs/promises";
@@ -51,7 +52,8 @@ describe.skipIf(process.platform === "win32")("private browser-owner inspection 
       owner.register(bindingFor(firstRequest), async () => {
         inspections += 1;
         return { url: "https://jobs.example.test/123", title: "Confirmation",
-          visibleText: "Application received for Example role" };
+          visibleText: "Application received for Example role",
+          tabId: randomUUID(), generation: randomUUID() };
       });
       const first = await worker({ socketPath, secret, request: firstRequest });
       const second = await worker({ socketPath, secret, request: requestFor(generation, tabId, claimId) });
@@ -68,6 +70,31 @@ describe.skipIf(process.platform === "win32")("private browser-owner inspection 
       expect(inspections).toBe(2);
     } finally {
       await owner.close();
+      await rm(directory, { recursive: true });
+    }
+  });
+
+  it("rejects a validly signed reply naming another tab", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openapply-owner-"));
+    const socketPath = join(directory, "owner.sock");
+    const secret = randomBytes(32);
+    const generation = randomUUID();
+    const request = requestFor(generation, randomUUID(), randomUUID());
+    const server = createServer((connection) => {
+      connection.once("data", () => {
+        const reply = { status: "ok", requestId: request.requestId,
+          result: { tabId: randomUUID(), generation, url: request.officialUrl,
+            title: "Confirmation", visibleText: "Application received" } };
+        const mac = createHmac("sha256", secret).update(JSON.stringify(reply)).digest("hex");
+        connection.end(JSON.stringify({ reply, mac }) + "\n");
+      });
+    });
+    try {
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+      await expect(inspectOwnedTab({ socketPath, secret, request }))
+        .rejects.toThrow("tab identity changed");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(directory, { recursive: true });
     }
   });
