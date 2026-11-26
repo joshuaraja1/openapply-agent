@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { assertPackageManifest } from "./assert-package.mjs";
 
 const publicFiles = ["dist/src/product-cli.js", "templates/user/01-candidate-profile.md",
-  "templates/resume/main.tex", "README.md", "LICENSE", "package.json"];
+  "templates/resume/main.tex", "README.md", "LICENSE", "package.json", "runtime-package-lock.json"];
 const manifest = (files) => [{ files: files.map((path) => ({ path })) }];
 
 test("accepts a portable package with CLI and templates", () => {
