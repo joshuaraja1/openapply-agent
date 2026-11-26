@@ -33,7 +33,8 @@ const source: ResumeSource = { latex, renderToken, fingerprint: createHash("sha2
 
 async function fixture(path: string, options: { title?: string; claim?: string; offPage?: boolean;
   overlap?: boolean; link?: boolean; subject?: string;
-  extraLink?: string; edgeGraphic?: boolean; darkBackground?: boolean } = {}): Promise<void> {
+  extraLink?: string; edgeGraphic?: boolean; darkBackground?: boolean;
+  secondPageLines?: number } = {}): Promise<void> {
   const pdf = await PDFDocument.create();
   pdf.setSubject(options.subject ?? `OpenApply:${renderToken}`);
   const page = pdf.addPage([612, 792]);
@@ -53,6 +54,12 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
     const annotation = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 710, 150, 725],
       Border: [0, 0, 0], A: { Type: "Action", S: "URI", URI: PDFString.of(options.extraLink) } });
     page.node.addAnnot(pdf.context.register(annotation));
+  }
+  if (options.secondPageLines) {
+    const secondPage = pdf.addPage([612, 792]);
+    for (let line = 0; line < options.secondPageLines; line += 1) {
+      secondPage.drawText(`Synthetic project detail ${line + 1}`, { x: 40, y: 740 - line * 20 });
+    }
   }
   await writeFile(path, await pdf.save());
 }
@@ -114,6 +121,19 @@ describe("job-bound PDF verification", () => {
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("ink too close");
       await fixture(path, { darkBackground: true });
       await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("excessive ink");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a mostly empty overflow page but permits a filled second page", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-"));
+    try {
+      const path = join(root, "resume.pdf");
+      await fixture(path, { secondPageLines: 1 });
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow("mostly empty second page");
+      await fixture(path, { secondPageLines: 18 });
+      await expect(verifyResumePdf(path, job, candidate, source)).resolves.toMatchObject({ pages: 2 });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
