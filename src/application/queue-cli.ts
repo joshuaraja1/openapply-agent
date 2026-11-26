@@ -20,7 +20,8 @@ import type { DiscoveredJob } from "../types.js";
 import { DailyQuota, type DailyQuotaRecord } from "./daily-quota.js";
 import { queueRunnerConfigSchema } from "./queue-config.js";
 import { createApplicationHandoff } from "./handoff.js";
-import { loadHandoffNotificationConfig, notifyPendingHandoff } from "./notification.js";
+import { assertAutonomousNotificationReady, loadHandoffNotificationConfig,
+  notifyPendingHandoff } from "./notification.js";
 import { runApplicationQueue } from "./queue-runner.js";
 import { runnableEntries } from "./queue-reconcile.js";
 import { RetryLedger, type RetryRecord } from "./retry-ledger.js";
@@ -54,6 +55,8 @@ const [queue, candidate, preferences, discovery] = await Promise.all([
   json(config.preferencesPath).then((value) => searchPreferencesSchema.parse(value)),
   json(config.discoveryInputPath).then((value) => discoveryInputSchema.parse(value)),
 ]);
+await assertAutonomousNotificationReady(preferences.applicationPolicy.requireFinalApproval,
+  notificationConfig, secrets);
 const workflow = new ApplicationWorkflow(sqlite?.store<ApplicationCheckpoint>("applications")
   ?? new EncryptedApplicationStateStore<ApplicationCheckpoint>(join(root, "applications.enc.json"), key));
 const quota = new DailyQuota(sqlite?.store<DailyQuotaRecord>("quota")

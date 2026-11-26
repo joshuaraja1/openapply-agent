@@ -28,6 +28,16 @@ export async function loadHandoffNotificationConfig(path: string): Promise<Hando
   return handoffNotificationSchema.parse(JSON.parse(await readPrivateFile(path)));
 }
 
+/** Unattended runs must have a usable channel before they begin applying. */
+export async function assertAutonomousNotificationReady(requireFinalApproval: boolean,
+  config: HandoffNotificationConfig | undefined, secrets: SecretStore): Promise<void> {
+  if (requireFinalApproval) return;
+  if (!config?.email) throw new Error("Automatic submission requires a configured handoff email");
+  if (!await secrets.get(config.email.apiKeySecretRef)) {
+    throw new Error("Automatic submission requires a handoff email key in the OS secret store");
+  }
+}
+
 /** Generic text only: job titles, answers, URLs, and candidate details stay on the device. */
 export async function sendHandoffEmail(config: HandoffNotificationConfig, checkpoint: ApplicationCheckpoint,
   secrets: SecretStore, fetcher: typeof fetch = fetch): Promise<void> {

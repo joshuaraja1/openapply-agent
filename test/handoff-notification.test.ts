@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { SecretStore } from "../src/storage/contracts.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
-import { handoffNotificationSchema, loadHandoffNotificationConfig,
+import { assertAutonomousNotificationReady, handoffNotificationSchema, loadHandoffNotificationConfig,
   notifyPendingHandoff, sendHandoffEmail } from "../src/application/notification.js";
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "../src/application/state-machine.js";
 
@@ -23,6 +23,16 @@ function memorySecrets(): SecretStore {
 }
 
 describe("human handoff email", () => {
+  it("requires a configured secret-backed alert before an unattended queue run", async () => {
+    const secrets = memorySecrets();
+    await assertAutonomousNotificationReady(true, undefined, secrets);
+    await expect(assertAutonomousNotificationReady(false, undefined, secrets))
+      .rejects.toThrow("configured handoff email");
+    await expect(assertAutonomousNotificationReady(false, config, secrets))
+      .rejects.toThrow("OS secret store");
+    await secrets.put(config.email!.apiKeySecretRef, "test-secret");
+    await assertAutonomousNotificationReady(false, config, secrets);
+  });
   it("replays unsent alerts once per durable handoff, including a second pause in the same millisecond", async () => {
     const store = new MemoryApplicationStateStore<ApplicationCheckpoint>();
     const workflow = new ApplicationWorkflow(store);

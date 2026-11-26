@@ -67,6 +67,9 @@ The email contains only a generic reminder to open OpenApply. An email failure
 never changes the application checkpoint or marks a submission complete. The
 notification path has synthetic tests; live delivery requires the user's own
 verified sender domain and API key.
+An unattended queue with `requireFinalApproval: false` requires this configured
+email channel and a stored sending key before it starts. A manual-approval queue
+can run without email.
 The next scheduled run replays an alert still pending in encrypted application
 state even if the job is absent from today's queue. Delivery is recorded only
 after the provider accepts the request. A crash between acceptance and that
