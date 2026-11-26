@@ -27,6 +27,7 @@ describe("manual submission reconciliation", () => {
       resumeSource: { latex: "fixture", fingerprint: "f".repeat(64), renderToken: "a".repeat(64), claimIds: ["x"] },
       resumePdfPath: "/private/resume.pdf", expectedConfirmation: "Thank you for applying",
       browserEndpoint: "http://127.0.0.1:3333/mcp" });
+    expect(applicationPackageSchema.safeParse({ ...pkg, expectedConfirmation: "   " }).success).toBe(false);
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore());
     await workflow.create(job.id, job.applicationUrl);
     await workflow.advance(job.id, "validated");
@@ -44,6 +45,8 @@ describe("manual submission reconciliation", () => {
     const attestation = { version: 1 as const, jobId: job.id, browserPageId: 7,
       confirmationUrl: "https://jobs.example.com/other", expectedConfirmation: "Thank you for applying",
       attestCorrectJob: true as const };
+    await expect(confirmManualSubmission(pkg, workflow, unconfirmed as never,
+      { ...attestation, expectedConfirmation: "   " }, verify)).rejects.toThrow();
     await expect(confirmManualSubmission(pkg, workflow, unconfirmed as never, attestation, verify))
       .rejects.toThrow("not visible");
     expect((await workflow.current(job.id))?.stage).toBe("waiting-human");

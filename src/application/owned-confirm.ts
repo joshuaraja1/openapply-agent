@@ -2,11 +2,16 @@ import { resolve } from "node:path";
 import type { BrowserContext } from "playwright";
 import { verifyResumePdf } from "../resume/verify-pdf.js";
 import type { DiscoveredJob } from "../types.js";
-import { hasStableRequisitionPath } from "./requisition.js";
+import { hasStableRequisitionPath, hasUnboundReceiptUrl } from "./requisition.js";
 import { applicationPackageSchema, type ApplicationPackage } from "./runner.js";
 import { ApplicationWorkflow } from "./state-machine.js";
+import { applicationPackageFingerprint } from "./package-fingerprint.js";
 
-const receiptSelector = 'h1:visible, h2:visible, h3:visible, [role="status"]:visible, [role="alert"]:visible';
+const receiptSelector = '[role="status"]:visible, [role="alert"]:visible, [data-testid="application-confirmation"]:visible';
+
+export function isOwnedReceiptAttested(jobId: string, typedJobId: string, accountAndSubmissionAnswer: string): boolean {
+  return typedJobId.trim() === jobId && accountAndSubmissionAnswer.trim() === "YES";
+}
 
 function exactToken(text: string, token: string): boolean {
   const lower = text.toLowerCase();
@@ -37,9 +42,9 @@ function exactRoleLine(text: string, company: string, role: string): boolean {
 
 /** Inspect an already-open employer receipt. This function never navigates or clicks. */
 export async function inspectOwnedReceipt(
-  context: Pick<BrowserContext, "pages">, pkg: ApplicationPackage, preSubmitUrl?: string,
+  context: Pick<BrowserContext, "pages">, pkg: ApplicationPackage, preSubmitUrl: string,
 ): Promise<string> {
-  if (!hasStableRequisitionPath(pkg.job) || !pkg.expectedConfirmation) {
+  if (!hasStableRequisitionPath(pkg.job) || !pkg.expectedConfirmation?.trim()) {
     throw new Error("This job lacks a stable requisition or configured receipt phrase");
   }
   const reference = pkg.job.id.split(":").at(-1)!;
@@ -51,16 +56,13 @@ export async function inspectOwnedReceipt(
     try { receipt = new URL(page.url()); } catch { continue; }
     if (receipt.protocol !== "https:" || receipt.origin !== original.origin
       || receipt.username || receipt.password) continue;
-    if (preSubmitUrl && receipt.pathname === new URL(preSubmitUrl).pathname) continue;
-    const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
-    if (body.length > 50_000) continue;
-    const pathParts = receipt.pathname.split("/").map((part) => {
-      try { return decodeURIComponent(part).toLowerCase(); } catch { return ""; }
-    });
-    if (!phrase(body, pkg.job.company) || !exactRoleLine(body, pkg.job.company, pkg.job.title)
-      || (!pathParts.includes(reference.toLowerCase()) && !exactToken(body, reference))) continue;
-    const receiptLines = await page.locator(receiptSelector).allInnerTexts().catch(() => []);
-    if (!receiptLines.some((line) => phrase(line, pkg.expectedConfirmation!))) continue;
+    if (receipt.pathname === new URL(preSubmitUrl).pathname
+      || hasUnboundReceiptUrl(pkg.job.id, pkg.job.applicationUrl, receipt.href)) continue;
+    const receiptBlocks = await page.locator(receiptSelector).allInnerTexts().catch(() => []);
+    if (!receiptBlocks.some((block) => block.length <= 2000
+      && phrase(block, pkg.expectedConfirmation!)
+      && exactRoleLine(block, pkg.job.company, pkg.job.title)
+      && exactToken(block, reference))) continue;
     if (page.url() !== receipt.href) continue;
     matches.push(receipt.href);
   }
@@ -84,6 +86,7 @@ export async function confirmOwnedSubmission(
     || !checkpoint || checkpoint.stage !== "submission-uncertain"
     || checkpoint.officialUrl !== pkg.job.applicationUrl
     || !checkpoint.packagePath || resolve(checkpoint.packagePath) !== resolve(packagePath)
+    || !checkpoint.packageSha256 || checkpoint.packageSha256 !== applicationPackageFingerprint(pkg)
     || !checkpoint.browserPageUrl
     || !checkpoint.artifactPath || !checkpoint.artifactSha256 || !checkpoint.sourceFingerprint) {
     throw new Error("No matching owned-browser uncertain submission awaits verification");

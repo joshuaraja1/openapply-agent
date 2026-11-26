@@ -126,12 +126,14 @@ the final click. The owned browser profile preserves sign-in state, but a closed
 Chromium context does not restore its receipt tab. To reconcile manually, run
 `OPENAPPLY_PACKAGE=<original-private-package-path> npm run application:verify-owned`.
 In the opened private browser, sign in if necessary and open the employer's
-application receipt or status for that exact job. Type the exact job ID at the
-terminal prompt. OpenApply then reads the live page without clicking or
+application receipt or status for that exact job. Type the exact job ID and
+explicitly attest that you used your own employer account and submitted this
+application. OpenApply then reads the live page without clicking or
 navigating. It records `submitted` only if the saved package and verified résumé
-match the uncertain claim and one visible receipt has the employer origin,
-requisition, company, role, and configured confirmation phrase. The receipt must
-be on a different path from the pre-submit page. If the employer portal does not
+match the uncertain claim and one visible receipt on the original requisition
+path contains the company, role, exact requisition, and configured confirmation
+phrase in one semantic receipt block. The receipt must be on a different path
+from the pre-submit page. If the employer portal does not
 show all that evidence, the application stays uncertain; inspect the employer
 portal or confirmation email outside OpenApply before deciding whether to retry.
 
