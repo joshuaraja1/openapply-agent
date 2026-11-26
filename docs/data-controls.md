@@ -23,7 +23,9 @@ local export, and can finish after an interrupted file purge. Unknown entries,
 symlinks, hard links, unsafe permissions, oversized files, or changed bytes stop
 the operation. The export contains **private résumé and application data**;
 move any backup you wish to retain before purging. A configured custom output
-directory is deliberately excluded and must be inventoried manually.
+directory is deliberately excluded and must be inventoried manually. A leftover
+temporary browser download directory after a crash also blocks artifact export
+until it is inspected and cleared separately.
 
 `state:control` handles the application, quota, retry, posting-claim, and email-code ledgers, plus the configured discovery state and pending queue. It works with the active encrypted SQLite store or the legacy encrypted files. The export is **readable JSON containing private application data**. It does not contain the OS encryption key, saved browser cookies, account passwords, OAuth tokens, onboarding files, generated PDFs, or other files outside these state paths. Keep the export private; deleting application state does not delete those other data stores or revoke connected accounts.
 

@@ -36,9 +36,17 @@ describe("generated artifact controls", () => {
         .rejects.toThrow("changed since export");
       expect(await readFile(join(artifacts, files[0]!.name), "utf8")).toBe("changed");
       await writeFile(join(artifacts, files[0]!.name), files[0]!.bytes);
+      await writeFile(join(root, "artifact-export", files[0]!.name), "changed backup");
+      await expect(runGeneratedArtifactControl("quarantine-artifacts", root))
+        .rejects.toThrow("changed since export");
+      await writeFile(join(root, "artifact-export", files[0]!.name), files[0]!.bytes);
       await expect(runGeneratedArtifactControl("quarantine-artifacts", root))
         .resolves.toEqual({ action: "artifacts-quarantined", files: 2 });
       await expect(lstat(artifacts)).rejects.toMatchObject({ code: "ENOENT" });
+      await writeFile(join(root, "removed-artifacts", "unrelated.txt"), "do not delete", { mode: 0o600 });
+      await expect(runGeneratedArtifactControl("purge-artifacts", root))
+        .rejects.toThrow("unrecognized entry");
+      await rm(join(root, "removed-artifacts", "unrelated.txt"));
       await mkdir(artifacts, { mode: 0o700 });
       await expect(runGeneratedArtifactControl("restore-artifacts", root))
         .rejects.toThrow("Newer generated artifacts");
