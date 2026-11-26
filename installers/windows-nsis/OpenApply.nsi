@@ -22,7 +22,7 @@ CRCCheck force
     IntOp $1 $0 & 0x400
     ${If} $1 != 0
       SetErrorLevel 4
-      Abort "OpenApply uninstall stopped at a linked directory."
+      Abort "OpenApply stopped at a linked directory."
     ${EndIf}
   ${EndIf}
 !macroend
@@ -46,6 +46,8 @@ Function .onInit
   SetShellVarContext current
   StrCmp $INSTDIR "$LOCALAPPDATA\OpenApply\runtime" +2 0
     Abort "OpenApply only installs to the current user's runtime folder."
+  !insertmacro CheckNoReparse "$LOCALAPPDATA\OpenApply"
+  !insertmacro CheckNoReparse "$INSTDIR"
   IfFileExists "$INSTDIR\*" 0 +2
     Abort "An OpenApply runtime already exists; use the updater when available."
 FunctionEnd

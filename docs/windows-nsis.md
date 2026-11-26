@@ -17,6 +17,10 @@ Candidate data and secrets remain outside the runtime. Windows CI builds an
 unsigned EXE, runs the installed CLI, checks reinstall rejection, injects a
 junction to a candidate-data sentinel, and verifies that uninstall refuses
 the junction and later preserves both the sentinel and a user-added file.
+It also builds two versions from the locked payload, refuses an unsigned
+signing attempt and an empty-runtime junction, checks that in-place replacement
+fails without damage, then drills uninstall/install replacement and rollback
+while checking a candidate-state sentinel after every phase.
 
 `installers/windows-nsis/build.ps1` accepts `-Sign` only when a valid
 certificate thumbprint and HTTPS timestamp endpoint are provided in
@@ -30,7 +34,9 @@ certificate thumbprint and signed manifest hash.
 
 This is still staging. The unsigned CI run does not establish that the
 signing service is available, that the installed uninstaller is signed on a
-clean machine, or that updates and rollback preserve compatible state. A
-signed clean install, failed update, rollback, and uninstall drill remain
-release gates. A browser runtime and first-run desktop UX are not bundled by
-this CLI installer.
+clean machine, or that updates and rollback preserve compatible state. The
+CI rollback uses two fixture versions built from the same locked package; it
+does not represent a transactional updater or a database compatibility test.
+A signed clean install, failed update recovery, and real-version rollback
+remain release gates. A browser runtime and first-run desktop UX are not
+bundled by this CLI installer.
