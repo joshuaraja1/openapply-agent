@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
@@ -25,8 +26,15 @@ test("user-level staging install and uninstall preserve private state", () => {
     assert.equal(installed.version, packed.version);
     assert.equal(installed.browserChecked, false);
     assert.equal(statusStaging(root).installed, true);
+    const packageRoot = join(root, "runtime", "install", "package");
+    const packageLock = JSON.parse(readFileSync(join(packageRoot, "package-lock.json"), "utf8"));
+    const sourceLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+    assert.equal(packageLock.packages["node_modules/zod"].integrity,
+      sourceLock.packages["node_modules/zod"].integrity);
+    assert.equal(statusStaging(root).tarballSha256,
+      createHash("sha256").update(readFileSync(tarball)).digest("hex"));
     assert.throws(() => installStaging(tarball, root), /already exists/);
-    rmSync(join(root, "runtime", "node_modules"), { recursive: true });
+    rmSync(join(packageRoot, "node_modules"), { recursive: true });
     assert.equal(existsSync(join(root, ".openapply-staging.json")), true);
     assert.deepEqual(uninstallStaging(root), { removed: true, root });
     assert.equal(uninstallStaging(root).removed, false);

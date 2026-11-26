@@ -39,6 +39,10 @@ try {
   priorPackage.version = "0.0.0";
   delete priorPackage.scripts;
   writeFileSync(join(priorSource, "package.json"), JSON.stringify(priorPackage));
+  const priorLock = JSON.parse(readFileSync(join(source, "package-lock.json"), "utf8"));
+  priorLock.version = "0.0.0";
+  priorLock.packages[""].version = "0.0.0";
+  writeFileSync(join(priorSource, "runtime-package-lock.json"), JSON.stringify(priorLock));
   for (const path of ["dist", "templates", "examples", "docs", "README.md", "LICENSE"]) {
     cpSync(join(source, path), join(priorSource, path), { recursive: true });
   }

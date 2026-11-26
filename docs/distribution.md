@@ -34,7 +34,7 @@ An existing root must be owned by the current user with owner-only Unix
 permissions or a protected owner-only Windows ACL. Windows custom roots must
 stay inside the current user's LocalAppData. Linked path components and unsafe
 shared ancestors are rejected.
-The installed CLI is under `runtime/node_modules/openapply-agent/dist/src/product-cli.js`
+The installed CLI is under `runtime/install/package/dist/src/product-cli.js`
 inside that directory and runs with the current Node installation. No admin
 privileges or global npm installation are needed.
 
@@ -43,10 +43,29 @@ so an interrupted removal can be retried, and removes only that directory.
 Candidate files, SQLite state, keychain secrets, and the shared
 Chromium cache are outside that directory and remain in place. This script
 does not create a launcher, register a scheduler, perform upgrades, or verify
-release signatures. `npm install` can resolve runtime dependencies from mutable
-registry metadata; this script does not pin or independently verify them before
-starting the CLI. Use it only for controlled staging and testing with trusted
-artifacts; do not publish it as a public installer.
+release signatures. It uses the locked tarball path below to check dependency
+hashes before starting the CLI. The package and its lock are still unsigned.
+Use it only for controlled staging with a trusted artifact; do not publish it
+as a public installer.
+
+## Locked tarball install for staging
+
+`npm pack` now adds `runtime-package-lock.json` to the portable tarball. From a
+source checkout, run `npm run distribution:locked-install -- /absolute/path/to/openapply-agent-0.1.0.tgz /absolute/empty/destination`.
+The helper rejects archive paths outside `package/` and archive links, validates
+the package against its lock, then runs `npm ci --omit=dev --ignore-scripts` in
+the extracted package before starting its CLI and importing runtime/native
+dependencies. npm verifies downloaded archive bytes against the lock's
+integrity hashes. If extraction or installation fails, the destination is
+removed. CI checks this path on macOS, Windows, and Linux, including a separate
+synthetic prior-version install that remains runnable for manual rollback and
+altered-hash and missing-dependency archives.
+
+The existing portable `npm install <tarball>` smoke remains a compatibility
+check; it does not pin transitive dependency resolution. The user-level staging
+installer now calls this locked path. The lock itself is inside an unsigned
+tarball, so this remains a controlled staging check, not a verified public
+release artifact.
 
 ## Requirements for a safe updater
 

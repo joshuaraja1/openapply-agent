@@ -115,7 +115,11 @@ export async function verifyResumePdf(
         if (item.width > 0 && height > 0) boxes.push({ x, y, width: item.width, height });
       }
       assertNoTextOverlap(boxes);
-      await inspectPdfPageImage(page);
+      const image = await inspectPdfPageImage(page);
+      // A short overflow onto page two can be legible yet still produce an unusable résumé.
+      if (index === 2 && image.inkRows / image.height < 0.12) {
+        throw new Error("Résumé PDF has a mostly empty second page");
+      }
       const annotations = await page.getAnnotations();
       for (const annotation of annotations) {
         if (annotation.subtype !== "Link") continue;

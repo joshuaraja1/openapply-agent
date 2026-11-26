@@ -12,8 +12,10 @@ posting, generation stops.
 embedded render token, approved claim text, candidate name, company, role title,
 active email link, page size, text extraction, page bounds, and significant text
 overlap checks pass. It also rasterizes every page and rejects blank output,
-excessive ink, and content within five points of the paper edge. It records
-the exact PDF hash for the application checkpoint. The embedded browser uploads
+excessive ink, and content within five points of the paper edge. It also rejects
+a second page with ink on fewer than 12% of its raster rows, which catches a
+short overflow page after tailoring. It records the exact PDF hash for the
+application checkpoint. The embedded browser uploads
 the verified bytes only after checking that hash again. `resume:render` now
 fills the source editor in a private Overleaf project through BrowserOS neo,
 recompiles, downloads the PDF, and verifies it before writing a private
