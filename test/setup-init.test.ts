@@ -30,5 +30,5 @@ describe("private first-run template setup", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, process.platform === "win32" ? 90_000 : 30_000);
 });
