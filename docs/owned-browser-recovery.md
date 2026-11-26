@@ -1,6 +1,8 @@
 # Owned-browser receipt recovery design
 
-Issue [#153](https://github.com/joshuaraja1/openapply-agent/issues/153) remains open. The current Playwright `launchPersistentContext` belongs to the application worker. Its `finally` closes the context, which destroys the live receipt tab even when the profile remains on disk. A worker crash also leaves no trustworthy tab identity to inspect. The candidate-assisted `application:verify-owned` path can check a fresh employer receipt, but it does not prove that a reopened tab is the tab that received the final click.
+Issue [#153](https://github.com/joshuaraja1/openapply-agent/issues/153) remains open. The production application runner still owns its Playwright `launchPersistentContext`. Its `finally` closes the context, which destroys the live receipt tab even when the profile remains on disk. A worker crash also leaves no trustworthy tab identity to inspect. The candidate-assisted `application:verify-owned` path can check a fresh employer receipt, but it does not prove that a reopened tab is the tab that received the final click.
+
+Merged #186 and #190 stage an authenticated owner-held inspection channel and a submit-once journal. They are inactive in the scheduled application path. They do not yet supply a supervised owner daemon, provider-vetted form actions, or production receipt reconnection across a worker crash. Their controlled tests therefore do not close #153.
 
 ## Safety invariants
 
