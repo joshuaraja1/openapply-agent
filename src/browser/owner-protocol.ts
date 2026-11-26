@@ -3,16 +3,16 @@ import { z } from "zod";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const base = { version: z.literal(1), requestId: z.uuid(), generation: z.uuid() };
+const binding = { tabId: z.uuid(), claimId: z.uuid(), jobId: z.string().min(1).max(256),
+  officialUrl: z.url().refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  }), packageSha256: digest, artifactSha256: digest };
 const ownerRequestSchema = z.discriminatedUnion("action", [
   z.object({ ...base, action: z.literal("ping") }).strict(),
-  z.object({ ...base, action: z.literal("inspect-tab"), tabId: z.uuid(),
-    claimId: z.uuid(), jobId: z.string().min(1).max(256),
-    officialUrl: z.url().refine((value) => {
-      const url = new URL(value);
-      return url.protocol === "https:" && !url.username && !url.password;
-    }),
-    packageSha256: digest, artifactSha256: digest,
-  }).strict(),
+  z.object({ ...base, ...binding, action: z.literal("inspect-tab") }).strict(),
+  z.object({ ...base, ...binding, action: z.literal("navigate-tab"), url: z.url() }).strict(),
+  z.object({ ...base, ...binding, action: z.literal("snapshot-tab") }).strict(),
 ]);
 
 export type OwnerRequest = z.infer<typeof ownerRequestSchema>;
@@ -35,7 +35,7 @@ function macFor(request: OwnerRequest, secret: Buffer): Buffer {
   return createHmac("sha256", secret).update(JSON.stringify(request)).digest();
 }
 
-/** Protocol only: no browser process or submission path uses this yet. */
+/** Private owner protocol. No production application runner uses it yet. */
 export function signOwnerRequest(request: OwnerRequest, secret: Buffer): OwnerEnvelope {
   assertSecret(secret);
   const parsed = ownerRequestSchema.parse(request);
@@ -69,7 +69,7 @@ export class OwnerRequestVerifier {
     if (!timingSafeEqual(actual, expected) || envelope.request.generation !== this.generation) {
       throw new Error("Browser-owner authentication failed");
     }
-    if (envelope.request.action === "inspect-tab") {
+    if (envelope.request.action !== "ping") {
       // The caller must obtain this binding from the active durable checkpoint
       // under the workflow lease. A valid MAC alone never authorizes inspection.
       const request = envelope.request;

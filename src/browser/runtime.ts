@@ -11,9 +11,19 @@ export interface BrowserRuntime {
   close(): Promise<void>;
 }
 
+const blockedServiceWorkerContexts = new WeakSet<BrowserContext>();
+
+/** Only contexts launched here with service workers disabled may back the owner proxy. */
+export function assertServiceWorkersBlocked(context: BrowserContext): void {
+  if (!blockedServiceWorkerContexts.has(context)) {
+    throw new Error("Owner browser must block service workers at launch");
+  }
+}
+
 export interface BrowserLaunchOptions {
   profileDirectory: string;
   headless?: boolean;
+  serviceWorkers?: "allow" | "block";
   launch?: typeof chromium.launchPersistentContext;
 }
 
@@ -146,6 +156,7 @@ export async function launchBrowser(options: BrowserLaunchOptions): Promise<Brow
     const launchOptions = {
       headless: options.headless ?? false,
       acceptDownloads: true,
+      serviceWorkers: options.serviceWorkers ?? "allow",
     };
     context = options.launch
       ? await options.launch(profileDirectory, launchOptions)
@@ -155,6 +166,7 @@ export async function launchBrowser(options: BrowserLaunchOptions): Promise<Brow
     throw error;
   }
   let closed = false;
+  if (options.serviceWorkers === "block") blockedServiceWorkerContexts.add(context);
   return {
     context,
     async close() {
