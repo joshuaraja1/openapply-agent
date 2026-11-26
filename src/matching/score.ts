@@ -78,11 +78,30 @@ export function scoreJob(
     salaryTarget,
     reviewFlags: ["Review candidate evidence or this role manually"],
   };
+  const arrangement = `${job.location ?? ""} ${job.workplaceType ?? ""}`.toLowerCase();
+  const arrangementTerms = `${job.descriptionText} ${arrangement}`
+    .replace(/\b(?:no\s+on[ -]?site\s+work\s+required|on[ -]?site\s+work\s+not\s+required)\b/gi, "");
+  const requiredArrangement = /\b(?:on[ -]?site|in[ -]?office|five days? (?:per week )?in (?:the )?office)\b/i.test(arrangementTerms)
+    ? "on-site" : /\bhybrid\b/i.test(arrangement) ? "hybrid" : /\bremote\b/i.test(arrangement) ? "remote" : null;
+  const accepted = [...preferences.workArrangements.preferred, ...preferences.workArrangements.accepted]
+    .map((value) => value.toLowerCase().replace(/on\s*site|onsite/, "on-site"));
+  const arrangementBlockers: string[] = [];
+  if (requiredArrangement && !accepted.includes(requiredArrangement)) {
+    arrangementBlockers.push(`${requiredArrangement} work arrangement is outside candidate preferences`);
+  }
+  const candidatePlace = /^\s*([^,]+),\s*([a-z]{2})\b/i.exec(candidate.identity.location);
+  const jobPlace = job.location && /^\s*([^,]+),\s*([a-z]{2})\b/i.exec(job.location);
+  if (requiredArrangement && requiredArrangement !== "remote" && job.location
+    && (!candidatePlace || !jobPlace || candidatePlace[1]!.trim().toLowerCase() !== jobPlace[1]!.trim().toLowerCase()
+      || candidatePlace[2]!.toLowerCase() !== jobPlace[2]!.toLowerCase())) {
+    arrangementBlockers.push("Onsite or hybrid location needs candidate confirmation");
+  }
   const hardRequirements = assessHardRequirements(job.descriptionText, candidate);
-  if (hardRequirements.blockers.length) return {
+  const blockers = [...arrangementBlockers, ...hardRequirements.blockers];
+  if (blockers.length) return {
     eligible: false,
     score: 0,
-    reasons: hardRequirements.blockers,
+    reasons: blockers,
     matchedSkills: matchedSkills.sort(),
     salaryTarget,
     reviewFlags: ["Review mandatory qualifications before applying"],
@@ -96,7 +115,6 @@ export function scoreJob(
     score += 15;
     reasons.push("Explicit early-career signal");
   }
-  const arrangement = `${job.location ?? ""} ${job.workplaceType ?? ""}`.toLowerCase();
   if (arrangement.includes("remote")) score += 15;
   else if (arrangement.includes("hybrid")) score += 8;
   else reviewFlags.push("Work arrangement needs review");
