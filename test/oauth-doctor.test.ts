@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { authenticationPolicySchema } from "../src/auth/schema.js";
 import { inspectMailboxConsent } from "../src/auth/oauth-doctor.js";
+import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
 const now = Date.parse("2026-11-24T16:01:00Z");
 const policy = authenticationPolicySchema.parse({ version: 1,
@@ -18,6 +24,27 @@ const token = { version: 1, provider: "gmail", accountEmail: "candidate@example.
   scopes: ["https://www.googleapis.com/auth/gmail.readonly"] };
 
 describe("explicit mailbox consent doctor", () => {
+  it("redacts malformed private policy contents from subprocess stdout and stderr", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-oauth-doctor-"));
+    try {
+      if (process.platform === "win32") await secureWindowsPrivatePath(root);
+      const path = join(root, "private-policy.json");
+      const sentinel = "private-email-sentinel@example.test";
+      await writeFile(path, `{"email":"${sentinel}","oauthClientId":"private-client-sentinel",`,
+        { mode: 0o600 });
+      if (process.platform === "win32") await secureWindowsPrivatePath(path);
+      const cli = fileURLToPath(new URL("../src/auth/oauth-doctor-cli.ts", import.meta.url));
+      const result = spawnSync(process.execPath, ["--import", "tsx", cli], {
+        cwd: process.cwd(), encoding: "utf8", timeout: 10_000,
+        env: { ...process.env, OPENAPPLY_AUTH_POLICY: path },
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout.trim()).toBe('{"mailboxConsent":"verification-failed"}');
+      expect(result.stderr).toBe("");
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/private-email-sentinel|private-client-sentinel/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it("distinguishes disabled and missing consent without contacting providers", async () => {
     const get = vi.fn(async () => undefined);
     const fetcher = vi.fn() as unknown as typeof fetch;
