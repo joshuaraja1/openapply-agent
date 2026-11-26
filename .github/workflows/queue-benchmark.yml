@@ -1,0 +1,37 @@
+name: Cross-platform queue benchmark
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Queue benchmark (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node --test scripts/assert-queue-benchmark.test.mjs
+      - name: Measure synthetic queue and recovery
+        shell: bash
+        run: node scripts/benchmark-queue.mjs > queue-benchmark.json
+      - run: node scripts/assert-queue-benchmark.mjs queue-benchmark.json "$RUNNER_OS"
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: queue-benchmark-${{ matrix.os }}
+          path: queue-benchmark.json
+          if-no-files-found: error
