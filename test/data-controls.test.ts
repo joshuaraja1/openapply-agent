@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { link, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -49,6 +49,13 @@ describe("private state export and deletion", () => {
       await expect(restoreLocalState(f.paths, f.root, true)).rejects.toThrow("separate");
       await expect(purgeLocalStateArchive(f.paths, f.root, true, true))
         .rejects.toThrow("separate");
+      const nestedUnderMissingDatabase = join(f.paths.databasePath, "archive");
+      await expect(quarantineLocalState(f.paths, f.key, f.output,
+        nestedUnderMissingDatabase, true)).rejects.toThrow("separate");
+      await expect(restoreLocalState(f.paths, nestedUnderMissingDatabase, true))
+        .rejects.toThrow("separate");
+      await expect(purgeLocalStateArchive(f.paths, nestedUnderMissingDatabase, true, true))
+        .rejects.toThrow("separate");
       expect(exported.records.applications).toHaveLength(2);
       expect(exported.records.applications).toContainEqual({ id: "job:deleted", version: 1 });
       expect(await readFile(f.output, "utf8")).not.toContain(f.key.toString("base64"));
@@ -63,13 +70,17 @@ describe("private state export and deletion", () => {
         .rejects.toThrow("unexpected files");
       expect(await readFile(unrelated, "utf8")).toBe("keep me");
       await rm(unrelated);
+      // Simulate a crash after a no-clobber hardlink but before removing its archive link.
+      await link(join(f.archive, "0-applications.enc.json"),
+        join(f.privateDir, "applications.enc.json"));
       await writeFile(f.paths.queuePath, JSON.stringify({ queue: [{ id: "new" }] }), { mode: 0o600 });
       if (process.platform === "win32") await secureWindowsPrivatePath(f.paths.queuePath);
       await expect(restoreLocalState(f.paths, f.archive, true))
         .rejects.toThrow("refusing to overwrite");
-      expect(await f.applications.read("job:1")).toBeUndefined();
+      expect((await f.applications.read("job:1"))?.state)
+        .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
       await rm(f.paths.queuePath);
-      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(3);
+      expect(await restoreLocalState(f.paths, f.archive, true)).toBe(2);
       expect((await f.applications.read("job:1"))?.state)
         .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
     } finally { await rm(f.root, { recursive: true, force: true }); }

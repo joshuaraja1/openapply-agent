@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, readdir, rename, rmdir, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { EncryptedApplicationStateStore } from "./encrypted-state.js";
@@ -80,7 +80,7 @@ function assertArchiveLocation(paths: LocalStatePaths, archivePath: string, expo
       && !isAbsolute(fromParent));
   };
   if (archive === resolve(paths.encryptedDirectory)
-    || knownFiles(paths).some((file) => contains(archive, file))
+    || knownFiles(paths).some((file) => contains(archive, file) || contains(file, archive))
     || (output && contains(archive, output))) {
     throw new Error("Archive must be separate from state and export paths");
   }
@@ -146,6 +146,7 @@ export async function restoreLocalState(paths: LocalStatePaths, archivePath: str
     throw new Error("Archive has unexpected files");
   }
   const toRestore: ArchiveEntry[] = [];
+  const toFinish: ArchiveEntry[] = [];
   // Preflight the entire archive before moving any file; a late conflict must
   // not leave a half-restored state directory.
   for (const entry of manifest.entries) {
@@ -159,15 +160,27 @@ export async function restoreLocalState(paths: LocalStatePaths, archivePath: str
       continue;
     }
     await assertPrivateFile(saved);
-    if (sha256(await readFile(saved)) !== entry.digest || await exists(entry.original)) {
+    if (sha256(await readFile(saved)) !== entry.digest) {
       throw new Error("Archive changed or newer state exists; refusing to overwrite");
+    }
+    if (await exists(entry.original)) {
+      await assertPrivateFile(entry.original);
+      const [source, destination] = await Promise.all([lstat(saved), lstat(entry.original)]);
+      if (!source.ino || source.ino !== destination.ino || source.dev !== destination.dev) {
+        throw new Error("Archive changed or newer state exists; refusing to overwrite");
+      }
+      toFinish.push(entry); // A prior restore linked the file before interruption.
+      continue;
     }
     toRestore.push(entry);
   }
   for (const entry of toRestore) {
     await ensurePrivateDirectory(dirname(entry.original));
-    await rename(join(archivePath, entry.saved), entry.original);
+    const saved = join(archivePath, entry.saved);
+    await link(saved, entry.original); // Atomic no-clobber even if an older writer ignores the lease.
+    await unlink(saved);
   }
+  for (const entry of toFinish) await unlink(join(archivePath, entry.saved));
   await unlink(join(archivePath, "manifest.json"));
   await rmdir(archivePath);
   return toRestore.length;
