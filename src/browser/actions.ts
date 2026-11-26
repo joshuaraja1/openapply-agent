@@ -173,14 +173,30 @@ export class AgentBrowser {
         if (ownership.length < 1 || new Set(ownership).size !== 1) {
           throw new Error("Combobox listbox ownership is unavailable or ambiguous");
         }
-        const listbox = page.locator(`[id=${JSON.stringify(ownership[0])}][role="listbox"]`);
         await handle.click();
-        await listbox.waitFor({ state: "visible", timeout: 3_000 });
-        if (await listbox.count() !== 1) throw new Error("Combobox listbox is ambiguous");
-        const option = listbox.getByRole("option", { name: value, exact: true });
-        await option.first().waitFor({ state: "visible", timeout: 3_000 });
-        if (await option.count() !== 1) throw new Error("Combobox option is ambiguous");
-        await option.click();
+        // IDs in separate shadow roots can be equal. Resolve the owned listbox
+        // from the combobox's own tree, never from a page-wide CSS locator.
+        let listbox: ElementHandle<Element> | null = null;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          const candidate = await handle.evaluateHandle((element, id) =>
+            (element.getRootNode() as Document | ShadowRoot).getElementById(id), ownership[0]!);
+          const node = candidate.asElement();
+          if (node && await node.getAttribute("role") === "listbox" && await node.isVisible()) {
+            listbox = node;
+            break;
+          }
+          await candidate.dispose();
+          await page.waitForTimeout(50);
+        }
+        if (!listbox) throw new Error("Combobox's owned listbox was not visible");
+        const matching: ElementHandle<Element>[] = [];
+        for (const option of await listbox.$$("[role=option]")) {
+          if (!await option.isVisible()) continue;
+          const name = (await option.getAttribute("aria-label")) ?? (await option.innerText()).trim();
+          if (name === value) matching.push(option);
+        }
+        if (matching.length !== 1) throw new Error("Combobox option is missing or ambiguous");
+        await matching[0]!.click();
         // Only the original control can establish success. A framework may
         // update it asynchronously or replace it; replacement is uncertain.
         let accepted = false;
