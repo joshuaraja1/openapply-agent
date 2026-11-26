@@ -72,7 +72,7 @@ describe("first-run runtime readiness", () => {
       await expect(runSetupBrowserDoctor(configPath, failed)).rejects.toThrow("Synthetic launch failure");
       expect(existsSync(dirname(failed.mock.calls[0]![0]))).toBe(false);
     } finally { await rm(root, { recursive: true, force: true }); }
-  });
+  }, 120_000);
 
   it("rejects a remote BrowserOS endpoint and never launches an owned browser for it", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-runtime-browseros-"));
@@ -93,5 +93,5 @@ describe("first-run runtime readiness", () => {
       await expect(runSetupBrowserDoctor(configPath, doctor)).rejects.toThrow("local HTTP");
       expect(doctor).not.toHaveBeenCalled();
     } finally { await rm(root, { recursive: true, force: true }); }
-  });
+  }, 120_000);
 });

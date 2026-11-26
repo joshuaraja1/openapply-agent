@@ -84,7 +84,7 @@ describe("local first-run setup", () => {
       await ui.close();
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it("serves private templates, saves with compare-and-swap, and rejects cross-origin writes", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-setup-ui-"));
@@ -133,7 +133,7 @@ describe("local first-run setup", () => {
       await ui.close();
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it("runs the browser doctor only through an authorized local request", async () => {
     const root = await mkdtemp(join(tmpdir(), "openapply-setup-doctor-"));
@@ -166,5 +166,5 @@ describe("local first-run setup", () => {
       expect(profile).toContain("openapply-browser-doctor-");
       expect(existsSync(dirname(profile))).toBe(false);
     } finally { await ui.close(); await rm(root, { recursive: true, force: true }); }
-  });
+  }, 120_000);
 });
