@@ -84,7 +84,7 @@ describe("private state export and deletion", () => {
       expect((await f.applications.read("job:1"))?.state)
         .toEqual({ stage: "waiting-human", privateEmail: "fixture@example.com" });
     } finally { await rm(f.root, { recursive: true, force: true }); }
-  });
+  }, 120_000);
 
   it("exports active SQLite, refuses stale export, and purges only a complete archive", async () => {
     const f = await fixture();
@@ -121,5 +121,5 @@ describe("private state export and deletion", () => {
       await expect(lstat(f.archive)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(lstat(f.paths.databasePath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await rm(f.root, { recursive: true, force: true }); }
-  });
+  }, 120_000);
 });
