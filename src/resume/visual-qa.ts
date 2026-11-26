@@ -116,16 +116,28 @@ export async function inspectPdfPageImage(
     const top = Math.max(0, Math.floor((viewport.height / scale - region.y - regionHeight - 1) * scale));
     const bottom = Math.min(height, Math.ceil((viewport.height / scale - region.y + 1) * scale));
     let readable = 0;
+    let readableRows = 0;
     for (let y = top; y < bottom; y += 1) {
+      let rowReadable = 0;
+      let run = 0;
+      let longestRun = 0;
       for (let x = left; x < right; x += 1) {
-        if (luminance(pixels, (y * width + x) * 4) <= maximumReadableLuminance) readable += 1;
+        if (luminance(pixels, (y * width + x) * 4) <= maximumReadableLuminance) {
+          rowReadable += 1;
+          run += 1;
+          longestRun = Math.max(longestRun, run);
+        } else run = 0;
       }
+      // A rule crossing a pale line of text is not evidence of readable glyphs.
+      if (longestRun >= Math.max(8, (right - left) * 0.45)) continue;
+      readable += rowReadable;
+      if (rowReadable > 0) readableRows += 1;
     }
     // Two isolated dark pixels (for example a nearby rule) do not establish
     // that the text itself rendered. Use a small area floor; uncertain output
     // goes to review rather than to an employer upload.
     const minimumReadable = Math.max(4, Math.ceil((right - left) * (bottom - top) * 0.03));
-    if (readable < minimumReadable) {
+    if (readable < minimumReadable || readableRows < 4) {
       throw new ResumeVisualReviewRequiredError("Résumé text region has insufficient contrast; human visual review required");
     }
   }

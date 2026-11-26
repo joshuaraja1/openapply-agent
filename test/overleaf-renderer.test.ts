@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BrowserToolClient, BrowserToolResult } from "../src/browser/client.js";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
 import { assertLocalBrowserEndpoint, assertOverleafProjectUrl, renderOverleafResume } from "../src/resume/overleaf.js";
+import { ResumeVisualReviewRequiredError } from "../src/resume/visual-qa.js";
 import type { ResumeSource } from "../src/resume/jake.js";
 import type { DiscoveredJob } from "../src/types.js";
 
@@ -72,6 +73,43 @@ describe("Overleaf renderer adapter", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it.skipIf(process.platform === "win32")("removes the Downloads copy after a visual review pause", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-overleaf-review-"));
+    try {
+      const downloads = join(root, "Downloads");
+      const downloaded = join(downloads, "fixture.pdf");
+      const bytes = Buffer.from("%PDF-1.4\n" + "x".repeat(120));
+      await mkdir(downloads);
+      await writeFile(downloaded, bytes);
+      let snapshots = 0;
+      let savedPath = "";
+      const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+        if (name === "name_session") return result("renamed");
+        if (name === "tabs" && args.action === "new") return result("opened page 7");
+        if (name === "snapshot") {
+          snapshots += 1;
+          return result(snapshots === 1 ? '- textbox "Source Editor editing" [ref=e3]'
+            : snapshots === 2 ? '- button "Recompile" [ref=e4]'
+              : '- link "Download PDF" [ref=e5]');
+        }
+        if (name === "act") return result("acted");
+        if (name === "wait") return result("matched (selector)");
+        if (name === "download") return result(`Downloaded fixture to: ${downloaded}`);
+        throw new Error(`Unexpected BrowserOS call ${name}`);
+      }) };
+      let caught: unknown;
+      try { await renderOverleafResume(client, projectUrl, job, candidate, source,
+        join(root, "artifacts"), { downloadsDirectory: downloads,
+          verify: async (path) => {
+            savedPath = path;
+            throw new ResumeVisualReviewRequiredError("human visual review required");
+          } }); } catch (error) { caught = error; }
+      expect(caught).toMatchObject({ artifactPath: savedPath });
+      expect(await readFile(savedPath)).toEqual(bytes);
+      await expect(readFile(downloaded)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it.skipIf(process.platform !== "win32")("blocks BrowserOS downloads without a Windows artifact ACL", async () => {

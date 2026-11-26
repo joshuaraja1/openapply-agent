@@ -72,6 +72,7 @@ export async function renderOverleafResume(
   requireSuccess(opened, "open project");
   const page = pageIdFromResult(opened);
   let completed = false;
+  let downloadToClean: { path: string; dev: number; ino: number } | undefined;
   try {
     const first = requireSuccess(await client.callTool({ name: "snapshot", arguments: {
       page, mode: "interactive", depth: 3,
@@ -101,14 +102,13 @@ export async function renderOverleafResume(
     } }), downloadsDirectory);
     const handle = await open(downloaded, constants.O_RDONLY | constants.O_NOFOLLOW);
     let bytes: Buffer;
-    let downloadedIdentity: { dev: number; ino: number };
     try {
       const file = await handle.stat();
       if (!file.isFile() || file.size < 100 || file.size > 5_000_000
         || file.mtimeMs + 2_000 < downloadStartedAt) {
         throw new Error("Overleaf downloaded an invalid or stale PDF file");
       }
-      downloadedIdentity = { dev: file.dev, ino: file.ino };
+      downloadToClean = { path: downloaded, dev: file.dev, ino: file.ino };
       bytes = await handle.readFile();
     } finally {
       await handle.close();
@@ -132,14 +132,16 @@ export async function renderOverleafResume(
       }
       throw error;
     }
-    const currentDownload = await lstat(downloaded);
-    if (currentDownload.isFile() && !currentDownload.isSymbolicLink()
-      && currentDownload.dev === downloadedIdentity.dev && currentDownload.ino === downloadedIdentity.ino) {
-      await unlink(downloaded);
-    }
     completed = true;
     return artifact;
   } finally {
+    if (downloadToClean) {
+      const current = await lstat(downloadToClean.path).catch(() => undefined);
+      if (current?.isFile() && !current.isSymbolicLink()
+        && current.dev === downloadToClean.dev && current.ino === downloadToClean.ino) {
+        await unlink(downloadToClean.path).catch(() => {});
+      }
+    }
     if (completed) await client.callTool({ name: "tabs", arguments: { action: "close", page } });
   }
 }
