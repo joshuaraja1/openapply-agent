@@ -2,10 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PDFDocument, PDFString, rgb } from "pdf-lib";
+import { PDFDocument, PDFString, StandardFonts, rgb } from "pdf-lib";
 import { describe, expect, it } from "vitest";
+import type { PDFPageProxy } from "pdfjs-dist";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
 import { assertNoTextOverlap, verifyResumePdf } from "../src/resume/verify-pdf.js";
+import { inspectPdfPageImage, ResumeVisualReviewRequiredError } from "../src/resume/visual-qa.js";
 import type { ResumeSource } from "../src/resume/jake.js";
 import type { DiscoveredJob } from "../src/types.js";
 
@@ -70,7 +72,90 @@ async function fixture(path: string, options: { title?: string; claim?: string; 
   await writeFile(path, await pdf.save());
 }
 
+type GoldenVariant = "readable" | "jake-like" | "tiny-body" | "cramped-heading" | "pale-body" | "whiteout-body"
+  | "half-whiteout-body" | "clipped-rule";
+
+/** Stable synthetic page layouts exercise the actual PDF parser and native rasterizer on every OS. */
+async function goldenFixture(path: string, variant: GoldenVariant): Promise<void> {
+  const pdf = await PDFDocument.create();
+  pdf.setSubject(`OpenApply:${renderToken}`);
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const page = pdf.addPage([612, 792]);
+  page.drawText("Test Candidate", { x: 40, y: 746, font: bold, size: 17 });
+  page.drawText("Backend Engineer", { x: 40, y: 720, font: regular, size: 11 });
+  page.drawText("Example Co", { x: 40, y: 702, font: regular, size: 10 });
+  page.drawText("EXPERIENCE", { x: 40, y: 675, font: bold, size: 12 });
+  page.drawText("Built Python services", { x: 40,
+    y: variant === "cramped-heading" ? 665 : 650, font: regular,
+    size: variant === "tiny-body" ? 6 : 10,
+    color: variant === "pale-body" ? rgb(0.79, 0.79, 0.79) : rgb(0, 0, 0) });
+  if (variant === "whiteout-body" || variant === "half-whiteout-body") {
+    page.drawRectangle({ x: variant === "whiteout-body" ? 39 : 88, y: 648,
+      width: variant === "whiteout-body" ? 170 : 130, height: 14,
+      color: rgb(1, 1, 1) });
+  }
+  if (variant === "clipped-rule") {
+    page.drawLine({ start: { x: 0, y: 625 }, end: { x: 120, y: 625 }, thickness: 2 });
+  }
+  if (variant === "jake-like") {
+    // Jake's résumé uses a left/right heading table, small bullet glyphs, and skill rows.
+    page.drawText("WEBONI", { x: 40, y: 620, font: bold, size: 11 });
+    page.drawText("Jan 2024 - Present", { x: 470, y: 620, font: regular, size: 9 });
+    page.drawText("Software Engineer", { x: 40, y: 603, font: regular, size: 9 });
+    page.drawText("•", { x: 61, y: 579, font: regular, size: 6 });
+    page.drawText("Built reliable Python services for engineering teams", {
+      x: 72, y: 579, font: regular, size: 9 });
+    page.drawText("Languages: Python, TypeScript, SQL", { x: 40, y: 548, font: regular, size: 9 });
+    page.drawText("Developer Tools: Docker, Git, AWS", { x: 40, y: 532, font: regular, size: 9 });
+  }
+  const annotation = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 740, 200, 764],
+    Border: [0, 0, 0], A: { Type: "Action", S: "URI", URI: PDFString.of("mailto:test@example.com") } });
+  page.node.addAnnot(pdf.context.register(annotation));
+  await writeFile(path, await pdf.save());
+}
+
 describe("job-bound PDF verification", () => {
+  it("turns an unexpected renderer failure into an actionable visual review", async () => {
+    const page = ({ getViewport: () => ({ width: 612, height: 792 }),
+      render: () => ({ promise: Promise.reject(new Error("native render failed")), cancel: () => {} })
+    }) as unknown as PDFPageProxy;
+    await expect(inspectPdfPageImage(page)).rejects.toBeInstanceOf(ResumeVisualReviewRequiredError);
+    await expect(inspectPdfPageImage(page)).rejects.toThrow("could not be inspected");
+  });
+  it("accepts the readable synthetic golden layout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-golden-"));
+    try {
+      const path = join(root, "readable.pdf");
+      await goldenFixture(path, "readable");
+      await expect(verifyResumePdf(path, job, candidate, source)).resolves.toMatchObject({ pages: 1 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("accepts a Jake-like layout with right dates, a bullet, and skill rows", async () => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-golden-"));
+    try {
+      const path = join(root, "jake-like.pdf");
+      await goldenFixture(path, "jake-like");
+      await expect(verifyResumePdf(path, job, candidate, source)).resolves.toMatchObject({ pages: 1 });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    ["tiny-body", /text is too small/],
+    ["cramped-heading", /section heading has insufficient spacing/],
+    ["pale-body", /insufficient contrast/],
+    ["whiteout-body", /insufficient contrast/],
+    ["half-whiteout-body", /obscured across its width/],
+    ["clipped-rule", /ink too close to the page edge/],
+  ] as const)("routes the %s golden defect to visual review", async (variant, reason) => {
+    const root = await mkdtemp(join(tmpdir(), "openapply-pdf-golden-"));
+    try {
+      const path = join(root, `${variant}.pdf`);
+      await goldenFixture(path, variant);
+      await expect(verifyResumePdf(path, job, candidate, source)).rejects.toThrow(reason);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("bounds the geometry scan before comparing a hostile number of text items", () => {
     const boxes = Array.from({ length: 1_501 }, (_, index) => ({
       x: 40, y: index * 12, width: 10, height: 10,

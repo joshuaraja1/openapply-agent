@@ -25,8 +25,9 @@ function normalize(value: string): string {
   return value.toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-interface TextBox { x: number; y: number; width: number; height: number }
+interface TextBox { x: number; y: number; width: number; height: number; text?: string }
 const maxTextItemsPerPage = 1_500;
+const uppercaseLetter = /\p{Lu}/u;
 
 export function assertNoTextOverlap(boxes: TextBox[]): void {
   if (boxes.length > maxTextItemsPerPage) {
@@ -34,12 +35,29 @@ export function assertNoTextOverlap(boxes: TextBox[]): void {
   }
   for (let first = 0; first < boxes.length; first += 1) {
     const a = boxes[first]!;
+    if ((a.text?.trim().length ?? 0) >= 4 && a.width > 15 && a.height < 7) {
+      throw new ResumeVisualReviewRequiredError("Résumé PDF text is too small; human visual review required");
+    }
     for (let second = first + 1; second < boxes.length; second += 1) {
       const b = boxes[second]!;
       const horizontal = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
       const vertical = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
       if (horizontal > 4 && vertical > Math.min(a.height, b.height) * 0.6) {
         throw new ResumeVisualReviewRequiredError("Résumé PDF contains overlapping text");
+      }
+      if (horizontal > 4) {
+        const heading = a.height >= b.height * 1.15 ? a : b.height >= a.height * 1.15 ? b : undefined;
+        const body = heading === a ? b : a;
+        const label = heading?.text?.trim();
+        if (heading && label && label.length >= 5 && uppercaseLetter.test(label)
+          && label === label.toUpperCase() && heading.y > body.y
+          && horizontal > Math.min(heading.width, body.width) * 0.25) {
+          const gap = heading.y - (body.y + body.height);
+          if (gap >= -2 && gap < 2) {
+            throw new ResumeVisualReviewRequiredError(
+              "Résumé PDF section heading has insufficient spacing; human visual review required");
+          }
+        }
       }
     }
   }
@@ -114,13 +132,14 @@ export async function verifyResumePdf(
           || y + height > viewport.height + 2) {
           throw new ResumeVisualReviewRequiredError("Résumé PDF contains text outside the page bounds");
         }
-        if (item.width > 0 && height > 0) {
-          const box = { x, y, width: item.width, height };
+        if (item.width > 0 && height <= 0) {
+          throw new ResumeVisualReviewRequiredError("Résumé PDF text has invalid geometry");
+        }
+        if (item.width > 0) {
+          const box = { x, y, width: item.width, height, text: item.str };
           boxes.push(box);
-          // Narrow separators and bullets are layout marks, not text lines.
-          // PDF.js can rasterize them outside their extracted boxes or within
-          // fewer than four rows. Inspect substantive text separately while
-          // retaining these marks in the overlap and page-wide ink checks.
+          // PDF.js may rasterize isolated separators and bullet glyphs outside
+          // their extracted boxes. Keep them in overlap and page-wide checks.
           if (!["|", "•"].includes(item.str.trim())) visualBoxes.push(box);
         }
       }

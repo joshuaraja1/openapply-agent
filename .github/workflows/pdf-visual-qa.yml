@@ -1,0 +1,49 @@
+name: PDF visual QA fixtures
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/pdf-visual-qa.yml
+      - src/resume/verify-pdf.ts
+      - src/resume/visual-qa.ts
+      - test/pdf-verification.test.ts
+      - scripts/benchmark-pdf-visual.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pdf-visual-qa.yml
+      - src/resume/verify-pdf.ts
+      - src/resume/visual-qa.ts
+      - test/pdf-verification.test.ts
+      - scripts/benchmark-pdf-visual.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fixtures:
+    name: PDF visual QA (${{ matrix.os }})
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run test/pdf-verification.test.ts
+      - run: node scripts/benchmark-pdf-visual.mjs > pdf-visual-benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-visual-benchmark-${{ matrix.os }}
+          path: pdf-visual-benchmark.json
+          if-no-files-found: error

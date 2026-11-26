@@ -1,4 +1,5 @@
 import { createCanvas } from "@napi-rs/canvas";
+import { performance } from "node:perf_hooks";
 import type { PDFPageProxy } from "pdfjs-dist";
 
 const scale = 1.5;
@@ -17,9 +18,10 @@ export interface PageImageInspection {
   readableInkPixels: number;
   inkRows: number;
   clearances: { left: number; right: number; top: number; bottom: number };
+  timingsMs: { render: number; inspect: number };
 }
 
-export interface TextImageRegion { x: number; y: number; width: number; height: number }
+export interface TextImageRegion { x: number; y: number; width: number; height: number; text?: string }
 
 /** A rendered résumé that needs a person to inspect it before any employer upload. */
 export class ResumeVisualReviewRequiredError extends Error {
@@ -33,7 +35,7 @@ function luminance(pixels: Uint8ClampedArray, offset: number): number {
 }
 
 /** Render a PDF page and reject blank, clipped, or visually uncertain output. */
-export async function inspectPdfPageImage(
+async function inspectPdfPageImageUnsafe(
   page: PDFPageProxy, textRegions: readonly TextImageRegion[] = [],
 ): Promise<PageImageInspection> {
   const viewport = page.getViewport({ scale });
@@ -47,19 +49,21 @@ export async function inspectPdfPageImage(
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
   // PDF.js declares DOM canvas types; its Node renderer accepts this native canvas.
+  const renderStarted = performance.now();
   const render = page.render({ canvas: canvas as unknown as HTMLCanvasElement,
     canvasContext: context as unknown as CanvasRenderingContext2D, viewport });
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([render.promise, new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
-        render.cancel();
+        try { render.cancel(); } catch { /* The review handoff still needs a settled rejection. */ }
         reject(new Error("Résumé page image rendering timed out"));
       }, 10_000);
     })]);
   } finally {
     clearTimeout(timeout);
   }
+  const inspectStarted = performance.now();
   const pixels = context.getImageData(0, 0, width, height).data;
   let inkPixels = 0;
   let readableInkPixels = 0;
@@ -102,6 +106,9 @@ export async function inspectPdfPageImage(
   // extractable text item against the actual page raster. This is a conservative
   // contrast sanity check, not proof that text reads well or is well laid out.
   for (const region of textRegions) {
+    // Jake's LaTeX bullet is an isolated tiny glyph; a three-row dot is not
+    // body text and cannot meet the body-line contrast floor on its own.
+    if (region.width <= 6 && /^[•◦▪‣∙]$/.test(region.text?.trim() ?? "")) continue;
     if (!Number.isFinite(region.x + region.y + region.width + region.height)
       || region.width <= 0 || region.height <= 0) {
       throw new ResumeVisualReviewRequiredError("Résumé text region needs human visual review");
@@ -117,21 +124,26 @@ export async function inspectPdfPageImage(
     const bottom = Math.min(height, Math.ceil((viewport.height / scale - region.y + 1) * scale));
     let readable = 0;
     let readableRows = 0;
+    const horizontalInk = [0, 0, 0, 0];
     for (let y = top; y < bottom; y += 1) {
       let rowReadable = 0;
       let run = 0;
       let longestRun = 0;
+      const rowInk = [0, 0, 0, 0];
       for (let x = left; x < right; x += 1) {
         if (luminance(pixels, (y * width + x) * 4) <= maximumReadableLuminance) {
           rowReadable += 1;
           run += 1;
           longestRun = Math.max(longestRun, run);
+          const quarter = Math.min(3, Math.floor((x - left) * 4 / (right - left)));
+          rowInk[quarter]! += 1;
         } else run = 0;
       }
       // A rule crossing a pale line of text is not evidence of readable glyphs.
       if (longestRun >= Math.max(8, (right - left) * 0.45)) continue;
       readable += rowReadable;
       if (rowReadable > 0) readableRows += 1;
+      for (let quarter = 0; quarter < 4; quarter += 1) horizontalInk[quarter]! += rowInk[quarter]!;
     }
     // Two isolated dark pixels (for example a nearby rule) do not establish
     // that the text itself rendered. Use a small area floor; uncertain output
@@ -140,6 +152,25 @@ export async function inspectPdfPageImage(
     if (readable < minimumReadable || readableRows < 4) {
       throw new ResumeVisualReviewRequiredError("Résumé text region has insufficient contrast; human visual review required");
     }
+    // A white overlay can erase half a line while the remaining glyphs satisfy
+    // the whole-region contrast floor. Long lines should leave ink across most
+    // of their measured width; sparse output is uncertain and needs review.
+    if ((region.text?.trim().length ?? 0) >= 12 && right - left >= 90
+      && horizontalInk.filter((count) => count >= 8).length < 3) {
+      throw new ResumeVisualReviewRequiredError("Résumé text region is obscured across its width; human visual review required");
+    }
   }
-  return { width, height, inkPixels, readableInkPixels, inkRows, clearances };
+  return { width, height, inkPixels, readableInkPixels, inkRows, clearances,
+    timingsMs: { render: inspectStarted - renderStarted, inspect: performance.now() - inspectStarted } };
+}
+
+export async function inspectPdfPageImage(
+  page: PDFPageProxy, textRegions: readonly TextImageRegion[] = [],
+): Promise<PageImageInspection> {
+  try { return await inspectPdfPageImageUnsafe(page, textRegions); }
+  catch (error) {
+    if (error instanceof ResumeVisualReviewRequiredError) throw error;
+    throw new ResumeVisualReviewRequiredError(
+      "Résumé page image could not be inspected; human visual review required");
+  }
 }
