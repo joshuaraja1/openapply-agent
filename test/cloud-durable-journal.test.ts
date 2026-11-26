@@ -118,6 +118,18 @@ describe("durable cloud application journal", () => {
     expect(await journal.renewLease(candidateId, next!)).toBe(true);
   });
 
+  it("uses one candidate partition across UUID case for lease and submit intent", async () => {
+    const db = new LedgerMemory();
+    const journal = db.journal();
+    const upper = candidateId.toUpperCase();
+    const first = (await journal.acquireLease(candidateId, firstRun))!;
+    expect(await journal.acquireLease(upper, secondRun)).toBeNull();
+    expect(await journal.beginSubmission(upper, first, job)).toBe(true);
+    expect(await journal.beginSubmission(candidateId, first, job)).toBe(false);
+    expect(await journal.submissionStatus(upper, job)).toBe("needs_reconciliation");
+    expect(db.items.has(db.key(`CANDIDATE#${upper}`, officialJobKey(job)))).toBe(false);
+  });
+
   it("keeps intent after a crash, including a new run ID, and never grants another click", async () => {
     const db = new LedgerMemory();
     const journal = db.journal();
@@ -156,6 +168,14 @@ describe("durable cloud application journal", () => {
     db.now += 121;
     expect(await journal.acquireLease(candidateId, secondRun)).toBeNull();
     expect(await journal.beginSubmission(candidateId, token, { ...job, requisitionId: "other" })).toBe(false);
+  });
+
+  it("blocks a queued uppercase candidate ID after a lowercase deletion tombstone", async () => {
+    const db = new LedgerMemory();
+    const journal = db.journal();
+    await journal.tombstoneCandidate(candidateId);
+    expect(await journal.acquireLease(candidateId.toUpperCase(), secondRun)).toBeNull();
+    expect(db.items.has(db.key(`CANDIDATE#${candidateId.toUpperCase()}`, "DELETED"))).toBe(false);
   });
 
   it("does not disguise a DynamoDB transaction failure as a duplicate", async () => {

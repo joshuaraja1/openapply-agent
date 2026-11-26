@@ -46,7 +46,7 @@ export class DurableApplicationJournal {
   }
 
   private candidateKey(candidateId: string): string {
-    return `CANDIDATE#${uuid.parse(candidateId)}`;
+    return `CANDIDATE#${uuid.parse(candidateId).toLowerCase()}`;
   }
 
   async acquireLease(candidateId: string, runId: string, leaseSeconds = 120): Promise<string | null> {
