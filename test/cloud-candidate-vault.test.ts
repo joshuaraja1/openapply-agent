@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { DeleteObjectsCommand, GetObjectCommand, ListObjectVersionsCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectsCommand, GetObjectCommand, ListObjectVersionsCommand, PutObjectCommand, S3Client,
+} from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
 import {
   artifactObjectKey, CandidateVault, type ArtifactStorePort, type DataKeyPort,
@@ -35,7 +37,11 @@ class FakeKeys implements DataKeyPort {
 
 class FakeObjects implements ArtifactStorePort {
   readonly versions = new Map<string, Uint8Array[]>();
-  async put(key: string, body: Uint8Array) {
+  async putCreateOnly(key: string, body: Uint8Array) {
+    if (this.versions.has(key)) throw new Error("Artifact ID already exists");
+    this.injectVersion(key, body);
+  }
+  injectVersion(key: string, body: Uint8Array) {
     this.versions.set(key, [...(this.versions.get(key) ?? []), Buffer.from(body)]);
   }
   async get(key: string) {
@@ -64,6 +70,20 @@ describe("cloud candidate vault", () => {
     plaintext.fill(0);
   });
 
+  it("keeps the first artifact immutable when an upload is retried", async () => {
+    const keys = new FakeKeys();
+    const objects = new FakeObjects();
+    const vault = new CandidateVault(keys, objects);
+    await vault.put(alice, resume, Buffer.from("original resume"));
+    await expect(vault.put(alice, resume, Buffer.from("different resume")))
+      .rejects.toThrow("already exists");
+    expect(keys.generatedKey).toEqual(Buffer.alloc(32));
+    expect(objects.versions.get(artifactObjectKey(alice, resume))).toHaveLength(1);
+    const saved = await vault.read(alice, resume);
+    expect(saved.toString()).toBe("original resume");
+    saved.fill(0);
+  });
+
   it("rejects ciphertext tampering and a copied object under another candidate", async () => {
     const keys = new FakeKeys();
     const objects = new FakeObjects();
@@ -73,15 +93,15 @@ describe("cloud candidate vault", () => {
     const corrupted = Buffer.from(aliceBody.ciphertext, "base64");
     corrupted[0] = corrupted[0]! ^ 1;
     aliceBody.ciphertext = corrupted.toString("base64");
-    await objects.put(artifactObjectKey(alice, resume), Buffer.from(JSON.stringify(aliceBody)));
+    objects.injectVersion(artifactObjectKey(alice, resume), Buffer.from(JSON.stringify(aliceBody)));
     await expect(vault.read(alice, resume)).rejects.toThrow();
 
-    await objects.put(artifactObjectKey(bob, resume), Buffer.from(JSON.stringify(aliceBody)));
+    objects.injectVersion(artifactObjectKey(bob, resume), Buffer.from(JSON.stringify(aliceBody)));
     const before = keys.unwrapCalls;
     await expect(vault.read(bob, resume)).rejects.toThrow("identity");
     expect(keys.unwrapCalls).toBe(before);
     aliceBody.candidateId = bob;
-    await objects.put(artifactObjectKey(bob, resume), Buffer.from(JSON.stringify(aliceBody)));
+    objects.injectVersion(artifactObjectKey(bob, resume), Buffer.from(JSON.stringify(aliceBody)));
     await expect(vault.read(bob, resume)).rejects.toThrow("context mismatch");
   });
 
@@ -107,7 +127,9 @@ describe("cloud candidate vault", () => {
     const objects = new FakeObjects();
     const vault = new CandidateVault(new FakeKeys(), objects);
     await vault.put(alice, resume, Buffer.from("v1"));
-    await vault.put(alice, resume, Buffer.from("v2"));
+    // A legacy version can exist even though new vault writes are create-only.
+    objects.injectVersion(artifactObjectKey(alice, resume),
+      await objects.get(artifactObjectKey(alice, resume)));
     await vault.put(alice, profile, Buffer.from("profile"));
     await vault.put(bob, resume, Buffer.from("bob"));
     await vault.deleteArtifact(alice, resume);
@@ -118,6 +140,17 @@ describe("cloud candidate vault", () => {
 });
 
 describe("S3 version purge", () => {
+  it("uses an atomic conditional create for every new artifact", async () => {
+    const send = vi.fn(async (command: unknown) => {
+      if (!(command instanceof PutObjectCommand)) throw new Error("Unexpected AWS command");
+      expect(command.input.IfNoneMatch).toBe("*");
+      return {};
+    });
+    const store = new S3ArtifactStore({ send } as unknown as S3Client, "private-bucket");
+    await store.putCreateOnly(artifactObjectKey(alice, resume), Buffer.from("encrypted"));
+    expect(send).toHaveBeenCalledOnce();
+  });
+
   it("reads a bounded encrypted object stream", async () => {
     const send = vi.fn(async (command: unknown) => {
       if (!(command instanceof GetObjectCommand)) throw new Error("Unexpected AWS command");
