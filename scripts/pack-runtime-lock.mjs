@@ -11,8 +11,8 @@ export function validateRuntimeLock(pkg, lock) {
     throw new Error("Runtime lock does not match the package manifest");
   }
   for (const [name, entry] of Object.entries(lock.packages)) {
-    if (!name || !entry.resolved) continue;
-    if (!entry.resolved.startsWith("https://registry.npmjs.org/")
+    if (!name) continue;
+    if (!entry.resolved?.startsWith("https://registry.npmjs.org/")
       || !/^sha512-[A-Za-z0-9+/=]+$/.test(entry.integrity ?? "")) {
       throw new Error(`Runtime dependency has no registry SHA-512 integrity: ${name}`);
     }

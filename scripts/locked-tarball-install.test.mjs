@@ -50,6 +50,14 @@ test("packed CLI installs only from its integrity-checked lock", () => {
       /EINTEGRITY|integrity checksum failed/);
     assert.equal(existsSync(join(root, "bad")), false);
 
+    delete lock.packages["node_modules/zod"].resolved;
+    delete lock.packages["node_modules/zod"].integrity;
+    writeFileSync(tamperedLockPath, JSON.stringify(lock));
+    command("tar", ["-czf", join(root, "unpinned.tgz"), "-C", root, "package"]);
+    assert.throws(() => installLockedTarball(join(root, "unpinned.tgz"), join(root, "unpinned")),
+      /no registry SHA-512 integrity/);
+    assert.equal(existsSync(join(root, "unpinned")), false);
+
     delete lock.packages["node_modules/zod"];
     writeFileSync(tamperedLockPath, JSON.stringify(lock));
     command("tar", ["-czf", join(root, "missing-dependency.tgz"), "-C", root, "package"]);
