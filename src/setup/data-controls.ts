@@ -8,8 +8,11 @@ import { exportLocalState, purgeLocalStateArchive, quarantineLocalState,
 import { createNativeSecretStore, stateKeyReference } from "../storage/native-secret-store.js";
 import { ensurePrivateDirectory, readPrivateFile } from "../storage/private-path.js";
 import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
+import { generatedArtifactStatus, runGeneratedArtifactControl,
+  type GeneratedArtifactAction } from "./generated-artifacts.js";
 
-export type StateControlAction = "export" | "quarantine" | "restore" | "purge";
+export type StateControlAction = "export" | "quarantine" | "restore" | "purge"
+  | GeneratedArtifactAction;
 export interface StateControlOptions {
   queueConfigPath: string;
   stateRoot?: string;
@@ -46,7 +49,8 @@ async function withLease<T>(root: string, operation: () => Promise<T>): Promise<
 export async function stateControlStatus(options: StateControlOptions) {
   const root = options.stateRoot ?? defaultRoot();
   return { exportReady: await exists(join(root, "state-export.json")),
-    archiveReady: await exists(join(root, "removed-state")) };
+    archiveReady: await exists(join(root, "removed-state")),
+    ...await generatedArtifactStatus(root) };
 }
 
 export async function runStateControl(action: StateControlAction, options: StateControlOptions) {
@@ -55,6 +59,12 @@ export async function runStateControl(action: StateControlAction, options: State
   const archivePath = join(root, "removed-state");
   return withLease(root, async () => {
     const config = queueRunnerConfigSchema.parse(JSON.parse(await readPrivateFile(options.queueConfigPath)));
+    if (action.endsWith("-artifacts")) {
+      if (config.outputDirectory !== join(root, "artifacts")) {
+        throw new Error("Artifact controls require the default private output directory");
+      }
+      return runGeneratedArtifactControl(action as GeneratedArtifactAction, root);
+    }
     const paths = { encryptedDirectory: root, databasePath: join(root, "state.sqlite"),
       discoveryStatePath: config.discoveryStatePath, queuePath: config.queuePath };
     if ((action === "restore" || action === "purge") && !await exists(archivePath)) {

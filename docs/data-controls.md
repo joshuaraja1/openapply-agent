@@ -1,6 +1,6 @@
-# Local state export and deletion
+# Local state and generated artifact controls
 
-The token-protected local setup screen also exposes these four actions under
+The token-protected local setup screen exposes four state actions under
 **Local state controls** when `OPENAPPLY_QUEUE_CONFIG` is set. It uses fixed
 private paths at `~/.openapply-agent/state-export.json` and
 `~/.openapply-agent/removed-state`; the browser cannot choose a filesystem
@@ -9,8 +9,23 @@ when the contents match; it refuses to replace a different backup. Quarantine
 requires a current export. Stop all OpenApply workers first, including older
 versions that may not use the workflow lease. The screen shows whether the
 export and archive exist without returning their paths or contents over HTTP.
-Purging the archive leaves the JSON export, onboarding files, browser profile,
-artifacts, OS secrets, and account grants in place.
+Purging the state archive leaves the JSON export, onboarding files, browser
+profile, artifacts, OS secrets, and account grants in place.
+
+The same screen has **separate generated-artifact actions** for the default
+`~/.openapply-agent/artifacts` directory. They recognize only OpenApply's
+generated résumé PDF and application-package filenames. Export copies these
+files and a hash manifest into a private `artifact-export` directory. After
+checking that the originals still match the export, quarantine atomically moves
+the original directory to `removed-artifacts`. Restore refuses to overwrite a
+newer artifact directory. Purge permanently removes both the archive and its
+local export, and can finish after an interrupted file purge. Unknown entries,
+symlinks, hard links, unsafe permissions, oversized files, or changed bytes stop
+the operation. The export contains **private résumé and application data**;
+move any backup you wish to retain before purging. A configured custom output
+directory is deliberately excluded and must be inventoried manually. A leftover
+temporary browser download directory after a crash also blocks artifact export
+until it is inspected and cleared separately.
 
 `state:control` handles the application, quota, retry, posting-claim, and email-code ledgers, plus the configured discovery state and pending queue. It works with the active encrypted SQLite store or the legacy encrypted files. The export is **readable JSON containing private application data**. It does not contain the OS encryption key, saved browser cookies, account passwords, OAuth tokens, onboarding files, generated PDFs, or other files outside these state paths. Keep the export private; deleting application state does not delete those other data stores or revoke connected accounts.
 
@@ -37,6 +52,6 @@ After checking the export and confirming that rollback is no longer needed, perm
 npm run state:control -- purge --confirm-inactive --confirm-permanent-delete
 ```
 
-Purge is irreversible. The exported JSON remains at the chosen path until the user deletes it. This command is a state-only control; full product deletion must also cover browser profiles, local input and output files, OS-stored credentials, and any connected account grants. No operation prints candidate data or secret values to stdout.
+Purge is irreversible. The exported JSON remains at the chosen path until the user deletes it. The CLI command above is a state-only control. The setup screen's artifact controls additionally cover the default generated output directory, but full product deletion still needs user-supplied source files, custom output directories, browser profiles, OS-stored credentials, and connected account grants handled explicitly. No operation prints candidate data or secret values to stdout.
 An interrupted purge can be retried with the same explicit confirmation; it
 removes only remaining files listed in the validated archive manifest.
