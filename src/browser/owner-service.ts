@@ -54,8 +54,8 @@ export async function startOwnerInspectionService(input: {
     let received = Buffer.alloc(0);
     connection.setTimeout(10_000, () => connection.destroy());
     connection.on("data", (chunk: Buffer) => {
+      if (received.length + chunk.length > MAX_OWNER_MESSAGE_BYTES) { connection.destroy(); return; }
       received = Buffer.concat([received, chunk]);
-      if (received.length > MAX_OWNER_MESSAGE_BYTES) { connection.destroy(); return; }
       const newline = received.indexOf(10);
       if (newline < 0) return;
       connection.pause();
@@ -95,9 +95,16 @@ export async function startOwnerInspectionService(input: {
     server.once("error", reject);
     server.listen(input.socketPath, () => { server.off("error", reject); resolve(); });
   });
-  const socket = await lstat(input.socketPath);
-  if (!socket.isSocket() || socket.isSymbolicLink()) { server.close(); throw new Error("Unsafe browser-owner socket"); }
-  await chmod(input.socketPath, 0o600);
+  let socket;
+  try {
+    socket = await lstat(input.socketPath);
+    if (!socket.isSocket() || socket.isSymbolicLink()) throw new Error("Unsafe browser-owner socket");
+    await chmod(input.socketPath, 0o600);
+  } catch (error) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await unlink(input.socketPath).catch(() => {});
+    throw error;
+  }
   return {
     register(binding, inspect) {
       signOwnerRequest({ version: 1, action: "inspect-tab", requestId: randomUUID(),
