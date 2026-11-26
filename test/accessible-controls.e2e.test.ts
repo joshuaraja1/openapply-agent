@@ -35,7 +35,9 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
   });
   for (const option of list.querySelectorAll('[role=option]')) {
     option.addEventListener('click', () => {
-      combo.textContent = option.textContent;
+      window.optionClicks = (window.optionClicks || 0) + 1;
+      if (window.asyncCombo) setTimeout(() => { combo.textContent = option.textContent; }, 100);
+      else combo.textContent = option.textContent;
       combo.setAttribute('aria-expanded', 'false');
       list.hidden = true;
       if (window.rerenderCombo) combo.replaceWith(combo.cloneNode(true));
@@ -49,7 +51,7 @@ const html = `<!doctype html><title>Apply</title><x-form></x-form>
 
 describe("owned browser accessible controls", () => {
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
-    "verifies selection after the form replaces its combobox", async () => {
+    "reports an uncertain selection if a form replaces its combobox", async () => {
       const directory = await mkdtemp(join(tmpdir(), "openapply-controls-rerender-"));
       const context = await chromium.launchPersistentContext(join(directory, "profile"), { headless: true });
       try {
@@ -58,10 +60,40 @@ describe("owned browser accessible controls", () => {
         const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
         const first = await browser.navigate("https://jobs.example.com/apply");
         const page = context.pages().find((candidate) => candidate.url() === "https://jobs.example.com/apply")!;
-        await page.evaluate(() => { (window as Window & { rerenderCombo?: boolean }).rerenderCombo = true; });
+        await page.evaluate(() => {
+          (window as Window & { rerenderCombo?: boolean }).rerenderCombo = true;
+          const root = document.querySelector('x-form')!.shadowRoot!;
+          const unrelated = document.createElement('button');
+          unrelated.setAttribute('role', 'combobox');
+          unrelated.setAttribute('aria-controls', 'locations');
+          unrelated.textContent = 'Remote';
+          root.append(unrelated);
+        });
+        const combo = first.controls.find((control) => control.name === "Work location")!;
+        await expect(browser.act(combo.ref, "select", "Remote"))
+          .rejects.toThrow("Selection outcome uncertain; take a new snapshot");
+        expect(await page.evaluate(() => (window as Window & { optionClicks?: number }).optionClicks)).toBe(1);
+      } finally {
+        await context.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }, 30_000,
+  );
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "waits for an asynchronous value update without clicking twice", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "openapply-controls-async-"));
+      const context = await chromium.launchPersistentContext(join(directory, "profile"), { headless: true });
+      try {
+        await context.route("https://jobs.example.com/**", (route) =>
+          route.fulfill({ contentType: "text/html", body: html }));
+        const browser = new AgentBrowser(context, new Set(["jobs.example.com"]));
+        const first = await browser.navigate("https://jobs.example.com/apply");
+        const page = context.pages().find((candidate) => candidate.url() === "https://jobs.example.com/apply")!;
+        await page.evaluate(() => { (window as Window & { asyncCombo?: boolean }).asyncCombo = true; });
         const combo = first.controls.find((control) => control.name === "Work location")!;
         const selected = await browser.act(combo.ref, "select", "Remote");
         expect(selected.controls.find((control) => control.name === "Work location")?.value).toBe("Remote");
+        expect(await page.evaluate(() => (window as Window & { optionClicks?: number }).optionClicks)).toBe(1);
       } finally {
         await context.close();
         await rm(directory, { recursive: true, force: true });

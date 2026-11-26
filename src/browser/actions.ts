@@ -181,17 +181,21 @@ export class AgentBrowser {
         await option.first().waitFor({ state: "visible", timeout: 3_000 });
         if (await option.count() !== 1) throw new Error("Combobox option is ambiguous");
         await option.click();
-        // Frameworks may replace the combobox on selection. Reacquire only
-        // the control that owns this listbox; a missing/duplicate owner is
-        // uncertain and must not trigger a second click.
-        const owner = page.locator(`[role="combobox"][aria-controls=${JSON.stringify(ownership[0])}], `
-          + `[role="combobox"][aria-owns=${JSON.stringify(ownership[0])}]`);
-        if (await owner.count() !== 1) throw new Error("Selection outcome uncertain; take a new snapshot");
-        const selected = await owner.evaluate((element) =>
-          ["INPUT", "TEXTAREA"].includes(element.tagName)
-            ? (element as HTMLInputElement).value
-            : element.getAttribute("aria-valuetext") ?? element.textContent?.trim() ?? "");
-        if (selected.trim() !== value) throw new Error("Selected option was not accepted");
+        // Only the original control can establish success. A framework may
+        // update it asynchronously or replace it; replacement is uncertain.
+        let accepted = false;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const selected = await handle.evaluate((element) => {
+            if (!element.isConnected) return null;
+            return ["INPUT", "TEXTAREA"].includes(element.tagName)
+              ? (element as HTMLInputElement).value
+              : element.getAttribute("aria-valuetext") ?? element.textContent?.trim() ?? "";
+          }).catch(() => null);
+          if (selected === null) break;
+          if (selected.trim() === value) { accepted = true; break; }
+          await page.waitForTimeout(50);
+        }
+        if (!accepted) throw new Error("Selection outcome uncertain; take a new snapshot");
       } else throw new Error("Selected control is not a combobox");
     }
     else if (action === "upload" && value !== undefined) {
