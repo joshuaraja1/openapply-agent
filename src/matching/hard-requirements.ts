@@ -27,9 +27,11 @@ export function assessHardRequirements(description: string, candidate: Candidate
       requiredSection = false;
       continue;
     }
+    const lineMandatory = /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(line);
     for (const part of line.split(/[.!?;](?=\s|$)/).map((item) => item.trim()).filter(Boolean)) {
-      const mandatory = requiredSection || /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(part);
+      const mandatory = requiredSection || lineMandatory;
       if (!mandatory) continue;
+      if (/^(?:[A-Za-z0-9+#./-]+|Bachelor's degree)\s+(?:preferred|optional|nice to have)$/i.test(part)) continue;
       // A compound statement cannot be proven from one matching skill or
       // free-text claim. Check before optional-language handling so a comma
       // cannot hide a second mandatory condition.
