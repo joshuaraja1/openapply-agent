@@ -129,7 +129,8 @@ describe("controlled queue to handoff staging flow", () => {
         if (actions.some((action) => action.name === "Project preference")) approved = true;
         return currentUrl.endsWith("step-2") ? secondPage() : firstPage;
       }, submit: submitClick };
-    const run = async (resumeApproved = false) => runApplicationPackage(pkg, workflow, "/tmp/profile", {
+    const run = async (resumeApproved = false, activeWorkflow = workflow) =>
+      runApplicationPackage(pkg, activeWorkflow, "/tmp/profile", {
       validateOfficial: async () => true,
       browserFactory: async (_hosts, artifacts) => {
         expect(artifacts.get(resumePdfPath)).toMatch(/^[a-f0-9]{64}$/);
@@ -166,10 +167,11 @@ describe("controlled queue to handoff staging flow", () => {
     expect(await runApplicationQueue([job], quota, retries, () => "2026-11-25", 1,
       async () => { throw new Error("quota should prevent rerun"); }))
       .toEqual([{ jobId: job.id, status: "duplicate" }]);
-    const resumed = await run(true);
+    const resumed = await run(true, restartedWorkflow);
     expect(resumed.checkpoint.stage).toBe("submitted");
     expect(resumed.checkpoint.confirmation).toBe("Application 123456 received");
+    expect((await restartedWorkflow.current(job.id))?.stage).toBe("submitted");
     expect(submitClick).toHaveBeenCalledOnce();
-    await expect(run()).rejects.toThrow("Application is submitted");
+    await expect(run(false, restartedWorkflow)).rejects.toThrow("Application is submitted");
   }, process.platform === "win32" ? 60_000 : 5_000);
 });
