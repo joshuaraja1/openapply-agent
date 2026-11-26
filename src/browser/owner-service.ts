@@ -8,6 +8,8 @@ import { MAX_OWNER_MESSAGE_BYTES, OwnerRequestVerifier, signOwnerRequest,
   type OwnerClaimBinding, type OwnerRequest } from "./owner-protocol.js";
 import { AgentBrowser, type BrowserSnapshot } from "./actions.js";
 import { assertServiceWorkersBlocked, type BrowserRuntime } from "./runtime.js";
+import { OwnerSubmitJournal, type OwnerSubmitIntent } from "./owner-submit-journal.js";
+import type { Page } from "playwright";
 
 const MAX_OWNER_REPLY_BYTES = 65_536;
 
@@ -23,17 +25,49 @@ const browserResult = z.object({ tabId: z.uuid(), generation: z.uuid(),
   snapshot: z.object({ url: z.url(), title: z.string().max(512),
     visibleText: z.string().max(30_000).optional(),
     controls: z.array(controlResult).max(100) }).strict() }).strict();
+const submitResult = z.object({ tabId: z.uuid(), generation: z.uuid(),
+  outcome: z.enum(["receipt", "uncertain"]), receiptUrl: z.url().optional() }).strict();
 const ownerReply = z.discriminatedUnion("status", [
   z.object({ status: z.literal("ok"), requestId: z.uuid(),
-    result: z.union([z.literal("pong"), inspectResult, browserResult]) }).strict(),
+    result: z.union([z.literal("pong"), inspectResult, browserResult, submitResult]) }).strict(),
   z.object({ status: z.literal("error"), requestId: z.uuid(),
     error: z.string().max(200) }).strict(),
 ]);
 type OwnerReply = z.infer<typeof ownerReply>;
 type RegisteredTab = { binding: OwnerClaimBinding; inspect: () => Promise<{
   url: string; title: string; visibleText: string;
-}>; browser?: Pick<AgentBrowser, "navigate" | "snapshot">;
-  navigationAttempted?: boolean; initialDocumentRequested?: boolean };
+}>; browser?: AgentBrowser;
+  receipt?: { company: string; role: string; phrase: string; postUrl: string };
+  postAllowed?: boolean; postCount?: number; submitting?: boolean;
+  navigationAttempted?: boolean };
+
+function sameBinding(left: OwnerClaimBinding, right: OwnerClaimBinding): boolean {
+  return Object.keys(left).every((key) => left[key as keyof OwnerClaimBinding]
+    === right[key as keyof OwnerClaimBinding]);
+}
+
+function exactToken(text: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9_-])${escaped}($|[^a-z0-9_-])`, "i").test(text);
+}
+
+async function ownerReceipt(page: Page, tab: RegisteredTab, intent: OwnerSubmitIntent): Promise<string | undefined> {
+  const receipt = tab.receipt;
+  if (!receipt || page.isClosed() || tab.browser?.ownedPage() !== page) return undefined;
+  const url = page.url();
+  if (url === intent.preSubmitUrl || hasUnboundReceiptUrl(tab.binding.jobId, tab.binding.officialUrl, url)) {
+    return undefined;
+  }
+  const reference = tab.binding.jobId.split(":").at(-1)!.toLowerCase();
+  const texts = await page.locator('[role="status"]:visible, [role="alert"]:visible, [data-testid="application-confirmation"]:visible')
+    .allInnerTexts().catch(() => []);
+  const expectedLine = `${receipt.company} — ${receipt.role}`.toLowerCase();
+  const matches = texts.filter((text) => text.length <= 2000
+    && text.toLowerCase().includes(receipt.phrase.toLowerCase())
+    && text.toLowerCase().split("\n").some((line) => line.trim().toLowerCase() === expectedLine)
+    && exactToken(text, reference));
+  return matches.length === 1 && page.url() === url ? url : undefined;
+}
 
 function replyMac(reply: OwnerReply, secret: Buffer): string {
   return createHmac("sha256", secret).update(JSON.stringify(reply)).digest("hex");
@@ -78,12 +112,41 @@ async function runBrowserAction(tab: RegisteredTab,
   return snapshot;
 }
 
-/** Experimental owner socket. No production runner wiring or final-submit operation. */
+async function runSubmitAction(tab: RegisteredTab, journal: OwnerSubmitJournal | undefined,
+  request: Extract<OwnerRequest, { action: "submit-once" | "reconcile-submit" }>,
+  generation: string,
+): Promise<z.infer<typeof submitResult>> {
+  if (!journal || !tab.browser || !tab.receipt) throw new Error("Owner submit staging is unavailable");
+  if (tab.submitting) throw new Error("Owner submit operation is already in progress");
+  tab.submitting = true;
+  try {
+    let intent = await journal.read(tab.binding.claimId);
+    if (intent && !sameBinding(intent.binding, tab.binding)) {
+      throw new Error("Submit journal belongs to another claim binding");
+    }
+    if (!intent && request.action === "submit-once") {
+      const prepared = await tab.browser.prepareFinalClick(request.ref);
+      const currentUrl = prepared.page.url();
+      assertBoundSnapshot(tab.binding, { url: currentUrl, title: "", controls: [] });
+      intent = await journal.claim(tab.binding, currentUrl);
+      // Only the owner that just persisted this intent may dispatch a click.
+      tab.postAllowed = true;
+      try { await prepared.click(); } catch { /* An uncertain click is never retried. */ }
+      finally { tab.postAllowed = false; }
+    }
+    if (!intent) throw new Error("No final-click intent exists for this claim");
+    const page = tab.browser.ownedPage();
+    const receiptUrl = await ownerReceipt(page, tab, intent);
+    return { tabId: request.tabId, generation,
+      outcome: receiptUrl ? "receipt" : "uncertain", ...(receiptUrl ? { receiptUrl } : {}) };
+  } finally { tab.submitting = false; }
+}
+
+/** Experimental owner socket. No production runner uses the staged submit operation. */
 export async function startOwnerInspectionService(input: {
-  socketPath: string; secret: Buffer; generation: string;
+  socketPath: string; secret: Buffer; generation: string; journalDirectory?: string;
 }): Promise<{ register(binding: OwnerClaimBinding, inspect: RegisteredTab["inspect"]): void;
-  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime,
-    readOnlyGetUrls?: readonly string[]): Promise<void>;
+  registerBrowser(binding: OwnerClaimBinding, runtime: BrowserRuntime, receipt?: RegisteredTab["receipt"]): Promise<void>;
   close(): Promise<void> }> {
   if (process.platform === "win32") {
     throw new Error("Windows owner pipe ACL has not been validated; owner service is disabled");
@@ -92,6 +155,7 @@ export async function startOwnerInspectionService(input: {
   try { await lstat(input.socketPath); throw new Error("Browser-owner socket already exists"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const verifier = new OwnerRequestVerifier(input.secret, input.generation);
+  const journal = input.journalDirectory ? new OwnerSubmitJournal(input.journalDirectory) : undefined;
   const tabs = new Map<string, RegisteredTab>();
   const server: Server = createServer((connection) => {
     connection.on("error", () => {});
@@ -112,7 +176,8 @@ export async function startOwnerInspectionService(input: {
           const tab = untrusted.request && untrusted.request.action !== "ping"
             ? tabs.get(untrusted.request.tabId ?? "") : undefined;
           request = verifier.verify(raw, tab?.binding);
-          let result: "pong" | z.infer<typeof inspectResult> | z.infer<typeof browserResult>;
+          let result: "pong" | z.infer<typeof inspectResult> | z.infer<typeof browserResult>
+            | z.infer<typeof submitResult>;
           if (request.action === "ping") result = "pong";
           else if (request.action === "inspect-tab") {
             if (!tab) throw new Error("Browser tab is unavailable");
@@ -120,11 +185,14 @@ export async function startOwnerInspectionService(input: {
             assertBoundSnapshot(tab.binding, { ...snapshot, controls: [] });
             result = inspectResult.parse({ url: snapshot.url, title: snapshot.title,
               visibleText: snapshot.visibleText, tabId: request.tabId, generation: request.generation });
-          } else {
+          } else if (request.action === "navigate-tab" || request.action === "snapshot-tab") {
             if (!tab) throw new Error("Browser tab is unavailable");
             const snapshot = await runBrowserAction(tab, request);
             result = browserResult.parse({ tabId: request.tabId,
               generation: request.generation, snapshot });
+          } else {
+            if (!tab) throw new Error("Browser tab is unavailable");
+            result = submitResult.parse(await runSubmitAction(tab, journal, request, input.generation));
           }
           const reply: OwnerReply = { status: "ok", requestId: request.requestId, result };
           const serialized = JSON.stringify({ reply, mac: replyMac(reply, input.secret) }) + "\n";
@@ -158,7 +226,7 @@ export async function startOwnerInspectionService(input: {
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
       tabs.set(binding.tabId, { binding: { ...binding }, inspect });
     },
-    async registerBrowser(binding, runtime, readOnlyGetUrls = []) {
+    async registerBrowser(binding, runtime, receipt) {
       signOwnerRequest({ version: 1, action: "inspect-tab", requestId: randomUUID(),
         generation: input.generation, ...binding }, input.secret);
       if (tabs.has(binding.tabId)) throw new Error("Browser tab ID is already registered");
@@ -168,36 +236,26 @@ export async function startOwnerInspectionService(input: {
       const context = runtime.context;
       assertServiceWorkersBlocked(context);
       if (context.serviceWorkers().length) throw new Error("Active service workers are not allowed");
-      // launchBrowser closes its initial blank page. Any page created since
-      // then could have live requests or sockets that routing cannot revoke.
-      if (context.pages().length > 0 || context.backgroundPages().length > 0) {
-        await runtime.close();
-        throw new Error("Browser-owner context contained a preexisting page; start a fresh owner generation");
+      const officialOrigin = new URL(binding.officialUrl).origin;
+      if (receipt && (!journal || !receipt.company.trim() || !receipt.role.trim()
+        || !receipt.phrase.trim() || new URL(receipt.postUrl).origin !== officialOrigin
+        || new URL(receipt.postUrl).protocol !== "https:")) {
+        throw new Error("Owner submit staging requires a private journal and exact receipt binding");
       }
-      const official = new URL(binding.officialUrl);
-      const approvedReadOnlyUrls = new Set(readOnlyGetUrls.map((value) => {
-        const url = new URL(value);
-        if (url.protocol !== "https:" || url.origin !== official.origin || url.hash
-          || url.username || url.password || url.href === official.href) {
-          throw new Error("Browser-owner read-only URL is not an exact approved employer URL");
-        }
-        return url.href;
-      }));
       const tab: RegisteredTab = { binding: { ...binding },
-        inspect: async () => { throw new Error("Browser tab has not been initialized"); } };
+        inspect: async () => { throw new Error("Browser tab has not been initialized"); },
+        ...(receipt ? { receipt } : {}), postAllowed: false, postCount: 0 };
       // The owner must launch this context with serviceWorkers: "block". This
-      // route allows only the first posting document and explicitly reviewed
-      // read-only GET URLs. HTTP method alone cannot identify a safe request.
+      // route prevents page JavaScript from submitting by POST while workers
+      // have only navigation/snapshot access.
       await context.route("**/*", async (route) => {
         const request = route.request();
         const destination = new URL(request.url());
-        const initialDocument = tab.navigationAttempted && !tab.initialDocumentRequested
-          && request.method() === "GET" && request.isNavigationRequest()
-          && request.resourceType() === "document" && destination.href === official.href;
-        if (initialDocument) tab.initialDocumentRequested = true;
-        const reviewedRead = ["GET", "HEAD"].includes(request.method())
-          && approvedReadOnlyUrls.has(destination.href);
-        if (!initialDocument && !reviewedRead) {
+        const approvedPost = request.method() === "POST" && tab.postAllowed
+          && tab.postCount === 0 && receipt && destination.href === receipt.postUrl;
+        if (approvedPost) tab.postCount = 1;
+        if (!(approvedPost || (["GET", "HEAD"].includes(request.method())
+          && destination.origin === officialOrigin))) {
           await route.abort("blockedbyclient");
           return;
         }
@@ -223,7 +281,8 @@ export async function startOwnerInspectionService(input: {
 
 /** A worker can reconnect after it exits; a reply must be authenticated to the same generation. */
 async function sendOwnerRequest(input: { socketPath: string; secret: Buffer;
-  request: OwnerRequest }): Promise<"pong" | z.infer<typeof inspectResult> | z.infer<typeof browserResult>> {
+  request: OwnerRequest }): Promise<"pong" | z.infer<typeof inspectResult> | z.infer<typeof browserResult>
+    | z.infer<typeof submitResult>> {
   const envelope = signOwnerRequest(input.request, input.secret);
   const raw = await new Promise<string>((resolve, reject) => {
     const connection = createConnection(input.socketPath);
@@ -256,7 +315,7 @@ async function sendOwnerRequest(input: { socketPath: string; secret: Buffer;
 export async function inspectOwnedTab(input: { socketPath: string; secret: Buffer;
   request: Extract<OwnerRequest, { action: "inspect-tab" | "ping" }> }): Promise<z.infer<typeof inspectResult> | "pong"> {
   const result = await sendOwnerRequest(input);
-  if (result !== "pong" && "snapshot" in result) throw new Error("Unexpected browser action reply");
+  if (result !== "pong" && ("snapshot" in result || "outcome" in result)) throw new Error("Unexpected browser action reply");
   return result;
 }
 
@@ -266,5 +325,14 @@ export async function requestOwnedBrowser(input: { socketPath: string; secret: B
   : Promise<z.infer<typeof browserResult>> {
   const result = await sendOwnerRequest(input);
   if (result === "pong" || !("snapshot" in result)) throw new Error("Unexpected browser action reply");
+  return result;
+}
+
+/** Staging-only final click and read-only reconciliation. Production never calls this. */
+export async function requestOwnedSubmit(input: { socketPath: string; secret: Buffer;
+  request: Extract<OwnerRequest, { action: "submit-once" | "reconcile-submit" }> })
+  : Promise<z.infer<typeof submitResult>> {
+  const result = await sendOwnerRequest(input);
+  if (result === "pong" || !("outcome" in result)) throw new Error("Unexpected owner submit reply");
   return result;
 }

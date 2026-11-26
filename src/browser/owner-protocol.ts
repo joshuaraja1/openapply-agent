@@ -13,6 +13,8 @@ const ownerRequestSchema = z.discriminatedUnion("action", [
   z.object({ ...base, ...binding, action: z.literal("inspect-tab") }).strict(),
   z.object({ ...base, ...binding, action: z.literal("navigate-tab"), url: z.url() }).strict(),
   z.object({ ...base, ...binding, action: z.literal("snapshot-tab") }).strict(),
+  z.object({ ...base, ...binding, action: z.literal("submit-once"), ref: z.string().min(1).max(64) }).strict(),
+  z.object({ ...base, ...binding, action: z.literal("reconcile-submit") }).strict(),
 ]);
 
 export type OwnerRequest = z.infer<typeof ownerRequestSchema>;

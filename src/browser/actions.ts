@@ -265,6 +265,28 @@ export class AgentBrowser {
     return text;
   }
 
+  /** Owner-only final-click preparation. The caller must persist its intent first. */
+  async prepareFinalClick(ref: string): Promise<{ page: Page; click: () => Promise<void> }> {
+    const page = this.requirePage();
+    const handle = this.controls.get(ref);
+    if (!handle || !ref.startsWith(`${this.generation}:`)) throw new Error("Stale browser control reference");
+    if (!(await handle.evaluate((element) => element.isConnected))) throw new Error("Submit control changed");
+    const type = await handle.getAttribute("type");
+    const label = ((await handle.getAttribute("aria-label")) ?? (await handle.innerText().catch(() => ""))).trim();
+    if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
+      throw new Error("Selected control is not a submit action");
+    }
+    return { page, click: async () => {
+      this.controls.clear();
+      this.generation += 1;
+      await handle.click();
+    } };
+  }
+
+  ownedPage(): Page {
+    return this.requirePage();
+  }
+
   private requirePage(): Page {
     if (!this.page) throw new Error("Navigate to an approved page first");
     return this.page;
