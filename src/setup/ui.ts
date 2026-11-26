@@ -12,6 +12,8 @@ import type { DiscoveredJob } from "../types.js";
 import { initializeUserWorkspace, userTemplateFiles } from "./init.js";
 import { inspectRuntimeReadiness, runSetupBrowserDoctor } from "./runtime-readiness.js";
 import { createFirstRuntimeConfig } from "./runtime-config.js";
+import { runSetupDryRun, templateDraftReady } from "./dry-run.js";
+import { probeOwnedOverleafSession } from "./overleaf-session.js";
 import { checkOwnedBrowser } from "../browser/doctor.js";
 import { runStateControl, stateControlStatus, type StateControlAction } from "./data-controls.js";
 import type { SecretStore } from "../storage/contracts.js";
@@ -77,6 +79,7 @@ async function profileReadiness(destination: string): Promise<{ valid: boolean; 
 
 export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number;
   queueConfigPath?: string; browserDoctor?: typeof checkOwnedBrowser;
+  overleafSessionProbe?: typeof probeOwnedOverleafSession;
   stateRoot?: string; stateSecretStore?: SecretStore }) {
   const destination = options.destination ?? join(userInfo().homedir, ".openapply-agent", "onboarding");
   const queueConfigPath = options.queueConfigPath ?? process.env.OPENAPPLY_QUEUE_CONFIG
@@ -105,7 +108,7 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
       if (url.pathname === "/api/templates" && request.method === "GET") {
         const files = await Promise.all(userTemplateFiles.map(async (name) => {
           const content = await readPrivateFile(join(destination, name));
-          return { name, content, sha256: digest(content), complete: !content.includes("{{") };
+          return { name, content, sha256: digest(content), complete: templateDraftReady(content) };
         }));
         return send(response, 200, { files });
       }
@@ -141,6 +144,16 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
             options.browserDoctor) });
         } catch {
           return send(response, 409, { error: "Browser check failed. Run npm run browser:doctor locally for details." });
+        }
+      }
+      if (url.pathname === "/api/dry-run" && request.method === "POST") {
+        try {
+          return send(response, 200, await runSetupDryRun({ destination, queueConfigPath,
+            profile: await profileReadiness(destination),
+            ...(options.browserDoctor ? { browserDoctor: options.browserDoctor } : {}),
+            probeOwnedOverleaf: options.overleafSessionProbe ?? probeOwnedOverleafSession }));
+        } catch {
+          return send(response, 409, { error: "Read-only setup check failed. Inspect private setup files locally." });
         }
       }
       if (url.pathname === "/api/state-control" && request.method === "GET") {
@@ -248,7 +261,8 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
             try { await directory.sync(); } finally { await directory.close(); }
           }
         } finally { await unlink(temporary).catch(() => {}); }
-        return send(response, 200, { name, sha256: digest(content), complete: !content.includes("{{") });
+        return send(response, 200, { name, sha256: digest(content),
+          complete: templateDraftReady(content) });
       } finally { busy.delete(name); }
     } catch (error) {
       send(response, 400, { error: error instanceof Error ? error.message : "Setup request failed" });
@@ -295,8 +309,9 @@ textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offs
 <div class="actions"><button class="save" id="save">Save this section</button><button class="compile" id="compile">Compile profile</button><button class="compile" id="readiness-check">Check readiness</button><span id="message" role="status" aria-live="polite"></span></div>
 <p id="readiness" role="status" aria-live="polite">Profile readiness has not been checked.</p>
 <div class="runtime"><h2>Runtime setup</h2><p class="note">Check the private queue configuration, daily limit, browser, Overleaf, alerts, and optional mailbox client. This does not sign in, send email, or submit an application.</p>
-<div class="actions"><button class="compile" id="runtime-check">Check runtime setup</button><button class="compile" id="browser-doctor">Check browser installation</button></div>
+<div class="actions"><button class="compile" id="runtime-check">Check runtime setup</button><button class="compile" id="browser-doctor">Check browser installation</button><button class="compile" id="dry-run">Run setup dry run</button></div>
 <p id="runtime-status" role="status" aria-live="polite">Runtime setup has not been checked.</p>
+<pre id="dry-run-status" role="status" aria-live="polite">No setup dry run yet.</pre>
 <h3>Save your first runtime configuration</h3><p class="note">Complete and compile section 03 to set the daily target, hard cap, and final approval policy. This form saves one official source and the browser and Overleaf settings in private files. It never overwrites existing settings.</p>
 <p id="runtime-policy" role="status" aria-live="polite">Loading saved application policy…</p>
 <label for="runtime-browser">Application browser</label><select id="runtime-browser"><option value="owned">OpenApply owned browser</option><option value="browseros">BrowserOS neo</option></select>
@@ -330,12 +345,13 @@ document.getElementById('runtime-provider').onchange=()=>{document.getElementByI
 document.getElementById('runtime-save').onclick=async()=>{const status=document.getElementById('runtime-save-status');if(!runtimePolicy){status.textContent='Complete and compile section 03 first';return}status.textContent='Validating private setup…';try{const browserRuntime=document.getElementById('runtime-browser').value;const response=await fetch('/api/runtime-setup',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({browserRuntime,...(browserRuntime==='browseros'?{browserEndpoint:document.getElementById('runtime-endpoint').value.trim()}:{}),overleafProjectUrl:document.getElementById('runtime-overleaf').value.trim(),dailyTarget:runtimePolicy.dailyTarget,dailyHardCap:runtimePolicy.dailyHardCap,requireFinalApproval:runtimePolicy.requireFinalApproval,firstSource:{provider:document.getElementById('runtime-provider').value,company:document.getElementById('runtime-company').value.trim(),identifier:document.getElementById('runtime-identifier').value.trim()}})});const data=await response.json();if(!response.ok)throw Error(data.error);status.textContent='Private runtime settings saved. Sign in to the browser and Overleaf before enabling applications.';await loadRuntimeSetup()}catch(error){status.textContent=error.message}};
 const labels=['Candidate profile','Work history','Search preferences','Source policy','Résumé tailoring','Application answers','Run configuration','Authentication'];
 function render(){const current=files[selected];document.getElementById('files').replaceChildren(...files.map((file,index)=>{const button=document.createElement('button');button.textContent=(index+1).toString().padStart(2,'0')+'  '+labels[index];button.setAttribute('aria-current',index===selected?'page':'false');button.onclick=()=>{if(editor.value!==files[selected].content&&!confirm('Discard unsaved changes?'))return;selected=index;render()};return button}));
-document.getElementById('title').textContent=labels[selected];document.getElementById('progress').textContent=files.filter(file=>file.complete).length+' / '+files.length+' sections without placeholders';editor.value=current.content;message.textContent=current.complete?'No placeholders detected':'Replace the {{PLACEHOLDER}} values before compiling your profile';}
+document.getElementById('title').textContent=labels[selected];document.getElementById('progress').textContent=files.filter(file=>file.complete).length+' / '+files.length+' sections with text and no placeholders';editor.value=current.content;message.textContent=current.complete?'No placeholders detected':'Add your answers and replace the {{PLACEHOLDER}} values before compiling';}
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
 async function checkReadiness(){const output=document.getElementById('readiness');if(editor.value!==files[selected].content){output.textContent='Save this section before checking readiness.';return}output.textContent='Checking private profile…';try{const response=await fetch('/api/readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=!data.valid?'Complete and validate templates 01–03 before compiling.':!data.compiled?'Templates 01–03 are valid. Compile the profile to create private output files.':!data.current?'Compiled profile is stale. Move the old private output files aside, then compile again.':'Profile is compiled and current. Continue with source, browser, and account setup.'}catch(error){output.textContent=error.message}}
 document.getElementById('readiness-check').onclick=checkReadiness;
 document.getElementById('runtime-check').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking runtime setup…';try{const response=await fetch('/api/runtime-readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.queueConfig==='missing'?'Set OPENAPPLY_QUEUE_CONFIG to a private queue configuration, then restart setup.':['Queue configuration: '+data.queueConfig,'Compiled candidate profile and paths: '+data.profilePaths,'Search preferences: '+data.preferences+(data.dailyLimit===null?'':' · effective daily limit '+data.dailyLimit),'Browser: '+data.browser+' (use the installation check below for owned Chromium)','Overleaf project: '+data.overleaf,'Handoff email: '+data.notification+' (sending key and delivery are not tested)','Mailbox OAuth: '+data.mailbox+' (client ID only; consent is not tested)'].join('\\n')}catch(error){output.textContent=error.message}};
 document.getElementById('browser-doctor').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking browser installation…';try{const response=await fetch('/api/browser-doctor',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.browser==='ready'?'Owned Chromium started in a temporary profile. Saved sessions were not opened.':'BrowserOS is configured separately. Verify its running endpoint and signed-in profile before applying.'}catch(error){output.textContent=error.message}};
+document.getElementById('dry-run').onclick=async()=>{const output=document.getElementById('dry-run-status');output.textContent='Checking private setup and the read-only Overleaf editor session…';try{const response=await fetch('/api/dry-run',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=(data.readyForPrivatePreview?'Private preview prerequisites are ready.':'Resolve the actions below before a private preview.')+'\\nLive applications remain disabled by this check.\\n'+data.checks.map(item=>(item.status==='ready'?'Ready: ':'Action: ')+item.action).join('\\n')}catch(error){output.textContent=error.message}};
 const stateStatus=document.getElementById('state-status'),stateConfirmation=document.getElementById('state-confirmation');
 const statePhrases={export:'EXPORT',quarantine:'STOPPED WORKFLOWS',restore:'STOPPED WORKFLOWS',purge:'STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE','export-artifacts':'EXPORT','quarantine-artifacts':'STOPPED WORKFLOWS','restore-artifacts':'STOPPED WORKFLOWS','purge-artifacts':'STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE'};
 async function refreshState(){try{const response=await fetch('/api/state-control',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);stateStatus.textContent='Private state export: '+(data.exportReady?'present':'missing')+' · State archive: '+(data.archiveReady?'present':'missing')+' · Artifact export: '+(data.artifactExportReady?'present':'missing')+' · Artifact archive: '+(data.artifactArchiveReady?'present':'missing')}catch{stateStatus.textContent='Could not inspect local state'}}

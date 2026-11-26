@@ -37,6 +37,19 @@ to the operating-system secret store, never to this repository or JSON files.
    sessions, or indicates that BrowserOS must be checked separately.
    These checks do not verify sign-ins, stored sending keys, OAuth consent,
    actual email delivery, or a real application.
+   **Run setup dry run** combines the eight template placeholder checks, a
+   current compiled profile, a private queue with at least one enabled HTTPS
+   official source, the owned browser installation check, and a read-only visit
+   to the configured Overleaf editor in the dedicated owned profile. It gives
+   an action for each failed check without returning private facts, URLs, or
+   secret references. This explicit check opens the dedicated browser profile;
+   stop a running worker first if it holds the profile lock. BrowserOS sessions
+   still require a separate manual check. A successful dry run permits a
+   private preparation preview only; it does not enable live applications or
+   prove employer sign-in, mailbox consent, or email delivery. The Overleaf
+   check blocks service workers, WebSockets, and every network request except
+   a GET for the exact configured project page. If the editor needs another
+   request, setup reports an action instead of claiming the session is ready.
    The setup screen can create a private queue configuration with one supported
    official source (Greenhouse, Ashby, Lever, SmartRecruiters, or an HTTPS
    employer job page), browser mode, and a direct Overleaf project URL. It
@@ -83,9 +96,9 @@ manual path governed by its job-bound handoff and final-approval controls.
 
 The scheduled queue's established path uses BrowserOS neo. An owned-browser
 queue preview is tracked in the release PR stack; recovery from human handoffs
-still needs validation. The local setup editor covers private templates; account
-consent, source configuration, dry-run preview, and installation are still CLI
-steps. OpenApply cannot promise
+still needs validation. The local setup editor covers private templates, initial
+source configuration, and a read-only setup dry run. Account consent and
+installation still need separate steps. OpenApply cannot promise
 every job on the internet or bypass CAPTCHA, MFA, legal questions, or site
 access controls. See the [release requirements](autonomy-release-requirements.md)
 for the remaining public-product gates.
