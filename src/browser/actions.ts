@@ -70,7 +70,24 @@ export class AgentBrowser {
     this.controls.clear();
     this.generation += 1;
     const pageText = await page.evaluate(() => {
-      const text = document.body?.innerText ?? "";
+      let text = document.body?.innerText ?? "";
+      // document.body.innerText omits open shadow roots. Include their visible
+      // text so a challenge or legal attestation cannot disappear from a scan.
+      const visit = (root: Document | ShadowRoot) => {
+        for (const host of root.querySelectorAll("*")) {
+          if (!host.shadowRoot || text.length > 50_000) continue;
+          const walker = document.createTreeWalker(host.shadowRoot, NodeFilter.SHOW_TEXT);
+          let node: Node | null;
+          while ((node = walker.nextNode()) && text.length <= 50_000) {
+            const parent = node.parentElement;
+            if (!parent || parent.closest('script, style, [hidden], [aria-hidden="true"]')
+              || !parent.getClientRects().length) continue;
+            text += `\n${node.textContent ?? ""}`;
+          }
+          visit(host.shadowRoot);
+        }
+      };
+      visit(document);
       return { text: text.slice(0, 50_000), overflow: text.length > 50_000 };
     });
     if (pageText.overflow) throw new Error("Application page text exceeds the safe snapshot limit");
@@ -126,8 +143,12 @@ export class AgentBrowser {
     const existingPages = new Set(this.context.pages());
     if (action === "click") {
       const type = await handle.getAttribute("type");
+      const effectiveSubmit = await handle.evaluate((element) => element.tagName === "BUTTON"
+        ? (element as HTMLButtonElement).type === "submit" : element.tagName === "INPUT"
+          && ["submit", "image"].includes((element as HTMLInputElement).type));
       const label = ((await handle.getAttribute("aria-label")) ?? (await handle.innerText().catch(() => ""))).trim();
-      if (type === "submit" || /\b(submit|apply now|send application)\b/i.test(label)) {
+      if (effectiveSubmit || type?.toLowerCase() === "submit"
+        || /\b(submit|apply now|send application)\b/i.test(label)) {
         throw new Error("Submission requires a separate approved action");
       }
       await handle.click();
@@ -142,13 +163,21 @@ export class AgentBrowser {
         const selected = await handle.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label.trim());
         if (selected !== value) throw new Error("Selected option was not accepted");
       } else if (await handle.getAttribute("role") === "combobox") {
-        if (await handle.getAttribute("type") === "submit"
-          || await handle.evaluate((element) => element.tagName === "BUTTON"
-            && (element as HTMLButtonElement).type === "submit")) {
+        if (await handle.evaluate((element) => element.tagName === "BUTTON"
+          ? (element as HTMLButtonElement).type === "submit" : element.tagName === "INPUT"
+            && ["submit", "image"].includes((element as HTMLInputElement).type))) {
           throw new Error("Submission requires a separate approved action");
         }
+        const ownership = [await handle.getAttribute("aria-controls"), await handle.getAttribute("aria-owns")]
+          .filter((entry): entry is string => Boolean(entry)).flatMap((entry) => entry.trim().split(/\s+/));
+        if (ownership.length < 1 || new Set(ownership).size !== 1) {
+          throw new Error("Combobox listbox ownership is unavailable or ambiguous");
+        }
+        const listbox = page.locator(`[id=${JSON.stringify(ownership[0])}][role="listbox"]`);
         await handle.click();
-        const option = page.getByRole("option", { name: value, exact: true });
+        await listbox.waitFor({ state: "visible", timeout: 3_000 });
+        if (await listbox.count() !== 1) throw new Error("Combobox listbox is ambiguous");
+        const option = listbox.getByRole("option", { name: value, exact: true });
         await option.first().waitFor({ state: "visible", timeout: 3_000 });
         if (await option.count() !== 1) throw new Error("Combobox option is ambiguous");
         await option.click();
