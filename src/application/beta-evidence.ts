@@ -1,31 +1,31 @@
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { ApplicationStateStore } from "../storage/contracts.js";
+import type { EncryptedApplicationStateStore } from "../storage/encrypted-state.js";
 import type { ApplicationCheckpoint } from "./state-machine.js";
 
 const alias = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const provider = z.enum(["greenhouse", "ashby", "lever", "smartrecruiters", "workday", "other"]);
 const ms = z.number().int().nonnegative().max(86_400_000);
 export const betaConsentSchema = z.strictObject({
-  kind: z.literal("consent"), participantId: alias, recordedAt: z.iso.datetime(),
+  kind: z.literal("consent"), participantId: alias,
   approvedProviders: z.array(provider).min(1), dailyCap: z.number().int().positive().max(100),
   automaticSubmission: z.boolean(), monitoringAccepted: z.literal(true),
   browserSessionApproved: z.literal(true), candidateAcknowledged: z.literal(true),
   retentionDays: z.number().int().positive().max(365),
-  withdrawnAt: z.iso.datetime().optional(),
 });
 export const betaObservationSchema = z.strictObject({
   kind: z.literal("observation"), participantId: alias, runId: alias, jobId: z.string().min(1).max(200),
-  provider, os: z.enum(["macos", "windows", "linux"]), recordedAt: z.iso.datetime(),
+  provider, os: z.enum(["macos", "windows", "linux"]),
   outcome: z.enum(["submitted", "waiting-human", "submission-uncertain", "blocked", "skipped"]),
   failureCategory: z.enum(["none", "browser", "provider-form", "upload", "auth", "human-question", "confirmation", "other"]),
   retryCount: z.number().int().nonnegative().max(100), crashCount: z.number().int().nonnegative().max(100),
   stageLatencyMs: z.partialRecord(z.enum(["discovery", "matching", "render", "application", "recovery"]), ms),
 });
-export type BetaConsent = z.infer<typeof betaConsentSchema>;
+export type BetaConsent = z.infer<typeof betaConsentSchema> & { recordedAt: string; withdrawnAt?: string };
 export type BetaObservationInput = z.infer<typeof betaObservationSchema>;
 export interface BetaObservation extends BetaObservationInput {
+  recordedAt: string;
   officialUrlSha256: string;
   confirmationPresent: boolean;
   checkpointStage: ApplicationCheckpoint["stage"];
@@ -34,36 +34,91 @@ export interface BetaObservation extends BetaObservationInput {
 export type BetaEvidence = BetaConsent | BetaObservation;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const consentKey = (id: string) => `consent:${id}`;
-const observationKey = (run: string, job: string) => `observation:${run}:${digest(job)}`;
+const observationKey = (participant: string, run: string, job: string) =>
+  `observation:${participant}:${run}:${digest(job)}`;
 
-export async function recordConsent(store: ApplicationStateStore<BetaEvidence>, raw: unknown): Promise<BetaConsent> {
+function checkpointProvider(checkpoint: ApplicationCheckpoint): z.infer<typeof provider> {
+  let host: string;
+  try { host = new URL(checkpoint.officialUrl).hostname.toLowerCase(); }
+  catch { throw new Error("Application checkpoint has an invalid official URL"); }
+  if (host === "boards.greenhouse.io" || host === "job-boards.greenhouse.io") return "greenhouse";
+  if (host === "jobs.ashbyhq.com") return "ashby";
+  if (host === "jobs.lever.co" || host === "jobs.eu.lever.co") return "lever";
+  if (host === "jobs.smartrecruiters.com") return "smartrecruiters";
+  if (host.endsWith(".myworkdayjobs.com") || host === "myworkdayjobs.com") return "workday";
+  return "other";
+}
+
+export async function recordConsent(store: ApplicationStateStore<BetaEvidence>, raw: unknown,
+  now = new Date()): Promise<BetaConsent> {
   const input = betaConsentSchema.parse(raw);
   const key = consentKey(input.participantId);
+  const record: BetaConsent = { ...input, recordedAt: now.toISOString() };
+  if (!await store.compareAndSwap(key, undefined, record)) throw new Error("Beta consent already exists");
+  return record;
+}
+
+export async function withdrawConsent(store: ApplicationStateStore<BetaEvidence>, participantId: string,
+  now = new Date()): Promise<BetaConsent> {
+  const key = consentKey(alias.parse(participantId));
   const prior = await store.read(key);
-  if (prior && prior.state.kind !== "consent") throw new Error("Beta consent record identity is occupied");
-  if (prior?.state.kind === "consent") {
-    const { withdrawnAt: previousWithdrawal, ...previous } = prior.state;
-    const { withdrawnAt: nextWithdrawal, ...next } = input;
-    if (previousWithdrawal || !nextWithdrawal || nextWithdrawal <= input.recordedAt
-      || !isDeepStrictEqual(previous, next)) {
-      throw new Error("Consent is immutable except for a later withdrawal");
-    }
+  if (!prior || prior.state.kind !== "consent" || prior.state.withdrawnAt) {
+    throw new Error("Active beta consent is required for withdrawal");
   }
-  if (!await store.compareAndSwap(key, prior?.version, input)) throw new Error("Beta consent changed concurrently");
-  return input;
+  const withdrawnAt = now.toISOString();
+  if (withdrawnAt < prior.state.recordedAt) throw new Error("Withdrawal predates consent");
+  const record = { ...prior.state, withdrawnAt };
+  if (!await store.compareAndSwap(key, prior.version, record)) throw new Error("Beta consent changed concurrently");
+  return record;
+}
+
+/** Remove expired observations and withdrawn participants' observations from the private ledger. */
+export async function sweepBetaEvidence(store: EncryptedApplicationStateStore<BetaEvidence>,
+  now = new Date()): Promise<number> {
+  const records = await store.snapshotRecords();
+  const consents = new Map(records.flatMap((row) => row.state?.kind === "consent"
+    ? [[row.state.participantId, row.state] as const] : []));
+  let removed = 0;
+  for (const row of records) {
+    const item = row.state;
+    if (!item || item.kind !== "observation") continue;
+    const consent = consents.get(item.participantId);
+    const expired = !consent || Boolean(consent.withdrawnAt)
+      || now.getTime() >= new Date(item.recordedAt).getTime() + consent.retentionDays * 86_400_000
+      || now.getTime() >= new Date(consent.recordedAt).getTime() + consent.retentionDays * 86_400_000;
+    if (expired && await store.delete(row.id, row.version)) removed++;
+  }
+  for (const row of records) {
+    const item = row.state;
+    if (item?.kind === "consent" && now.getTime() >= Date.parse(item.recordedAt) + item.retentionDays * 86_400_000
+      && await store.delete(row.id, row.version)) removed++;
+  }
+  return removed;
 }
 
 export async function recordObservation(store: ApplicationStateStore<BetaEvidence>, raw: unknown,
-  checkpoint: ApplicationCheckpoint): Promise<BetaObservation> {
+  checkpoint: ApplicationCheckpoint, now = new Date()): Promise<BetaObservation> {
   const input = betaObservationSchema.parse(raw);
+  const recordedAt = now.toISOString();
   const saved = (await store.read(consentKey(input.participantId)))?.state;
   if (!saved || saved.kind !== "consent" || saved.withdrawnAt || !saved.approvedProviders.includes(input.provider)
-    || input.recordedAt < saved.recordedAt) throw new Error("Active beta consent does not cover this provider");
+    || recordedAt < saved.recordedAt
+    || now.getTime() >= Date.parse(saved.recordedAt) + saved.retentionDays * 86_400_000) {
+    throw new Error("Active beta consent does not cover this provider or time");
+  }
   if (input.jobId !== checkpoint.jobId || !checkpoint.officialUrl) {
     throw new Error("Beta observation does not match the exact application checkpoint");
   }
-  if (input.recordedAt < checkpoint.updatedAt) {
+  if (recordedAt < checkpoint.updatedAt) {
     throw new Error("Beta observation predates the saved application checkpoint");
+  }
+  if (!checkpoint.createdAt || checkpoint.createdAt < saved.recordedAt) {
+    throw new Error("Application began before beta consent or has no trusted creation time");
+  }
+  const actualProvider = checkpointProvider(checkpoint);
+  if (input.provider !== actualProvider || (checkpoint.jobId.includes(":")
+    && checkpoint.jobId.split(":", 1)[0] !== (actualProvider === "other" ? "jsonld" : actualProvider))) {
+    throw new Error("Beta provider does not match the saved official posting");
   }
   if (input.outcome === "submitted" && (checkpoint.stage !== "submitted"
     || !checkpoint.confirmation?.trim())) {
@@ -72,10 +127,10 @@ export async function recordObservation(store: ApplicationStateStore<BetaEvidenc
   if (input.outcome !== "submitted" && input.outcome !== checkpoint.stage) {
     throw new Error("Beta outcome must match the saved application checkpoint");
   }
-  const record: BetaObservation = { ...input, officialUrlSha256: digest(checkpoint.officialUrl),
+  const record: BetaObservation = { ...input, recordedAt, officialUrlSha256: digest(checkpoint.officialUrl),
     confirmationPresent: checkpoint.stage === "submitted" && Boolean(checkpoint.confirmation?.trim()),
     checkpointStage: checkpoint.stage, checkpointUpdatedAt: checkpoint.updatedAt };
-  const key = observationKey(input.runId, input.jobId);
+  const key = observationKey(input.participantId, input.runId, input.jobId);
   if (!await store.compareAndSwap(key, undefined, record)) {
     throw new Error("Beta observation for this run and exact job already exists");
   }

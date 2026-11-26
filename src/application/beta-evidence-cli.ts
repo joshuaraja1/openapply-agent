@@ -6,7 +6,7 @@ import { readPrivateFile } from "../storage/private-path.js";
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import { holdWorkflowLease } from "../storage/workflow-lease.js";
 import { recordConsent, recordObservation, summarizeBetaEvidence,
-  type BetaEvidence } from "./beta-evidence.js";
+  sweepBetaEvidence, withdrawConsent, type BetaEvidence } from "./beta-evidence.js";
 import type { ApplicationCheckpoint } from "./state-machine.js";
 
 await holdWorkflowLease();
@@ -20,17 +20,24 @@ const root = join(userInfo().homedir, ".openapply-agent");
 const sqlite = await openActiveSqliteRuntime(key);
 try {
   const evidence = new EncryptedApplicationStateStore<BetaEvidence>(join(root, "beta-evidence.enc.json"), key);
+  await sweepBetaEvidence(evidence);
   const action = process.argv[2] === "beta:evidence" ? process.argv[3] : process.argv[2];
   if (action === "summary") {
     const snapshot = await evidence.snapshotRecords();
     console.log(JSON.stringify(summarizeBetaEvidence(snapshot.flatMap((row) => row.state ? [row.state as BetaEvidence] : []))));
-  } else if (action === "consent" || action === "observe") {
+  } else if (action === "consent" || action === "observe" || action === "withdraw") {
     const inputPath = process.env.OPENAPPLY_BETA_INPUT;
     if (!inputPath) throw new Error("Set OPENAPPLY_BETA_INPUT to an absolute private JSON file");
     const input = JSON.parse(await readPrivateFile(inputPath)) as unknown;
     if (action === "consent") {
       await recordConsent(evidence, input);
       console.log(JSON.stringify({ action: "consent-recorded" }));
+    } else if (action === "withdraw") {
+      const participantId = (input as { participantId?: unknown })?.participantId;
+      if (typeof participantId !== "string") throw new Error("Withdrawal needs a participant ID");
+      await withdrawConsent(evidence, participantId);
+      await sweepBetaEvidence(evidence);
+      console.log(JSON.stringify({ action: "consent-withdrawn", next: "stop scheduled runs" }));
     } else {
       const parsed = input as { jobId?: unknown };
       if (typeof parsed?.jobId !== "string") throw new Error("Observation needs an exact job ID");
@@ -41,5 +48,5 @@ try {
       await recordObservation(evidence, input, checkpoint);
       console.log(JSON.stringify({ action: "observation-recorded" }));
     }
-  } else throw new Error("Use openapply beta:evidence consent, observe, or summary");
+  } else throw new Error("Use openapply beta:evidence consent, observe, withdraw, or summary");
 } finally { sqlite?.close(); }
