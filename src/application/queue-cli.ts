@@ -151,6 +151,16 @@ try {
     if (result.checkpoint.stage === "waiting-human") {
       await notifyPendingHandoff(workflow, result.checkpoint, secrets, notificationConfig);
     }
+    switch (result.checkpoint.stage) {
+      case "submitted":
+      case "waiting-human":
+      case "submission-uncertain":
+      case "blocked":
+      case "skipped":
+        return result.checkpoint.stage;
+      default:
+        return undefined;
+    }
   }, async (job) => await postingClaims.claim(job.id, job.applicationUrl) === "claimed");
   console.log(JSON.stringify({ date: date(), outcomes, needsReview }));
 } finally {
