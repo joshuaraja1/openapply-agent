@@ -75,7 +75,9 @@ export class AgentBrowser {
     });
     if (pageText.overflow) throw new Error("Application page text exceeds the safe snapshot limit");
     const visibleText = pageText.text;
-    const handles = await page.locator("a, button, input, textarea, select, [role=button]").elementHandles();
+    // Playwright's CSS locator traverses open shadow roots. Explicit roles
+    // include custom controls that do not use native select/input elements.
+    const handles = await page.locator("a, button, input, textarea, select, [role=button], [role=combobox]").elementHandles();
     const controls: BrowserControl[] = [];
     for (const handle of handles) {
       if (!(await handle.isVisible())) continue;
@@ -87,14 +89,21 @@ export class AgentBrowser {
         const labelNode = field.labels?.[0]?.cloneNode(true) as HTMLElement | undefined;
         labelNode?.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
         const label = labelNode?.textContent?.trim();
+        const root = field.getRootNode?.() as Document | ShadowRoot | undefined;
+        const labelledBy = field.getAttribute("aria-labelledby")?.split(/\s+/).filter(Boolean)
+          .map((id) => root?.getElementById(id)?.textContent?.trim() ?? "").join(" ").trim();
+        const customCombo = field.getAttribute("role") === "combobox" && field.tagName !== "SELECT";
+        const nativeValue = ["INPUT", "TEXTAREA", "SELECT"].includes(field.tagName)
+          ? field.value ?? null : null;
         return {
-          label: label ?? field.getAttribute("aria-label") ?? field.getAttribute("placeholder")
-            ?? field.getAttribute("name") ?? field.textContent ?? "",
+          label: label || field.getAttribute("aria-label") || labelledBy || field.getAttribute("placeholder")
+            || field.getAttribute("name") || field.textContent || "",
           required: field.matches(":required") || field.getAttribute("aria-required") === "true",
           options: field.tagName === "SELECT"
             ? Array.from((field as HTMLSelectElement).options, (option) => option.label.trim()) : [],
           value: field.tagName === "INPUT" && ["password", "hidden"].includes((field as HTMLInputElement).type)
-            ? null : "value" in field ? field.value : null,
+            ? null : nativeValue !== null ? nativeValue
+              : customCombo ? field.getAttribute("aria-valuetext") ?? field.textContent?.trim() ?? null : null,
         };
       });
       const name = metadata.label;
@@ -127,9 +136,27 @@ export class AgentBrowser {
       if (await handle.inputValue() !== value) throw new Error("Form value was not accepted");
     }
     else if (action === "select" && value !== undefined) {
-      await handle.selectOption({ label: value });
-      const selected = await handle.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label.trim());
-      if (selected !== value) throw new Error("Selected option was not accepted");
+      const tag = await handle.evaluate((element) => element.tagName.toLowerCase());
+      if (tag === "select") {
+        await handle.selectOption({ label: value });
+        const selected = await handle.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label.trim());
+        if (selected !== value) throw new Error("Selected option was not accepted");
+      } else if (await handle.getAttribute("role") === "combobox") {
+        if (await handle.evaluate((element) => element.tagName === "BUTTON"
+          && (element as HTMLButtonElement).type === "submit")) {
+          throw new Error("Submission requires a separate approved action");
+        }
+        await handle.click();
+        const option = page.getByRole("option", { name: value, exact: true });
+        await option.first().waitFor({ state: "visible", timeout: 3_000 });
+        if (await option.count() !== 1) throw new Error("Combobox option is ambiguous");
+        await option.click();
+        const selected = await handle.evaluate((element) =>
+          ["INPUT", "TEXTAREA"].includes(element.tagName)
+            ? (element as HTMLInputElement).value
+            : element.getAttribute("aria-valuetext") ?? element.textContent?.trim() ?? "");
+        if (selected.trim() !== value) throw new Error("Selected option was not accepted");
+      } else throw new Error("Selected control is not a combobox");
     }
     else if (action === "upload" && value !== undefined) {
       const expectedHash = this.approvedArtifacts.get(resolve(value));
