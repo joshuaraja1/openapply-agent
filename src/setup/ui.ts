@@ -40,10 +40,17 @@ async function setupProfile(destination: string) {
 }
 
 async function profileReadiness(destination: string): Promise<{ valid: boolean; compiled: boolean; current: boolean }> {
+  // Read failures are operational errors, not invalid candidate answers.
+  const [profile, work, search] = await Promise.all([
+    readPrivateFile(join(destination, "01-candidate-profile.md")),
+    readPrivateFile(join(destination, "02-work-history.md")),
+    readPrivateFile(join(destination, "03-search-preferences.md")),
+  ]);
   let candidate: unknown;
   let preferences: unknown;
   try {
-    ({ candidate, preferences } = await setupProfile(destination));
+    candidate = compileCandidateMarkdown(profile, work);
+    preferences = compileSearchMarkdown(search);
   } catch {
     return { valid: false, compiled: false, current: false };
   }
@@ -227,7 +234,7 @@ document.getElementById('title').textContent=labels[selected];document.getElemen
 async function load(){const response=await fetch('/api/templates',{headers:{'x-openapply-token':token}});if(!response.ok)throw Error('Could not load private templates');files=(await response.json()).files;render()}
 async function checkReadiness(){const output=document.getElementById('readiness');if(editor.value!==files[selected].content){output.textContent='Save this section before checking readiness.';return}output.textContent='Checking private profile…';try{const response=await fetch('/api/readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=!data.valid?'Complete and validate templates 01–03 before compiling.':!data.compiled?'Templates 01–03 are valid. Compile the profile to create private output files.':!data.current?'Compiled profile is stale. Move the old private output files aside, then compile again.':'Profile is compiled and current. Continue with source, browser, and account setup.'}catch(error){output.textContent=error.message}}
 document.getElementById('readiness-check').onclick=checkReadiness;
-document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately'}catch(error){message.textContent=error.message}};
+document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('preview-run').onclick=async()=>{const result=document.getElementById('preview-result');if(editor.value!==files[selected].content){result.textContent='Save this section before previewing';return}result.textContent='Checking…';try{const response=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({title:document.getElementById('preview-title').value,description:document.getElementById('preview-description').value})});const data=await response.json();if(!response.ok)throw Error(data.error);const match=data.match;result.textContent=(match.eligible?'Potential match':'Needs review')+' · score '+match.score+'\\n'+match.reasons.join('\\n')+'\\nMatched skills: '+(match.matchedSkills.join(', ')||'none')+(match.reviewFlags.length?'\\nReview: '+match.reviewFlags.join('; '):'')}catch(error){result.textContent=error.message}};
 load().catch(error=>{message.textContent=error.message});

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Script } from "node:vm";
@@ -45,6 +45,12 @@ describe("local first-run setup", () => {
       expect((await compile()).status).toBe(200);
       expect(await readiness()).toEqual({ status: 200,
         value: { valid: true, compiled: true, current: true } });
+      const profileSource = join(destination, "01-candidate-profile.md");
+      if (process.platform !== "win32") {
+        await chmod(profileSource, 0o644);
+        expect((await readiness()).status).toBe(400);
+        await chmod(profileSource, 0o600);
+      }
       const preview = (title: string, description: string) => fetch(`${url.origin}/api/preview`, {
         method: "POST", headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({ title, description }),
@@ -63,7 +69,6 @@ describe("local first-run setup", () => {
       const profile = JSON.parse(await readFile(join(destination, "candidate-profile.json"), "utf8")) as
         { identity: { fullName: string } };
       expect(profile.identity.fullName).toBe("Test Candidate");
-      const profileSource = join(destination, "01-candidate-profile.md");
       const oldSource = await readFile(profileSource, "utf8");
       await writeFile(profileSource, oldSource.replace("Test Candidate", "Changed Candidate"));
       expect(await readiness()).toEqual({ status: 200,
