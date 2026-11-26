@@ -1,6 +1,7 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PDFDocument, PDFString } from "pdf-lib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApplicationHandoff } from "../src/application/handoff.js";
 import { notifyPendingHandoff, sendHandoffEmail, handoffNotificationSchema } from "../src/application/notification.js";
@@ -9,8 +10,10 @@ import { applicationPackageSchema, runApplicationPackage } from "../src/applicat
 import { ApplicationWorkflow, type ApplicationCheckpoint } from "../src/application/state-machine.js";
 import { DailyQuota } from "../src/application/daily-quota.js";
 import { RetryLedger } from "../src/application/retry-ledger.js";
-import { candidateProfileSchema } from "../src/candidate/schema.js";
+import { compileCandidateMarkdown, compileSearchMarkdown } from "../src/candidate/markdown.js";
 import type { BrowserControl } from "../src/browser/actions.js";
+import { scoreJob } from "../src/matching/score.js";
+import { createJakeResumeSource } from "../src/resume/jake.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
 import { EncryptedApplicationStateStore } from "../src/storage/encrypted-state.js";
 import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
@@ -25,20 +28,7 @@ const job: DiscoveredJob = {
   sourceUpdatedAt: null, firstSeenAt: "2026-11-25T00:00:00Z", discoveredAt: "2026-11-25T00:00:00Z",
   isNew: true, isFresh: true, freshnessBasis: "first-seen", matchedKeywords: [],
 };
-const candidate = candidateProfileSchema.parse({ version: 1,
-  identity: { fullName: "Test Candidate", location: "Dallas, TX",
-    email: "candidate@example.net", phone: "555-0100" },
-  authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
-  skills: {}, education: [], experience: [], projects: [],
-});
-const pkg = applicationPackageSchema.parse({ version: 1, browserRuntime: "owned", job, candidate,
-  source: { provider: "greenhouse", boardToken: "example", company: "Example Co",
-    enabled: true, allowedApplicationHosts: ["jobs.example.com"] },
-  handoff: createApplicationHandoff(job, false),
-  resumeSource: { latex: "synthetic fixture", fingerprint: "f".repeat(64),
-    renderToken: "a".repeat(64), claimIds: ["fixture"] },
-  resumePdfPath: "/tmp/synthetic-resume.pdf", expectedConfirmation: "Application 123456 received",
-});
+const fenced = (tag: string, value: unknown) => `\u0060\u0060\u0060${tag}\n${JSON.stringify(value)}\n\u0060\u0060\u0060\n`;
 const config = handoffNotificationSchema.parse({ version: 1, email: {
   provider: "resend", from: "alerts@example.org", to: "candidate@example.net",
   apiKeySecretRef: "keychain://openapply/test-resend",
@@ -61,6 +51,49 @@ describe("controlled queue to handoff staging flow", () => {
     const directory = await mkdtemp(join(tmpdir(), "openapply-staging-handoff-"));
     directories.push(directory);
     if (process.platform === "win32") await secureWindowsPrivatePath(directory);
+    const candidate = compileCandidateMarkdown(
+      fenced("openapply-identity-json", { version: 1,
+        identity: { fullName: "Test Candidate", location: "Dallas, TX",
+          email: "candidate@example.net", phone: "555-0100" },
+        authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
+        education: [] }),
+      fenced("openapply-history-json", { version: 1, skills: { languages: ["Python"] },
+        experience: [{ employer: "Example Co", title: "Engineer", employmentType: "Intern",
+          start: "2025", end: "2026", claims: [{ id: "python-service",
+            claim: "Built software with Python", skills: ["Python"],
+            evidence: [{ source: "synthetic fixture", uri: "private:fixture" }],
+            status: "verified", allowedUses: ["matching", "resume"] }] }],
+        projects: [], quarantinedClaims: [] }));
+    const preferences = compileSearchMarkdown(fenced("openapply-search-json", { version: 1,
+      targetRoles: ["Software Engineer"],
+      workArrangements: { preferred: ["Remote"], accepted: ["Remote"] },
+      compensation: { preferredBaseFloor: 0 },
+      applicationPolicy: { dailyTarget: 1, dailyHardCap: 1, requireFinalApproval: false } }));
+    const match = scoreJob(job, candidate, preferences);
+    expect(match.eligible).toBe(true);
+    expect(match.matchedSkills).toContain("Python");
+    const resumeSource = createJakeResumeSource(await readFile("templates/resume/main.tex", "utf8"), job, candidate);
+    expect(resumeSource.claimIds).toEqual(["python-service"]);
+    const resumePdfPath = join(directory, "resume.pdf");
+    // This is a controlled PDF fixture with the source token, not an Overleaf render.
+    const pdf = await PDFDocument.create();
+    pdf.setSubject(`OpenApply:${resumeSource.renderToken}`);
+    const page = pdf.addPage([612, 792]);
+    for (const [index, line] of [candidate.identity.fullName, job.title, job.company,
+      "Built software with Python", candidate.identity.email].entries()) {
+      page.drawText(line, { x: 40, y: 740 - index * 20 });
+    }
+    const emailLink = pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [40, 655, 190, 670],
+      Border: [0, 0, 0], A: { Type: "Action", S: "URI",
+        URI: PDFString.of(`mailto:${candidate.identity.email}`) } });
+    page.node.addAnnot(pdf.context.register(emailLink));
+    await writeFile(resumePdfPath, await pdf.save(), { mode: 0o600 });
+    if (process.platform === "win32") await secureWindowsPrivatePath(resumePdfPath);
+    const pkg = applicationPackageSchema.parse({ version: 1, browserRuntime: "owned", job, candidate,
+      source: { provider: "greenhouse", boardToken: "example", company: "Example Co",
+        enabled: true, allowedApplicationHosts: ["jobs.example.com"] },
+      handoff: createApplicationHandoff(job, false), resumeSource, resumePdfPath,
+      expectedConfirmation: "Application 123456 received" });
     const statePath = join(directory, "applications.enc.json");
     const key = Buffer.alloc(32, 7);
     const applicationStore = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
@@ -96,17 +129,19 @@ describe("controlled queue to handoff staging flow", () => {
         if (actions.some((action) => action.name === "Project preference")) approved = true;
         return currentUrl.endsWith("step-2") ? secondPage() : firstPage;
       }, submit: submitClick };
-    const run = async (resumeApproved = false) => runApplicationPackage(pkg, workflow, "/tmp/profile", {
-      verify: async () => ({ jobId: job.id, sourceFingerprint: pkg.resumeSource.fingerprint,
-        pdfSha256: "a".repeat(64), path: pkg.resumePdfPath, pages: 1,
-        verifiedAt: "2026-11-25T00:00:00Z" }),
+    const run = async (resumeApproved = false, activeWorkflow = workflow) =>
+      runApplicationPackage(pkg, activeWorkflow, "/tmp/profile", {
       validateOfficial: async () => true,
-      browserFactory: async () => ({ browser, close: async () => {} }),
+      browserFactory: async (_hosts, artifacts) => {
+        expect(artifacts.get(resumePdfPath)).toMatch(/^[a-f0-9]{64}$/);
+        return { browser, close: async () => {} };
+      },
       ...(resumeApproved ? { resumedJobId: job.id,
         humanAnswerApproval: { jobId: job.id, browserPageId: 0, approveFinalSubmission: true,
           answers: new Map([["Project preference", "Platform"]]) } } : {}),
     });
-    const first = await runApplicationQueue([job], quota, retries, () => "2026-11-25", 1,
+    const first = await runApplicationQueue([job], quota, retries, () => "2026-11-25",
+      preferences.applicationPolicy.dailyHardCap,
       async () => {
         const result = await run();
         if (result.checkpoint.stage === "waiting-human") await send(result.checkpoint);
@@ -114,6 +149,7 @@ describe("controlled queue to handoff staging flow", () => {
       });
     expect(first).toEqual([{ jobId: job.id, status: "waiting-human" }]);
     expect((await workflow.current(job.id))?.resumeUploaded).toBe(true);
+    expect((await workflow.current(job.id))?.sourceFingerprint).toBe(resumeSource.fingerprint);
     expect(submitClick).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledOnce();
     const [endpoint, request] = fetcher.mock.calls[0]!;
@@ -131,10 +167,11 @@ describe("controlled queue to handoff staging flow", () => {
     expect(await runApplicationQueue([job], quota, retries, () => "2026-11-25", 1,
       async () => { throw new Error("quota should prevent rerun"); }))
       .toEqual([{ jobId: job.id, status: "duplicate" }]);
-    const resumed = await run(true);
+    const resumed = await run(true, restartedWorkflow);
     expect(resumed.checkpoint.stage).toBe("submitted");
     expect(resumed.checkpoint.confirmation).toBe("Application 123456 received");
+    expect((await restartedWorkflow.current(job.id))?.stage).toBe("submitted");
     expect(submitClick).toHaveBeenCalledOnce();
-    await expect(run()).rejects.toThrow("Application is submitted");
+    await expect(run(false, restartedWorkflow)).rejects.toThrow("Application is submitted");
   }, process.platform === "win32" ? 60_000 : 5_000);
 });
