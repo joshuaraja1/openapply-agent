@@ -87,7 +87,7 @@ async function run(provider: Provider, name: NameLayout, contact: ContactLayout,
   const resumePath = join(root, "fixture-resume.pdf");
   await writeFile(resumePath, pdfBytes);
   const pdfSha256 = createHash("sha256").update(pdfBytes).digest("hex");
-  const reference = `123456-${caseNumber}`;
+  const reference = `${provider}-123456-${caseNumber}`;
   const job: DiscoveredJob = {
     id: `${provider}:example:${reference}`, provider, company: "Example Co", title: "Software Engineer",
     descriptionText: "Build software", location: "Remote", department: null,
@@ -161,10 +161,12 @@ async function run(provider: Provider, name: NameLayout, contact: ContactLayout,
 }
 
 describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider completions", () => {
+  const applicationUrls: string[] = [];
   for (const provider of ["greenhouse", "ashby"] as const) {
     let caseNumber = 0;
     for (const name of nameLayouts) for (const contact of contactLayouts) for (const step of stepLayouts) {
       const current = ++caseNumber;
+      applicationUrls.push(`https://jobs.example.com/apply/${provider}-123456-${current}`);
       it(`${provider} ${current}: ${name}/${contact}/${step}`, async () => {
         const result = await run(provider, name, contact, step, current);
         expect(result.checkpoint.stage).toBe("submitted");
@@ -189,4 +191,8 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
       }, 30_000);
     }
   }
+  it("uses 200 globally distinct synthetic requisition URLs", () => {
+    expect(applicationUrls).toHaveLength(200);
+    expect(new Set(applicationUrls).size).toBe(200);
+  });
 });
