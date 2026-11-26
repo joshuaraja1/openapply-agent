@@ -162,6 +162,30 @@ until those tests and signed artifacts pass. Apple documents the Developer ID,
 hardened runtime, and notarization requirements in its
 [notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
 
+## Linux verified-bundle staging preview
+
+On Linux only, `npm run distribution:verified-stage -- stage BUNDLE PUBLIC_KEY ROOT`
+copies a signed bundle into a new private revision under `ROOT` and selects it
+for a future installer. Set `OPENAPPLY_RELEASE_KEY_SHA256` to the trusted
+public-key PEM fingerprint obtained through a separate trusted channel. Use
+`status ROOT` to inspect the selected revision and
+`rollback PUBLIC_KEY ROOT` to restore the previous verified selection. Both
+stage and rollback verify the Ed25519 manifest and every artifact hash; rollback
+re-verifies the previous bytes before changing the selection. Selection changes
+are atomic. A failed verification leaves the prior selection intact. A lock
+prevents concurrent selection changes; inspect an abandoned lock after a crash
+before removing it. The command does not unpack, execute, install, activate,
+or downgrade code or candidate state.
+
+The Linux CI smoke signs synthetic bytes with a throwaway test key and exercises
+stage, rollback, corruption, and failed-signature recovery. It is not production
+signing evidence. This staging slice does not provision a production release
+private key or trusted public-key fingerprint, or specify a production Linux
+artifact format. A macOS `.pkg` release requires a valid `Developer ID Installer`
+identity, notarization credentials, and a stapled ticket. Windows needs an
+Authenticode signing certificate or signing service and a trusted thumbprint.
+These credentials must stay outside source, logs, and public CI artifacts.
+
 ## Requirements for a safe updater
 
 An updater must stop scheduled discovery and application workers before
