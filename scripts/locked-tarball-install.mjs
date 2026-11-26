@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,7 @@ export function installLockedTarball(tarballPath, destination) {
     // Validate and extract the same private copy, even if the caller's path changes.
     const archive = join(target, "artifact.tgz");
     copyFileSync(tarballPath, archive);
+    const tarballSha256 = createHash("sha256").update(readFileSync(archive)).digest("hex");
     const listing = run("tar", ["-tzf", archive]).trim().split(/\r?\n/);
     const safe = (path) => path.startsWith("package/") && !path.includes("\\")
       && !path.split("/").includes("..") && !path.includes("\0");
@@ -51,7 +53,7 @@ export function installLockedTarball(tarballPath, destination) {
     run(process.execPath, ["--input-type=module", "-e",
       "await Promise.all(['playwright','@napi-rs/canvas','@napi-rs/keyring','@modelcontextprotocol/sdk/client/index.js'].map(name => import(name)))"],
     { cwd: packageRoot });
-    return { packageRoot, version: pkg.version };
+    return { packageRoot, version: pkg.version, tarballSha256 };
   } catch (error) {
     rmSync(target, { recursive: true, force: true });
     throw error;
