@@ -27,6 +27,7 @@
     "beta:evidence": "tsx src/application/beta-evidence-cli.ts",
     "queue:run": "tsx src/application/queue-cli.ts",
     "autopilot": "tsx src/application/autopilot-cli.ts",
+    "cloud:watch": "tsx src/cloud/wake-cli.ts",
     "profile:compile": "tsx src/candidate/markdown-cli.ts",
     "setup:init": "tsx src/setup/init-cli.ts",
     "setup:ui": "tsx src/setup/ui-cli.ts",

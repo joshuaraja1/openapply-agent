@@ -1,0 +1,12 @@
+{
+  "name": "openapply-wake",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-11-26",
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "openapply-wake",
+    "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    "migrations_dir": "migrations"
+  }]
+}

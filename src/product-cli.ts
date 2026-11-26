@@ -12,6 +12,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "browser:open": () => import("./browser/open-cli.js"),
   "browser:discover": () => import("./browser/cli.js"),
   autopilot: () => import("./application/autopilot-cli.js"),
+  "cloud:watch": () => import("./cloud/wake-cli.js"),
   "queue:run": () => import("./application/queue-cli.js"),
   "application:run": () => import("./application/cli.js"),
   "schedule:install": async () => (await import("./scheduler/cli.js")).runScheduleAction("install"),
