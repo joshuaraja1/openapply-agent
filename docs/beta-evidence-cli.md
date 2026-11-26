@@ -18,7 +18,10 @@ the input cannot backdate consent. To withdraw, provide a private input
 `{"participantId":"candidate-1"}` and run `openapply beta:evidence withdraw`.
 Withdrawal removes that participant's observations from the ledger, but the
 operator must also stop scheduled runs. Re-enrollment requires a new private
-signed form; use a new participant alias to keep runs distinct.
+signed form and a new participant alias. A minimal revocation marker containing
+the old internal alias and withdrawal time remains in encrypted local state so
+the old alias cannot be reused after retention cleanup. The marker is removed
+only by the explicit local state deletion procedure.
 
 After a controlled run, record a job observation with the exact saved job ID:
 
@@ -27,12 +30,16 @@ After a controlled run, record a job observation with the exact saved job ID:
 ```
 
 Run `openapply beta:evidence observe`. The recorder reads the existing
-application checkpoint, stamps the observation with local time, checks that the
+application checkpoint, stamps the observation with local system time, checks that the
 checkpoint was created after consent, verifies the
 provider against the official URL and source ID, derives the URL SHA-256 and
 confirmation-present flag, and refuses an unconfirmed `submitted` claim.
-Older checkpoints without a trusted creation timestamp cannot count toward beta
+Older checkpoints without a locally recorded creation timestamp cannot count toward beta
 evidence. A participant/run/job pair is immutable to prevent quiet replacement.
+Local timestamps and encrypted checkpoints are operational evidence from this
+device; they are not independent or tamper-proof proof of consent or submission.
+The signed form and employer confirmation must be checked during the monitored
+beta review.
 Stage timings are measured by the operator; they are not automatic telemetry.
 Never put names, email addresses, URLs, receipts, answers, or résumé text into
 an input. The strict schema rejects extra fields.

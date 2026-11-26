@@ -31,7 +31,9 @@ export interface BetaObservation extends BetaObservationInput {
   checkpointStage: ApplicationCheckpoint["stage"];
   checkpointUpdatedAt: string;
 }
-export type BetaEvidence = BetaConsent | BetaObservation;
+/** Minimal marker prevents a withdrawn alias from silently re-enrolling after retention cleanup. */
+export interface BetaRevocation { kind: "revocation"; participantId: string; withdrawnAt: string }
+export type BetaEvidence = BetaConsent | BetaObservation | BetaRevocation;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const consentKey = (id: string) => `consent:${id}`;
 const observationKey = (participant: string, run: string, job: string) =>
@@ -59,7 +61,7 @@ export async function recordConsent(store: ApplicationStateStore<BetaEvidence>, 
 }
 
 export async function withdrawConsent(store: ApplicationStateStore<BetaEvidence>, participantId: string,
-  now = new Date()): Promise<BetaConsent> {
+  now = new Date()): Promise<BetaRevocation> {
   const key = consentKey(alias.parse(participantId));
   const prior = await store.read(key);
   if (!prior || prior.state.kind !== "consent" || prior.state.withdrawnAt) {
@@ -67,7 +69,7 @@ export async function withdrawConsent(store: ApplicationStateStore<BetaEvidence>
   }
   const withdrawnAt = now.toISOString();
   if (withdrawnAt < prior.state.recordedAt) throw new Error("Withdrawal predates consent");
-  const record = { ...prior.state, withdrawnAt };
+  const record: BetaRevocation = { kind: "revocation", participantId, withdrawnAt };
   if (!await store.compareAndSwap(key, prior.version, record)) throw new Error("Beta consent changed concurrently");
   return record;
 }

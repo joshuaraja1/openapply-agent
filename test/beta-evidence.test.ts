@@ -88,8 +88,14 @@ describe("private beta evidence", () => {
       await withdrawConsent(store, "candidate-1", new Date("2026-11-26T14:00:00.000Z"));
       expect(await sweepBetaEvidence(store, new Date("2026-11-26T14:00:00.000Z"))).toBe(1);
       expect((await store.snapshotRecords()).filter((row) => row.state?.kind === "observation")).toHaveLength(0);
-      expect(await sweepBetaEvidence(store, new Date("2026-11-27T12:00:00.000Z"))).toBe(1);
-      expect((await store.snapshotRecords()).filter((row) => row.state !== undefined)).toHaveLength(0);
+      expect(await sweepBetaEvidence(store, new Date("2026-11-27T12:00:00.000Z"))).toBe(0);
+      expect((await store.snapshotRecords()).filter((row) => row.state !== undefined).map((row) => row.state))
+        .toEqual([{ kind: "revocation", participantId: "candidate-1",
+          withdrawnAt: "2026-11-26T14:00:00.000Z" }]);
+      await expect(recordConsent(store, { ...consent, retentionDays: 1 },
+        new Date("2026-11-28T12:00:00.000Z"))).rejects.toThrow("already exists");
+      await recordConsent(store, { ...consent, participantId: "candidate-2", retentionDays: 1 },
+        new Date("2026-11-28T12:00:00.000Z"));
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
