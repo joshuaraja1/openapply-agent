@@ -86,6 +86,7 @@ describe("generated artifact controls", () => {
     try {
       await runGeneratedArtifactControl("export-artifacts", root);
       await runGeneratedArtifactControl("quarantine-artifacts", root);
+      await rm(join(root, "removed-artifacts", "manifest.json")); // Crash before archive manifest persisted.
       await rm(join(root, "removed-artifacts", files[0]!.name));
       await expect(runGeneratedArtifactControl("purge-artifacts", root))
         .resolves.toEqual({ action: "artifacts-purged", files: 2 });

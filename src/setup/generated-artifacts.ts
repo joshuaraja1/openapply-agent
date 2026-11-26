@@ -174,6 +174,13 @@ export async function runGeneratedArtifactControl(action: GeneratedArtifactActio
     await rename(archive, source);
     return { action: "artifacts-restored", files: archived.length };
   }
+  // A process can die after the directory move but before writing its manifest.
+  // Make the archive self-contained before removing the export copy.
+  if (!await exists(join(archive, "manifest.json"))) {
+    const path = join(archive, "manifest.json");
+    await writeFile(path, JSON.stringify(manifest), { flag: "wx", mode: 0o600 });
+    if (process.platform === "win32") await secureWindowsPrivatePath(path);
+  }
   if (await exists(exported)) {
     const copies = await scan(exported, true);
     assertMatches(copies, manifest.files, true);
