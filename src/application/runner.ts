@@ -12,7 +12,7 @@ import { fetchSourceBatch } from "../sources/batch.js";
 import type { DiscoveredJob } from "../types.js";
 import { applicationHandoffSchema } from "./handoff.js";
 import { fillApplicationForm, isEmailCodeControl } from "./form-mapper.js";
-import { ApplicationWorkflow, type ApplicationCheckpoint } from "./state-machine.js";
+import { ApplicationWorkflow, needsResumeVisualReview, type ApplicationCheckpoint } from "./state-machine.js";
 import { submitApplication } from "./submit.js";
 import type { HumanAnswerApproval } from "./human-answers.js";
 import { hasStableRequisitionPath, isOriginalRequisition } from "./requisition.js";
@@ -65,7 +65,7 @@ export interface ApplicationBrowserSurface {
   navigate(url: string): Promise<BrowserSnapshot>;
   act(ref: string, action: "click" | "fill" | "select" | "upload", value?: string): Promise<BrowserSnapshot>;
   submit(ref: string, expectedConfirmation: string): Promise<string>;
-  fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot>;
+  fillBatch?(actions: import("./form-mapper.js").FormAction[]): Promise<BrowserSnapshot | import("./form-mapper.js").BatchFillResult>;
   pageId?(): number | undefined;
   groupId?(): string | undefined;
   attach?(pageId: number, expectedUrl: string, expectedGroupId: string,
@@ -189,7 +189,8 @@ export async function runApplicationPackage(
     throw new Error("An interrupted BrowserOS handoff requires explicit same-tab resume");
   }
   if (current && !resumingApproval && !resumingHuman
-    && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)) {
+    && !["discovered", "validated", "matched", "tailored", "rendered", "applying"].includes(current.stage)
+    && !needsResumeVisualReview(current)) {
     throw new Error(`Application is ${current.stage}; inspect or resume it before another run`);
   }
   const [isOfficial, artifact] = await Promise.all([
@@ -211,7 +212,7 @@ export async function runApplicationPackage(
       checkpoint = await workflow.advance(job.id, stage);
     }
   }
-  if (checkpoint.stage === "tailored") checkpoint = await workflow.advance(job.id, "rendered", {
+  if (checkpoint.stage === "tailored" || needsResumeVisualReview(checkpoint)) checkpoint = await workflow.advance(job.id, "rendered", {
     artifactPath: artifact.path, artifactSha256: artifact.pdfSha256,
     sourceFingerprint: artifact.sourceFingerprint,
   });
@@ -499,7 +500,8 @@ export async function runApplicationPackage(
             continued || resumingHuman || authenticatedRedirect ? filled.snapshot.url : undefined,
             dependencies.packagePath, dependencies.packagePath ? applicationPackageFingerprint(pkg) : undefined,
             dependencies.beforeFinalSubmit
-              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined);
+              ? async () => await dependencies.beforeFinalSubmit!(job) : undefined,
+            { company: job.company, title: job.title });
           checkpoint = (await workflow.current(job.id))!;
         }
       }

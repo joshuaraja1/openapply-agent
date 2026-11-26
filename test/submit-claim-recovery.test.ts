@@ -21,6 +21,7 @@ it("recovers a claimed final click only under the workflow lease and alerts once
     const previousMarker = `${previousHandoff}:${createHash("sha256").update(recipient).digest("hex")}`;
     const saved: ApplicationCheckpoint = { jobId: "synthetic-job", officialUrl: "https://example.invalid/apply",
       stage: "submit-claimed", updatedAt: "2026-01-01T00:00:00.000Z",
+      submissionClaimId: "8460d44b-5218-4c76-a389-5d3e5e4c144d",
       handoffId: previousHandoff, emailNotifiedFor: previousMarker,
       artifactPath: "/synthetic/resume.pdf", artifactSha256: "a".repeat(64),
       sourceFingerprint: "b".repeat(64), packagePath: "/synthetic/package.json" };
@@ -29,6 +30,9 @@ it("recovers a claimed final click only under the workflow lease and alerts once
     await holdWorkflowLease(root);
     await expect(recoverClaimedSubmission(workflow, { ...saved, officialUrl: "https://other.invalid" }, root))
       .rejects.toThrow("saved job and URL");
+    await expect(recoverClaimedSubmission(workflow, {
+      ...saved, submissionClaimId: "ea86b36d-eb85-40e5-90ec-63e92bd26a28",
+    }, root)).rejects.toThrow("claim identity changed");
     const recovered = await recoverClaimedSubmission(workflow, saved, root);
     expect(recovered).toMatchObject({ stage: "submission-uncertain", officialUrl: saved.officialUrl,
       packagePath: saved.packagePath, handoffId: previousHandoff });
@@ -44,6 +48,13 @@ it("recovers a claimed final click only under the workflow lease and alerts once
     await notifyPendingHandoff(workflow, (await workflow.current(saved.jobId))!, secrets, config, options);
     expect(email).toHaveBeenCalledTimes(1);
     expect((await workflow.current(saved.jobId))?.emailNotifiedFor).not.toBe(previousMarker);
+    const legacy: ApplicationCheckpoint = { jobId: "legacy-job", officialUrl: "https://example.invalid/apply",
+      stage: "submit-claimed", updatedAt: "2026-01-01T00:00:00.000Z" };
+    await store.compareAndSwap(legacy.jobId, undefined, legacy);
+    await expect(recoverClaimedSubmission(workflow, {
+      ...legacy, updatedAt: "2026-01-02T00:00:00.000Z",
+    }, root)).rejects.toThrow("Legacy interrupted submission checkpoint changed");
+    expect((await recoverClaimedSubmission(workflow, legacy, root)).stage).toBe("submission-uncertain");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

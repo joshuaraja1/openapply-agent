@@ -15,7 +15,8 @@ concurrency:
 jobs:
   benchmark:
     name: Browser benchmark (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    # Keep the required status name stable while pinning Linux browser dependencies.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:

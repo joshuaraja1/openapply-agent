@@ -37,6 +37,16 @@ to the operating-system secret store, never to this repository or JSON files.
    sessions, or indicates that BrowserOS must be checked separately.
    These checks do not verify sign-ins, stored sending keys, OAuth consent,
    actual email delivery, or a real application.
+   The setup screen can create a private queue configuration with one supported
+   official source (Greenhouse, Ashby, Lever, SmartRecruiters, or an HTTPS
+   employer job page), browser mode, and a direct Overleaf project URL. It
+   reads the daily target, hard cap, and final-approval policy from the compiled
+   section 03; edit and recompile that section to change those values. This
+   first-run action preserves existing private configurations and requires
+   final approval. Set `OPENAPPLY_QUEUE_CONFIG` to the resulting private
+   `~/.openapply-agent/queue-runner.json` for scheduled commands. Add further
+   sources in the private discovery input file after validating their exact
+   employer destinations.
 5. If using automatic site login, create a private authentication policy with
    exact domains and OS secret references. Enter each password through
    `npm run secret:put` using stdin. If enabling email-code entry, register your

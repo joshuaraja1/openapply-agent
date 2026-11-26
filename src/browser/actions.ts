@@ -258,6 +258,13 @@ export class AgentBrowser {
     return (await confirmation.innerText()).trim();
   }
 
+  async receiptContext(): Promise<string> {
+    this.assertAllowedPage();
+    const text = await this.requirePage().evaluate(() => document.body?.innerText ?? "");
+    if (text.length > 8_000) throw new Error("Employer receipt text exceeds the verification limit");
+    return text;
+  }
+
   private requirePage(): Page {
     if (!this.page) throw new Error("Navigate to an approved page first");
     return this.page;
