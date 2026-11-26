@@ -15,6 +15,10 @@ VPC endpoints for ECR, S3, and CloudWatch Logs. Run the task manually using
 the task definition does not start compute; running a Fargate task incurs usage
 charges.
 
+The task uses Fargate's default ephemeral storage allocation. AWS documents
+`capabilities.drop` with `ALL` as supported for Fargate task definitions, but
+this exact image and task combination has not yet been run in Fargate.
+
 Do not use this task to apply to jobs. The Docker CI smoke used writable tmpfs
 and a larger shared-memory mount. Fargate does not support those task settings,
 so Chromium must be measured in the real Fargate environment before browser
