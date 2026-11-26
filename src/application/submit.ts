@@ -20,6 +20,7 @@ export async function submitApplication(
   approvedFinalUrl?: string,
   packagePath?: string,
   packageSha256?: string,
+  beforeClick?: () => Promise<string | undefined>,
 ): Promise<void> {
   const current = await workflow.current(jobId);
   const host = new URL(handoff.applicationUrl).hostname;
@@ -45,6 +46,18 @@ export async function submitApplication(
     ...(packagePath ? { packagePath } : {}),
     ...(packageSha256 ? { packageSha256 } : {}),
   });
+  // The durable claim prevents any restart from repeating the final click.
+  // Recheck mutable local policy after the claim and immediately before the
+  // browser action; a denied claim remains conservative and requires review.
+  let policyBlocker: string | undefined;
+  try { policyBlocker = await beforeClick?.(); }
+  catch { policyBlocker = "Private provider policy is unavailable before the final click"; }
+  if (policyBlocker) {
+    await workflow.advance(jobId, "submission-uncertain", {
+      blocker: `${policyBlocker}; no final click was attempted in this run`,
+    });
+    return;
+  }
   try {
     const confirmation = await browser.submit(submitRef, expectedConfirmation);
     if (hasUnboundReceiptUrl(jobId, handoff.applicationUrl, browser.currentUrl())) {
