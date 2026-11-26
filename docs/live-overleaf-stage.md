@@ -13,9 +13,14 @@ site or submits an application.
    `OPENAPPLY_BROWSEROS_ENDPOINT` to its loopback MCP endpoint.
 3. Set `OPENAPPLY_LIVE_OVERLEAF_STAGE=run-once`, then run
    `npm test -- test/live-overleaf.stage.test.ts` from the repository root.
-4. Render the resulting PDF page to an image and inspect legibility, spacing,
-   clipping, overlap, section order, and broken characters. Remove the test
-   project when finished.
+   The test removes its temporary PDF on completion. To keep a PDF for visual
+   review, also set `OPENAPPLY_OVERLEAF_STAGE_ARTIFACT_DIR` to an absolute
+   user-only directory outside the repository. The renderer checks its privacy
+   permissions. BrowserOS download/retention remains blocked on Windows until
+   its private-file ACL path is implemented.
+4. Render the retained PDF page to an image and inspect legibility, spacing,
+   clipping, overlap, section order, and broken characters. Remove the local
+   artifact and test project when finished.
 
 Without the explicit opt-in, CI skips this test. A successful automated check
 proves this one synthetic render and the verifier's current checks. It does not

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { expect, it } from "vitest";
 import { connectBrowserOs, type BrowserToolClient, type BrowserToolResult } from "../src/browser/client.js";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
@@ -30,7 +30,7 @@ it.runIf(enabled)("compiles and verifies a synthetic résumé in a disposable Ov
   });
   const candidate = candidateProfileSchema.parse({
     version: 1,
-    identity: { fullName: `Fixture ${suffix}`, location: "Dallas, TX",
+    identity: { fullName: `Fixture ${suffix}`, location: "Example City, TX",
       email: `fixture-${suffix}@example.com`, phone: "555-0100" },
     authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
     skills: { languages: ["Python", "SQL"] },
@@ -40,7 +40,14 @@ it.runIf(enabled)("compiles and verifies a synthetic résumé in a disposable Ov
     projects: [{ name: "Sample Data Project", claims: [claim("sql", "Processed sample records with SQL", "SQL")] }],
   });
   const source = createJakeResumeSource(await readFile("templates/resume/main.tex", "utf8"), job, candidate);
-  const outputDirectory = await mkdtemp(join(tmpdir(), "openapply-live-overleaf-"));
+  const retainedDirectory = process.env.OPENAPPLY_OVERLEAF_STAGE_ARTIFACT_DIR;
+  if (retainedDirectory && !isAbsolute(retainedDirectory)) {
+    throw new Error("Visual review artifact directory must be absolute and private");
+  }
+  if (retainedDirectory && process.platform === "win32") {
+    throw new Error("BrowserOS Overleaf artifact retention requires Windows private-file ACL support");
+  }
+  const outputDirectory = retainedDirectory ?? await mkdtemp(join(tmpdir(), "openapply-live-overleaf-"));
   let connection: Awaited<ReturnType<typeof connectBrowserOs>> | undefined;
   try {
     connection = await connectBrowserOs(endpoint);
@@ -50,7 +57,7 @@ it.runIf(enabled)("compiles and verifies a synthetic résumé in a disposable Ov
     expect(artifact).toMatchObject({ jobId: job.id, sourceFingerprint: source.fingerprint, pages: 1 });
     expect(artifact.pdfSha256).toMatch(/^[a-f0-9]{64}$/);
   } finally {
-    await connection?.close();
-    await rm(outputDirectory, { recursive: true, force: true });
+    try { await connection?.close(); }
+    finally { if (!retainedDirectory) await rm(outputDirectory, { recursive: true, force: true }); }
   }
 }, 90_000);
