@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +60,8 @@ describe("local setup state controls", () => {
       expect((await post("quarantine", "STOPPED WORKFLOWS")).status).toBe(200);
       expect(await store.read("fixture:1")).toBeUndefined();
       expect(await fetch(endpoint, { headers }).then((r) => r.json())).toEqual({
-        exportReady: true, archiveReady: true });
+        exportReady: true, archiveReady: true,
+        artifactExportReady: false, artifactArchiveReady: false });
       expect((await post("restore", "STOPPED WORKFLOWS")).status).toBe(200);
       expect((await store.read("fixture:1"))?.state).toEqual({
         stage: "waiting-human", email: "synthetic@example.com" });
@@ -69,10 +70,28 @@ describe("local setup state controls", () => {
       await expect(lstat(join(root, "removed-state"))).rejects.toMatchObject({ code: "ENOENT" });
       expect(await store.read("fixture:1")).toBeUndefined();
       expect(await readFile(exportPath, "utf8")).toContain("synthetic@example.com");
+      const artifacts = join(root, "artifacts");
+      await ensurePrivateDirectory(artifacts);
+      const pdf = join(artifacts, `${"a".repeat(16)}-${randomUUID()}.pdf`);
+      await writeFile(pdf, "%PDF-1.4 synthetic", { mode: 0o600 });
+      if (process.platform === "win32") await secureWindowsPrivatePath(pdf);
+      const savedConfig = await readFile(configPath, "utf8");
+      await writeFile(configPath, JSON.stringify({ ...JSON.parse(savedConfig),
+        outputDirectory: join(root, "custom-output") }));
+      expect((await post("export-artifacts", "EXPORT")).status).toBe(409);
+      await writeFile(configPath, savedConfig);
+      expect((await post("export-artifacts", "EXPORT")).status).toBe(200);
+      expect((await post("quarantine-artifacts", "STOPPED WORKFLOWS")).status).toBe(200);
+      expect((await post("restore-artifacts", "STOPPED WORKFLOWS")).status).toBe(200);
+      expect((await post("quarantine-artifacts", "STOPPED WORKFLOWS")).status).toBe(200);
+      expect((await post("purge-artifacts", "STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE")).status).toBe(200);
+      await expect(lstat(join(root, "artifact-export"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(join(root, "removed-artifacts"))).rejects.toMatchObject({ code: "ENOENT" });
       await expect(lstat(join(root, "workflow.lock"))).rejects.toMatchObject({ code: "ENOENT" });
       const html = await fetch(ui.url).then((r) => r.text());
       expect(html).toContain("Purge permanently removes that archive");
       expect(html).toContain("the export, onboarding templates, and OS secrets remain");
+      expect(html).toContain("Export artifacts");
     } finally { await ui.close(); await rm(base, { recursive: true, force: true }); }
   }, 120_000);
 });
