@@ -31,3 +31,5 @@ jobs:
       - run: npm run distribution:staging-smoke
       - run: npm run distribution:locked-smoke
       - run: npm run distribution:release-gate-smoke
+      - if: matrix.os == 'macos-latest'
+        run: npm run distribution:macos-pkg-smoke

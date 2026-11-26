@@ -37,6 +37,8 @@
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
     "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
     "distribution:release-gate-smoke": "node --test scripts/verify-release-bundle.test.mjs",
+    "distribution:macos-pkg-smoke": "node --test scripts/build-macos-pkg.test.mjs",
+    "distribution:macos-pkg": "node scripts/build-macos-pkg.mjs",
     "distribution:verify-release": "node scripts/verify-release-bundle.mjs",
     "distribution:staging": "node scripts/staging-user-install.mjs",
     "distribution:locked-smoke": "node --test scripts/locked-tarball-install.test.mjs",
