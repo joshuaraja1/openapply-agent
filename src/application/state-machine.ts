@@ -38,6 +38,8 @@ export interface ApplicationCheckpoint {
   artifactSha256?: string;
   sourceFingerprint?: string;
   confirmation?: string;
+  /** One durable identity for the final-click attempt; retained through recovery. */
+  submissionClaimId?: string;
   blocker?: string;
   browserPageId?: number;
   browserPageUrl?: string;
@@ -148,6 +150,7 @@ export class ApplicationWorkflow {
       ...current.state,
       ...details,
       stage,
+      ...(stage === "submit-claimed" ? { submissionClaimId: randomUUID() } : {}),
       ...(stage === "waiting-human" ? { handoffId: randomUUID() } : {}),
       updatedAt: new Date().toISOString(),
     };
