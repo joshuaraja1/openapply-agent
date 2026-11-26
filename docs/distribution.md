@@ -36,9 +36,10 @@ so an interrupted removal can be retried, and removes only that directory.
 Candidate files, SQLite state, keychain secrets, and the shared
 Chromium cache are outside that directory and remain in place. This script
 does not create a launcher, register a scheduler, perform upgrades, or verify
-release signatures or dependency integrity independently of npm registry
-resolution. Use it only for controlled staging and testing; do not publish it
-as a public installer.
+release signatures. `npm install` can resolve runtime dependencies from mutable
+registry metadata; this script does not pin or independently verify them before
+starting the CLI. Use it only for controlled staging and testing with trusted
+artifacts; do not publish it as a public installer.
 
 ## Requirements for a safe updater
 
