@@ -6,7 +6,7 @@ The report records the median and p95 elapsed time for five runs of 100 distinct
 synthetic jobs. These runs exercise quota reservations, retry checks, canonical
 claim callbacks, and queue outcomes using in-memory stores and no network.
 
-The same CI job runs `npm run application:benchmark` and uploads
+The same CI job runs `node scripts/benchmark-application-stage.mjs` and uploads
 `application-benchmark.json`. It measures 30 in-memory queue-to-job-bound-confirmation
 fixtures through the production queue, checkpoint, and submission functions.
 It then simulates 1,000 distinct ambiguous post-click outcomes and verifies
@@ -14,6 +14,7 @@ that each stays `submission-uncertain` and a retry never repeats its final click
 The report includes sample counts, failures, median, p95, and click counts.
 This is a **synthetic in-process safety and overhead measurement**. It excludes
 real discovery, browser, PDF, employer network, and process startup.
+For a local JSON report, run `npm run --silent application:benchmark`.
 
 The recovery measurement starts a child process, writes an encrypted durable
 `submit-claimed` checkpoint and one **simulated** final-click marker. A second
