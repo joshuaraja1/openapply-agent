@@ -16,9 +16,10 @@ owned-browser credential entry requires a verified same-origin HTTPS POST form.
 Node 22/24 verification, controlled Chromium provider tests, Windows private
 storage smoke, secret scanning, dependency audit, and CodeQL run in CI. A
 controlled two-step Chromium test verifies a browser restart, fresh résumé
-upload, approved answer, and confirmed submission. One operator email alert
-was delivered through Resend's testing sender; delivery from the product's own
-domain and to beta candidates remains unverified.
+upload, approved answer, and confirmed submission. One operator handoff alert
+was delivered from a verified OpenApply sending domain to the owner's inbox
+using a domain-scoped Resend key. Queue-triggered delivery and delivery to beta
+candidates remain unverified.
 
 **This is a beta foundation, not an unattended public release.** Complete the
 first-run and exception flow, signed installers and updater with rollback,
