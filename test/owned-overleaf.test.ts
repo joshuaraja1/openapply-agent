@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +23,7 @@ const verified = (path: string): VerifiedResumeArtifact => ({ path, jobId: job.i
   pdfSha256: createHash("sha256").update(Buffer.alloc(200, 7)).digest("hex"), pages: 1,
   verifiedAt: new Date().toISOString() });
 
-function fixture() {
+function fixture(onDownload?: (path: string) => void) {
   const fill = vi.fn(async () => {});
   const compileClick = vi.fn(async () => {});
   const downloadClick = vi.fn(async () => {});
@@ -44,6 +45,7 @@ function fixture() {
       begin?.({ guid: "fixture" });
       const filePath = join(downloadDirectory, "fixture");
       await writeFile(filePath, Buffer.alloc(200, 7));
+      onDownload?.(filePath);
       progress?.({ guid: "fixture", receivedBytes: 200, totalBytes: 200,
         state: "completed", filePath });
       return {};
@@ -125,6 +127,26 @@ describe("owned Overleaf renderer", () => {
       expect(close).toHaveBeenCalledOnce();
     } finally { await rm(root, { recursive: true, force: true }); }
   }, 30_000);
+
+  it.skipIf(process.platform !== "win32")(
+    "rejects a browser download with a shared Windows ACL before publishing a PDF", async () => {
+      const root = await mkdtemp(join(tmpdir(), "openapply-owned-overleaf-shared-"));
+      await secureWindowsPrivatePath(root);
+      const output = join(root, "output");
+      try {
+        const { context, close } = fixture((path) => {
+          execFileSync("icacls", [path, "/grant", "*S-1-1-0:(R)"], { stdio: "ignore" });
+        });
+        const verify = vi.fn(async (path: string) => verified(path));
+        await expect(renderOwnedOverleafResume(projectUrl, job, candidate, source, output, {
+          launch: async () => ({ context, close }), verify: verify as never,
+        })).rejects.toThrow("ACL is unsafe");
+        expect(verify).not.toHaveBeenCalled();
+        expect(await readdir(output)).toEqual([]);
+        expect(close).toHaveBeenCalledOnce();
+      } finally { await rm(root, { recursive: true, force: true }); }
+    }, 30_000,
+  );
 
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1" || process.platform === "win32")(
     "compiles and downloads through a controlled Chromium page", async () => {

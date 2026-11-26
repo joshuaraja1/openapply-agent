@@ -49,3 +49,21 @@ The user may instead ask the agent to create a fresh private Overleaf project fo
 9. Upload only the verified role-specific PDF to the application.
 
 If Overleaf is unavailable, stop and report the blocker unless the private run policy explicitly permits a local LaTeX fallback.
+
+## Windows download boundary
+
+The owned-browser renderer places downloads in an owner-only temporary directory.
+Before it reads a downloaded PDF, it verifies the directory's protected ACL
+and the file's effective owner-only ACL. The file may inherit the owner rule
+from that validated directory. It then reads through a pinned file handle
+whose identity still matches the checked path.
+A Windows process running as an administrator may create a file owned by the
+built-in Administrators group despite that owner-only access rule. After the
+strict effective-rule check, the renderer changes only that trusted group owner
+to the current user and rechecks the rules and owner; unrelated owners fail.
+A download with an added shared access rule fails before PDF verification or
+publication; the temporary directory is removed. The Windows CI smoke includes
+this negative case. BrowserOS downloads remain disabled on Windows until their
+separate artifact ACL path has the same protection. This test does not close the
+full Windows private-file matrix in issue #54 or replace a standard-user install
+and rollback test.

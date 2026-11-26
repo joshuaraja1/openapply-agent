@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open, rm, unlink, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import type { BrowserRuntime } from "../browser/runtime.js";
@@ -10,8 +10,9 @@ import type { ResumeSource } from "./jake.js";
 import { assertOverleafProjectUrl } from "./overleaf.js";
 import { verifyResumePdf, type VerifiedResumeArtifact } from "./verify-pdf.js";
 import { ResumeVisualReviewRequiredError } from "./visual-qa.js";
-import { ensurePrivateDirectory } from "../storage/private-path.js";
-import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
+import { assertSameFileIdentity, ensurePrivateDirectory } from "../storage/private-path.js";
+import { sealWindowsPrivateChildPath, secureWindowsPrivatePath }
+  from "../storage/windows-acl.js";
 
 type Launch = (options: { profileDirectory: string; headless: boolean }) => Promise<BrowserRuntime>;
 const maxPdfBytes = 5_000_000;
@@ -117,11 +118,20 @@ export async function renderOwnedOverleafResume(
     if (!downloadGuid || downloadedPath !== join(downloadDirectory, downloadGuid)) {
       throw new Error("Browser downloaded the PDF outside the private directory");
     }
-    const downloaded = await lstat(downloadedPath);
-    if (!downloaded.isFile() || downloaded.isSymbolicLink() || downloaded.size < 100
-      || downloaded.size > maxPdfBytes) throw new Error("Overleaf downloaded an invalid PDF");
-    const bytes = await readFile(downloadedPath);
-    if (bytes.length !== downloaded.size) throw new Error("Overleaf PDF changed during verification");
+    const handle = await open(downloadedPath, "r");
+    let bytes: Buffer;
+    try {
+      const pinned = await handle.stat();
+      if (process.platform === "win32") await sealWindowsPrivateChildPath(downloadedPath);
+      const downloaded = await lstat(downloadedPath);
+      if (!downloaded.isFile() || downloaded.isSymbolicLink() || downloaded.size < 100
+        || downloaded.size > maxPdfBytes || !pinned.isFile()) {
+        throw new Error("Overleaf downloaded an invalid PDF");
+      }
+      assertSameFileIdentity(pinned, downloaded);
+      bytes = await handle.readFile();
+      if (bytes.length !== downloaded.size) throw new Error("Overleaf PDF changed during verification");
+    } finally { await handle.close(); }
     const name = createHash("sha256").update(job.id).digest("hex").slice(0, 16);
     artifactPath = join(directory, `${name}-${randomUUID()}.pdf`);
     await writeFile(artifactPath, bytes, { flag: "wx", mode: 0o600 });
