@@ -39,7 +39,8 @@ function browserFixture(extraRequired = false) {
   const handles = fields.map((field) => ({
     isVisible: async () => true,
     evaluate: async (callback: (node: object) => unknown) => callback({ tagName: field.tag,
-      labels: [{ textContent: field.name }], textContent: field.name, isConnected: true,
+      labels: [{ textContent: field.name, cloneNode: () => ({ textContent: field.name,
+        querySelectorAll: () => [] }) }], textContent: field.name, isConnected: true,
       matches: () => field.required, getAttribute: (key: string) => key === "name" ? field.name : null }),
     getAttribute: async (key: string) => key === "name" ? field.name : key === "type" ? field.type : null,
     innerText: async () => field.name,
@@ -51,8 +52,8 @@ function browserFixture(extraRequired = false) {
   const page = { url: () => job.applicationUrl, title: async () => "Apply", goto: async () => {},
     evaluate: async () => ({ text: "Example Co Software Engineer application", overflow: false }),
     locator: () => ({ elementHandles: async () => handles }),
-    getByText: () => ({ count: async () => confirmationVisible ? 1 : 0,
-      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) };
+    getByText: () => ({ filter: () => ({ count: async () => confirmationVisible ? 1 : 0,
+      first: () => ({ waitFor: async () => {}, innerText: async () => "Thank you for applying" }) }) }) };
   const context = { route: async () => {}, newPage: async () => page, pages: () => [page] } as unknown as BrowserContext;
   return { context, close: vi.fn(async () => {}), fields, uploaded };
 }
