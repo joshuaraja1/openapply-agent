@@ -16,6 +16,8 @@ export interface FormPlan {
   blockers: string[];
 }
 
+export interface BatchFillResult { snapshot: BrowserSnapshot; uploaded: boolean }
+
 function key(control: BrowserControl): string {
   return `${control.tag}:${control.type ?? ""}:${control.name.trim().toLowerCase()}`;
 }
@@ -107,7 +109,7 @@ export function planApplicationForm(snapshot: BrowserSnapshot, candidate: Candid
 }
 
 export async function fillApplicationForm(
-  browser: Pick<AgentBrowser, "act"> & { fillBatch?: (actions: FormAction[]) => Promise<BrowserSnapshot> },
+  browser: Pick<AgentBrowser, "act"> & { fillBatch?: (actions: FormAction[]) => Promise<BrowserSnapshot | BatchFillResult> },
   snapshot: BrowserSnapshot,
   candidate: CandidateProfile,
   resumePath: string,
@@ -132,9 +134,11 @@ export async function fillApplicationForm(
     return blockers;
   };
   if (browser.fillBatch) {
-    const filled = await browser.fillBatch(plan.actions);
+    const batch = await browser.fillBatch(plan.actions);
+    const filled = "snapshot" in batch ? batch.snapshot : batch;
     if (filled.url !== snapshot.url) throw new Error("Application page changed during form filling");
-    const uploaded = plan.actions.some((action) => action.action === "upload");
+    const uploaded = "snapshot" in batch ? batch.uploaded
+      : plan.actions.some((action) => action.action === "upload");
     return { snapshot: filled, blockers: postFillBlockers(filled, uploaded), uploaded };
   }
   let current = snapshot;
