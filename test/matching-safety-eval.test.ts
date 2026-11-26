@@ -123,9 +123,26 @@ describe("automatic match safety evaluation", () => {
     }
   });
 
-  it("accepts either supported tool in an OR requirement", () => {
+  it("holds OR requirements until each alternative can be parsed", () => {
     expect(scoreJob({ ...base, descriptionText: "TypeScript. Must have TypeScript or JavaScript." },
-      candidate, preferences).eligible).toBe(true);
+      candidate, preferences).eligible).toBe(false);
+  });
+
+  it.each([
+    "Must have US citizenship, Kubernetes.",
+    "Must have US work authorization without sponsorship, Kubernetes.",
+    "Must have TypeScript and Kubernetes.",
+    "Must have TypeScript or Kubernetes.",
+    "Must have TypeScript/Kubernetes.",
+    "Must have TypeScript (Kubernetes preferred).",
+    "Must have TypeScript, Kubernetes - Python preferred.",
+    "Bachelor's degree not required, Kubernetes required.",
+  ])("holds compound mandatory text: %s", (text) => {
+    const citizen = candidateProfileSchema.parse({ ...candidate,
+      education: [{ id: "citizenship", claim: "US citizenship", skills: [],
+        evidence: [{ source: "user-confirmed", uri: "private:synthetic" }], status: "user-confirmed",
+        allowedUses: ["matching"] }] });
+    expect(scoreJob({ ...base, descriptionText: `TypeScript. ${text}` }, citizen, preferences).eligible).toBe(false);
   });
 
   it("does not accept expired credentials", () => {

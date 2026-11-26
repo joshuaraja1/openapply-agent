@@ -30,61 +30,60 @@ export function assessHardRequirements(description: string, candidate: Candidate
     for (const part of line.split(/[.!?;](?=\s|$)/).map((item) => item.trim()).filter(Boolean)) {
       const mandatory = requiredSection || /\b(?:must|require(?:d|s|ments?)?|minimum|at least|need to have)\b/i.test(part);
       if (!mandatory) continue;
+      // A compound statement cannot be proven from one matching skill or
+      // free-text claim. Check before optional-language handling so a comma
+      // cannot hide a second mandatory condition.
+      if (/[(),/]|\b(?:and|or|but)\b/i.test(part)) {
+        blockers.add(`Compound mandatory qualification needs review: ${part.slice(0, 120)}`);
+        continue;
+      }
       if (/\b(?:not required|no requirement|no\s+on[ -]?site\s+work\s+required)\b/i.test(part)) {
-        if (/\b(?:and|but)\b/i.test(part)) {
-          blockers.add(`Mixed optional and mandatory qualifications need review: ${part.slice(0, 120)}`);
-        }
         continue;
       }
       if (/\b(?:preferred|nice to have|optional)\b/i.test(part)) {
         blockers.add(`Mixed mandatory and optional qualifications need review: ${part.slice(0, 120)}`);
         continue;
       }
-      // An "and" joins mandatory conditions. An "or" is handled only for
-      // simple skill alternatives below; other alternatives need review.
-      for (const clause of part.split(/\s+(?:and|but)\s+/i)) {
-        const statement = clause.replace(/^[•*\-]\s*/, "").trim();
-        if (/\b(?:bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate|degree|diploma)\b/i.test(statement)) {
-          blockers.add("Degree requirement needs structured completion and field evidence");
-          continue;
+      const statement = part.replace(/^[•*\-]\s*/, "").trim();
+      if (/\b(?:bachelor(?:'s)?|master(?:'s)?|ph\.?d\.?|doctorate|degree|diploma)\b/i.test(statement)) {
+        blockers.add("Degree requirement needs structured completion and field evidence");
+        continue;
+      }
+      if (/\b(?:clearance|secret|top secret|ts\/sci)\b/i.test(statement)) {
+        blockers.add("Clearance requirement needs structured level and active-status evidence");
+        continue;
+      }
+      if (/\b(?:license|licence|certification|certified|certificate)\b/i.test(statement)) {
+        blockers.add("License or certification requirement needs structured currency evidence");
+        continue;
+      }
+      if (/\b\d{1,2}\+?\s+years?\b/i.test(statement)) {
+        blockers.add("Experience-years requirement needs structured duration evidence");
+        continue;
+      }
+      if (/\b(?:itar|export.control|us person|u\.s\. person)\b/i.test(statement)) {
+        blockers.add("Export-control eligibility needs candidate review");
+        continue;
+      }
+      if (/\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(statement)) {
+        if (!evidence.claims.some((claim) => /\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(claim)
+          && !/\b(?:not|never|formerly)\b/i.test(claim))) {
+          blockers.add("US citizenship requirement needs an approved matching claim");
         }
-        if (/\b(?:clearance|secret|top secret|ts\/sci)\b/i.test(statement)) {
-          blockers.add("Clearance requirement needs structured level and active-status evidence");
-          continue;
+        continue;
+      }
+      if (/\b(?:work (?:authorization|authorisation|eligibility)|authorized to work|legally work|without (?:visa )?sponsorship|sponsorship (?:is )?not available)\b/i.test(statement)) {
+        if (!/\b(?:us|united states)\b/i.test(statement)
+          || !candidate.authorization.countries.some((country) => /^(?:us|u\.?s\.?a?\.?|united states)$/i.test(country))
+          || candidate.authorization.sponsorshipRequiredNowOrFuture) {
+          blockers.add("US work authorization without sponsorship needs candidate confirmation");
         }
-        if (/\b(?:license|licence|certification|certified|certificate)\b/i.test(statement)) {
-          blockers.add("License or certification requirement needs structured currency evidence");
-          continue;
-        }
-        if (/\b\d{1,2}\+?\s+years?\b/i.test(statement)) {
-          blockers.add("Experience-years requirement needs structured duration evidence");
-          continue;
-        }
-        if (/\b(?:itar|export.control|us person|u\.s\. person)\b/i.test(statement)) {
-          blockers.add("Export-control eligibility needs candidate review");
-          continue;
-        }
-        if (/\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(statement)) {
-          if (!evidence.claims.some((claim) => /\b(?:u\.?s\.?|united states)\s+citizen(?:ship)?\b/i.test(claim)
-            && !/\b(?:not|never|formerly)\b/i.test(claim))) {
-            blockers.add("US citizenship requirement needs an approved matching claim");
-          }
-          continue;
-        }
-        if (/\b(?:work (?:authorization|authorisation|eligibility)|authorized to work|legally work|without (?:visa )?sponsorship|sponsorship (?:is )?not available)\b/i.test(statement)) {
-          if (!/\b(?:us|united states)\b/i.test(statement)
-            || !candidate.authorization.countries.some((country) => /^(?:us|u\.?s\.?a?\.?|united states)$/i.test(country))
-            || candidate.authorization.sponsorshipRequiredNowOrFuture) {
-            blockers.add("US work authorization without sponsorship needs candidate confirmation");
-          }
-          continue;
-        }
-        const tool = /^(?:must (?:have|know|use)|(?:experience|proficiency|knowledge) (?:with|in|of)|(?:required|minimum) (?:experience|proficiency) (?:with|in))\s+(.+?)(?:\s+(?:experience|skills?))?$/i.exec(statement);
-        const names = (tool?.[1] ?? statement).replace(/\s+required\.?$/i, "").replace(/[.!]$/, "")
-          .split(/\s+or\s+/i).map((name) => name.trim());
-        if (!names.length || !names.some(hasSkill)) {
-          blockers.add(`Mandatory qualification needs review: ${statement.slice(0, 120)}`);
-        }
+        continue;
+      }
+      const tool = /^(?:must (?:have|know|use)|(?:experience|proficiency|knowledge) (?:with|in|of)|(?:required|minimum) (?:experience|proficiency) (?:with|in))\s+(.+?)(?:\s+(?:experience|skills?))?$/i.exec(statement);
+      const name = (tool?.[1] ?? statement).replace(/\s+required\.?$/i, "").replace(/[.!]$/, "").trim();
+      if (!hasSkill(name)) {
+        blockers.add(`Mandatory qualification needs review: ${statement.slice(0, 120)}`);
       }
     }
   }
