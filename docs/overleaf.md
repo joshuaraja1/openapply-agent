@@ -22,10 +22,11 @@ recompiles, downloads the PDF, and verifies it before writing a private
 application package. The raster gate catches visual defects missed by text
 extraction. It now rejects a page with fewer than 100 pixels whose contrast
 against white paper reaches 4.5:1, and runs the real PDF fixture on Linux,
-Windows, and the owned-browser smoke job. This is a whole-page floor: one dark
-heading can coexist with unreadable pale body text, so the check does not yet
-judge contrast per text region, typography, or section spacing.
-Visually review those qualities before enabling unattended submission.
+Windows, and the owned-browser smoke job. The verifier also checks contrast
+and ink coverage per extracted text region, flags very small text and cramped
+uppercase section headings, and routes uncertain output to visual review.
+These are conservative heuristics, not a complete proof of typography or
+layout quality. See [the fixture and timing evidence](pdf-visual-qa.md).
 
 ## One-time setup
 
