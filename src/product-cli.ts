@@ -26,6 +26,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   "oauth:connect": () => import("./auth/oauth-connect-cli.js"),
   "state:cutover": () => import("./storage/sqlite-cutover-cli.js"),
   "state:control": () => import("./storage/data-controls-cli.js"),
+  "beta:evidence": () => import("./application/beta-evidence-cli.js"),
 };
 
 const command = process.argv[2];

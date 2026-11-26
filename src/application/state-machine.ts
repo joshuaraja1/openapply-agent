@@ -51,6 +51,7 @@ export interface ApplicationCheckpoint {
   handoffId?: string;
   desktopNotifiedFor?: string;
   emailNotifiedFor?: string;
+  createdAt?: string;
   updatedAt: string;
 }
 
@@ -92,8 +93,9 @@ export class ApplicationWorkflow {
   }
 
   async create(jobId: string, officialUrl: string): Promise<ApplicationCheckpoint> {
+    const now = new Date().toISOString();
     const checkpoint: ApplicationCheckpoint = {
-      jobId, officialUrl, stage: "discovered", updatedAt: new Date().toISOString(),
+      jobId, officialUrl, stage: "discovered", createdAt: now, updatedAt: now,
     };
     const version = await this.store.compareAndSwap(jobId, undefined, checkpoint);
     if (!version) throw new Error(`Application ${jobId} already exists`);

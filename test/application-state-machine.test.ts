@@ -9,7 +9,8 @@ const artifact = (path: string) => ({ artifactPath: path,
 describe("application workflow", () => {
   it("requires a verified artifact and employer confirmation", async () => {
     const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore<ApplicationCheckpoint>());
-    await workflow.create("job-1", "https://jobs.example.com/1");
+    const created = await workflow.create("job-1", "https://jobs.example.com/1");
+    expect(created.createdAt).toBe(created.updatedAt);
     await expect(workflow.create("job-1", "https://jobs.example.com/1")).rejects.toThrow("already exists");
     await workflow.advance("job-1", "validated");
     await workflow.advance("job-1", "matched");
@@ -22,6 +23,7 @@ describe("application workflow", () => {
     await expect(workflow.advance("job-1", "submitted")).rejects.toThrow("confirmation");
     const submitted = await workflow.advance("job-1", "submitted", { confirmation: "Application 123" });
     expect(submitted).toMatchObject({ stage: "submitted", submissionClaimId: claimed.submissionClaimId });
+    expect(submitted.createdAt).toBe(created.createdAt);
     await expect(workflow.advance("job-1", "applying")).rejects.toThrow("Invalid");
   });
 

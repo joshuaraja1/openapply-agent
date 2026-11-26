@@ -48,6 +48,9 @@ provider, application/requisition ID, stage, outcome, confirmation present
 (yes/no), retry count, crash count, and stage timing summaries. Store employer
 URLs and résumé fingerprints only in encrypted local state. Publish aggregate
 counts and sanitized failure categories; never publish raw pages or answers.
+The local `beta:evidence` recorder and its limits are described in
+`beta-evidence-cli.md`; it records operator-supplied observations against saved
+application checkpoints and produces aggregate counts without candidate IDs.
 
 The release report includes:
 
