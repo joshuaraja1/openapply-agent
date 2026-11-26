@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApplicationHandoff } from "../src/application/handoff.js";
 import { notifyPendingHandoff, sendHandoffEmail, handoffNotificationSchema } from "../src/application/notification.js";
 import { runApplicationQueue } from "../src/application/queue-runner.js";
@@ -9,6 +12,7 @@ import { RetryLedger } from "../src/application/retry-ledger.js";
 import { candidateProfileSchema } from "../src/candidate/schema.js";
 import type { BrowserControl } from "../src/browser/actions.js";
 import { MemoryApplicationStateStore } from "../src/storage/contracts.js";
+import { EncryptedApplicationStateStore } from "../src/storage/encrypted-state.js";
 import type { DiscoveredJob } from "../src/types.js";
 
 const job: DiscoveredJob = {
@@ -46,18 +50,28 @@ const answer: BrowserControl = { ref: "answer", tag: "input", role: "textbox", n
   value: "", required: true, options: [] };
 const submit: BrowserControl = { ref: "submit", tag: "button", role: "button", name: "Submit application",
   type: "submit", value: null, required: false, options: [] };
+const directories: string[] = [];
+afterEach(async () => {
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+});
 
 describe("controlled queue to handoff staging flow", () => {
   it("sends one generic alert for an unknown field, replays safely, then submits only after an approved answer", async () => {
-    const workflow = new ApplicationWorkflow(new MemoryApplicationStateStore<ApplicationCheckpoint>());
+    const directory = await mkdtemp(join(tmpdir(), "openapply-staging-handoff-"));
+    directories.push(directory);
+    const statePath = join(directory, "applications.enc.json");
+    const key = Buffer.alloc(32, 7);
+    const applicationStore = new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key);
+    const workflow = new ApplicationWorkflow(applicationStore);
     const quota = new DailyQuota(new MemoryApplicationStateStore());
     const retries = new RetryLedger(new MemoryApplicationStateStore());
     const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response('{"id":"email_1"}', { status: 200 }));
     const secrets = { get: vi.fn(async () => "synthetic-api-key"),
       put: async () => {}, delete: async () => {} };
-    const send = async (checkpoint: ApplicationCheckpoint) =>
-      notifyPendingHandoff(workflow, checkpoint, secrets, config, {
+    const send = async (checkpoint: ApplicationCheckpoint,
+      activeWorkflow: ApplicationWorkflow = workflow) =>
+      notifyPendingHandoff(activeWorkflow, checkpoint, secrets, config, {
         desktopEnabled: false,
         email: (emailConfig, saved, store) => sendHandoffEmail(emailConfig, saved, store,
           fetcher as typeof fetch),
@@ -107,8 +121,11 @@ describe("controlled queue to handoff staging flow", () => {
     expect(body).not.toContain(job.id);
     expect(body).not.toContain(job.applicationUrl);
     expect(body).not.toContain("Project preference");
-    await send((await workflow.current(job.id))!); // Simulate a restarted queue replay.
+    const restartedWorkflow = new ApplicationWorkflow(
+      new EncryptedApplicationStateStore<ApplicationCheckpoint>(statePath, key));
+    await send((await restartedWorkflow.current(job.id))!, restartedWorkflow);
     expect(fetcher).toHaveBeenCalledOnce();
+    expect(await readFile(statePath, "utf8")).not.toContain(job.applicationUrl);
     expect(await runApplicationQueue([job], quota, retries, () => "2026-11-25", 1,
       async () => { throw new Error("quota should prevent rerun"); }))
       .toEqual([{ jobId: job.id, status: "duplicate" }]);
