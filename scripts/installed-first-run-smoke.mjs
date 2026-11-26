@@ -129,5 +129,7 @@ export async function smokeInstalledFirstRun(installed, root, cwd) {
   assert.equal((await store.read("fixture:1")).state.jobId, "fixture:1");
   assert.equal(await quarantineLocalState(paths, key, exportPath, archivePath, true), 3);
   await purgeLocalStateArchive(paths, archivePath, true, true);
+  assert.equal(await store.read("fixture:1"), undefined);
+  await assert.rejects(stat(archivePath), { code: "ENOENT" });
   console.log("Packed first-run setup, handoff, export/delete/restore smoke passed");
 }
