@@ -45,7 +45,20 @@ OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json npm run queue:run
 Run these two commands from the repository root on a schedule using the local
 operating system scheduler. `OPENAPPLY_QUEUE_CONFIG=/private/queue-runner.json npm run autopilot`
 runs both commands in order, using the queue configuration as the only source
-for discovery and candidate paths. BrowserOS neo and Overleaf must already be signed
+for discovery and candidate paths. To add signed-in job-board searches to each
+autopilot run, put `browserSearchInputPath` and `browserLeadsOutputPath` in the
+private queue config. Both must be absolute paths; the search JSON follows
+[`browser-searches.json`](../examples/browser-searches.json), and its runtime
+and local endpoint must match the queue config. Keep the lead output in a
+private directory and separate from every other state/input file. Autopilot
+collects board links, closes the discovery browser, atomically replaces the
+lead file (including an empty result), and then asks the live official-source
+verifier to recheck recognized Greenhouse, Ashby, Lever, and SmartRecruiters
+links before queueing. One failed search does not discard other searches.
+Workday and arbitrary employer URLs found on boards are not yet promoted by
+this verifier; configured official discovery sources still run separately.
+Without both optional paths, autopilot searches configured official sources
+only. BrowserOS neo and Overleaf must already be signed
 in. Queued applications use that same BrowserOS profile and its existing site
 sessions. BrowserOS neo pauses for human sign-in or account creation because
 its snapshots do not prove where credentials would be submitted. The owned

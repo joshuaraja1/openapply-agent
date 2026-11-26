@@ -58,4 +58,15 @@ describe("browser lead extraction", () => {
       "[Role](https://employer.example/careers/123?jobId=123&access_token=secret)", context("generic"));
     expect(leads.map((lead) => lead.url)).toEqual(["https://employer.example/careers/123?jobId=123"]);
   });
+
+  it("allows direct recognized ATS links from owned employer searches, but no other external links", () => {
+    const leads = extractBrowserLeads([
+      "[ATS](https://job-boards.greenhouse.io/acme/jobs/1234?tracking=one)",
+      "[Arbitrary](https://other.example/jobs/789)",
+      "[Impostor](https://job-boards.greenhouse.io.evil.test/acme/jobs/1234)",
+    ].join("\n"), { ...context("generic"), ownedGeneric: true });
+    expect(leads.map((lead) => lead.url)).toEqual([
+      "https://job-boards.greenhouse.io/acme/jobs/1234",
+    ]);
+  });
 });

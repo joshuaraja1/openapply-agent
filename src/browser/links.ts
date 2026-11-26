@@ -1,4 +1,5 @@
 import type { BrowserLead, BrowserPlatform } from "./schema.js";
+import { officialSourceForLead } from "./verify-official.js";
 
 export function isHostOrSubdomain(hostname: string, domain: string): boolean {
   return hostname === domain || hostname.endsWith(`.${domain}`);
@@ -43,6 +44,7 @@ function accepts(platform: BrowserPlatform, value: string, sourceSearchUrl: stri
     return isHostOrSubdomain(url.hostname, "joinhandshake.com") && /\/jobs\//.test(url.pathname);
   }
   if (!ownedGeneric) return url.protocol === "http:" || url.protocol === "https:";
+  if (officialSourceForLead(value)) return true;
   const source = new URL(sourceSearchUrl);
   return url.origin === source.origin
     && /\/(?:jobs?|careers?|positions?|openings?|postings?|requisitions?|roles?|apply)(?:\/|$)/i
