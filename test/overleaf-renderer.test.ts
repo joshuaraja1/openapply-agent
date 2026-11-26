@@ -54,6 +54,7 @@ describe("Overleaf renderer adapter", () => {
               : '- link "Download PDF" [ref=e5]');
         }
         if (name === "act") return result("acted");
+        if (name === "evaluate_in_page") return result("armed");
         if (name === "wait") return result("matched (selector)");
         if (name === "download") return result(`Downloaded "fixture.pdf" (128 bytes) on this machine, to: ${downloaded}`);
         throw new Error(`Unexpected BrowserOS call ${name}`);
@@ -68,13 +69,35 @@ describe("Overleaf renderer adapter", () => {
       expect(verify).toHaveBeenCalledOnce();
       const calls = vi.mocked(client.callTool).mock.calls.map(([call]) => call);
       expect(calls.map(({ name }) => name)).toEqual(["name_session", "tabs", "snapshot", "act",
-        "wait", "snapshot", "act", "wait", "snapshot", "download", "tabs"]);
+        "wait", "snapshot", "evaluate_in_page", "act", "wait", "wait", "snapshot", "download", "tabs"]);
       expect(calls[3]?.arguments).toMatchObject({ kind: "fill", sensitive: true, value: source.latex });
       expect(calls[4]?.arguments).toMatchObject({ for: "selector",
         value: '.compile-button[data-ol-loading="false"]' });
+      expect(calls[8]?.arguments).toMatchObject({ for: "selector",
+        value: '.compile-button[data-openapply-compile-started="true"]' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it.skipIf(process.platform === "win32")("does not download the old PDF when a new compile never starts", async () => {
+    let snapshots = 0;
+    let waits = 0;
+    const calls: string[] = [];
+    const client: BrowserToolClient = { callTool: vi.fn(async ({ name, arguments: args }) => {
+      calls.push(name);
+      if (name === "name_session") return result("renamed");
+      if (name === "tabs") return result(args.action === "new" ? "opened page 7" : "closed");
+      if (name === "snapshot") return result(++snapshots === 1
+        ? '- textbox "Source Editor editing" [ref=e3]' : '- button "Recompile" [ref=e4]');
+      if (name === "act") return result("acted");
+      if (name === "evaluate_in_page") return result("armed");
+      if (name === "wait") return result(++waits === 1 ? "matched (selector)" : "not matched");
+      throw new Error(`Unexpected BrowserOS call ${name}`);
+    }) };
+    await expect(renderOverleafResume(client, projectUrl, job, candidate, source,
+      join(tmpdir(), "unused-openapply-artifact"))).rejects.toThrow("compilation did not start");
+    expect(calls).not.toContain("download");
   });
 
   it.skipIf(process.platform === "win32")("removes the Downloads copy after a visual review pause", async () => {
@@ -99,6 +122,7 @@ describe("Overleaf renderer adapter", () => {
         }
         if (name === "act") return result("acted");
         if (name === "wait") return result("matched (selector)");
+        if (name === "evaluate_in_page") return result("armed");
         if (name === "download") return result(`Downloaded fixture to: ${downloaded}`);
         throw new Error(`Unexpected BrowserOS call ${name}`);
       }) };
@@ -136,6 +160,7 @@ describe("Overleaf renderer adapter", () => {
         }
         if (name === "act") return result("acted");
         if (name === "wait") return result("matched (selector)");
+        if (name === "evaluate_in_page") return result("armed");
         if (name === "download") return result(`Downloaded fixture to: ${downloaded}`);
         throw new Error(`Unexpected BrowserOS call ${name}`);
       }) };
