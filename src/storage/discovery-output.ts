@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { assertPrivateFile, ensurePrivateDirectory } from "./private-path.js";
 import { secureWindowsPrivatePath } from "./windows-acl.js";
 
-async function atomicJson(path: string, value: unknown): Promise<void> {
+export async function writePrivateAtomicJson(path: string, value: unknown): Promise<void> {
   const destination = resolve(path);
   await ensurePrivateDirectory(dirname(destination));
   try {
@@ -44,6 +44,6 @@ export async function persistDiscoveryOutput(
 ): Promise<void> {
   if (resolve(outputPath) === resolve(statePath)) throw new Error("Queue and discovery state need separate files");
   // State may mark jobs reported only after the recoverable queue is durable.
-  await atomicJson(outputPath, output);
-  await atomicJson(statePath, state);
+  await writePrivateAtomicJson(outputPath, output);
+  await writePrivateAtomicJson(statePath, state);
 }
