@@ -13,6 +13,8 @@ import { initializeUserWorkspace, userTemplateFiles } from "./init.js";
 import { inspectRuntimeReadiness, runSetupBrowserDoctor } from "./runtime-readiness.js";
 import { createFirstRuntimeConfig } from "./runtime-config.js";
 import { checkOwnedBrowser } from "../browser/doctor.js";
+import { runStateControl, stateControlStatus, type StateControlAction } from "./data-controls.js";
+import type { SecretStore } from "../storage/contracts.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const names = new Set<string>(userTemplateFiles);
@@ -74,7 +76,8 @@ async function profileReadiness(destination: string): Promise<{ valid: boolean; 
 }
 
 export async function startSetupUi(options: { destination?: string; repositoryRoot: string; port?: number;
-  queueConfigPath?: string; browserDoctor?: typeof checkOwnedBrowser }) {
+  queueConfigPath?: string; browserDoctor?: typeof checkOwnedBrowser;
+  stateRoot?: string; stateSecretStore?: SecretStore }) {
   const destination = options.destination ?? join(userInfo().homedir, ".openapply-agent", "onboarding");
   const queueConfigPath = options.queueConfigPath ?? process.env.OPENAPPLY_QUEUE_CONFIG
     ?? join(dirname(destination), "queue-runner.json");
@@ -138,6 +141,34 @@ export async function startSetupUi(options: { destination?: string; repositoryRo
             options.browserDoctor) });
         } catch {
           return send(response, 409, { error: "Browser check failed. Run npm run browser:doctor locally for details." });
+        }
+      }
+      if (url.pathname === "/api/state-control" && request.method === "GET") {
+        return send(response, 200, await stateControlStatus({ queueConfigPath: queueConfigPath ?? "",
+          ...(options.stateRoot ? { stateRoot: options.stateRoot } : {}) }));
+      }
+      if (url.pathname === "/api/state-control" && request.method === "POST") {
+        if (request.headers["content-type"] !== "application/json") {
+          return send(response, 415, { error: "JSON is required" });
+        }
+        const input = await body(request) as { action?: unknown; confirmation?: unknown } | null;
+        const action = input?.action;
+        const phrases: Record<StateControlAction, string> = {
+          export: "EXPORT", quarantine: "STOPPED WORKFLOWS", restore: "STOPPED WORKFLOWS",
+          purge: "STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE",
+        };
+        if (typeof action !== "string" || !(action in phrases)
+          || input?.confirmation !== phrases[action as StateControlAction]) {
+          return send(response, 400, { error: "Enter the exact confirmation phrase for this action" });
+        }
+        if (!queueConfigPath) return send(response, 409, { error: "Private queue configuration is required" });
+        try {
+          const result = await runStateControl(action as StateControlAction, { queueConfigPath,
+            ...(options.stateRoot ? { stateRoot: options.stateRoot } : {}),
+            ...(options.stateSecretStore ? { secretStore: options.stateSecretStore } : {}) });
+          return send(response, 200, result);
+        } catch {
+          return send(response, 409, { error: "State action failed. Check the private configuration, export, archive, and workflow lock locally." });
         }
       }
       if (url.pathname === "/api/compile" && request.method === "POST") {
@@ -273,6 +304,12 @@ textarea:focus,button:focus-visible{outline:3px solid var(--accent);outline-offs
 <label for="runtime-identifier" id="runtime-identifier-label">Board identifier</label><input id="runtime-identifier" maxlength="500" autocomplete="off">
 <button class="save" type="button" id="runtime-save">Save private runtime settings</button>
 <p id="runtime-save-status" role="status" aria-live="polite"></p></div>
+<div class="runtime"><h2>Local state controls</h2><p class="note">Stop the scheduler and all OpenApply workers first. Export creates a private JSON backup. Quarantine moves application, queue, and discovery state into a restorable archive. Purge permanently removes that archive; the export, onboarding templates, and OS secrets remain until you remove them separately.</p>
+<p id="state-status" role="status" aria-live="polite">State status has not been checked.</p>
+<label for="state-confirmation">Type the confirmation phrase shown for the action you choose</label>
+<input id="state-confirmation" autocomplete="off" spellcheck="false" aria-describedby="state-phrase">
+<p id="state-phrase">Export: EXPORT · Quarantine or restore: STOPPED WORKFLOWS · Purge: STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE</p>
+<div class="actions"><button class="compile" id="state-refresh">Check state</button><button class="compile" data-state-action="export">Export</button><button class="compile" data-state-action="quarantine">Quarantine</button><button class="compile" data-state-action="restore">Restore</button><button class="compile" data-state-action="purge">Purge archive</button></div></div>
 <div class="preview"><h2>Try a job match</h2><p class="note">Paste a posting to check your saved evidence and search preferences. This local preview does not verify the employer posting, create a résumé, or apply.</p>
 <label for="preview-title">Job title</label><input id="preview-title" maxlength="200">
 <label for="preview-description">Job description</label><textarea id="preview-description" maxlength="100000"></textarea>
@@ -294,6 +331,11 @@ async function checkReadiness(){const output=document.getElementById('readiness'
 document.getElementById('readiness-check').onclick=checkReadiness;
 document.getElementById('runtime-check').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking runtime setup…';try{const response=await fetch('/api/runtime-readiness',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.queueConfig==='missing'?'Set OPENAPPLY_QUEUE_CONFIG to a private queue configuration, then restart setup.':['Queue configuration: '+data.queueConfig,'Compiled candidate profile and paths: '+data.profilePaths,'Search preferences: '+data.preferences+(data.dailyLimit===null?'':' · effective daily limit '+data.dailyLimit),'Browser: '+data.browser+' (use the installation check below for owned Chromium)','Overleaf project: '+data.overleaf,'Handoff email: '+data.notification+' (sending key and delivery are not tested)','Mailbox OAuth: '+data.mailbox+' (client ID only; consent is not tested)'].join('\\n')}catch(error){output.textContent=error.message}};
 document.getElementById('browser-doctor').onclick=async()=>{const output=document.getElementById('runtime-status');output.textContent='Checking browser installation…';try{const response=await fetch('/api/browser-doctor',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);output.textContent=data.browser==='ready'?'Owned Chromium started in a temporary profile. Saved sessions were not opened.':'BrowserOS is configured separately. Verify its running endpoint and signed-in profile before applying.'}catch(error){output.textContent=error.message}};
+const stateStatus=document.getElementById('state-status'),stateConfirmation=document.getElementById('state-confirmation');
+const statePhrases={export:'EXPORT',quarantine:'STOPPED WORKFLOWS',restore:'STOPPED WORKFLOWS',purge:'STOPPED WORKFLOWS; PERMANENTLY DELETE ARCHIVE'};
+async function refreshState(){try{const response=await fetch('/api/state-control',{headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);stateStatus.textContent='Private export: '+(data.exportReady?'present':'missing')+' · Restorable archive: '+(data.archiveReady?'present':'missing')}catch{stateStatus.textContent='Could not inspect local state'}}
+document.getElementById('state-refresh').onclick=refreshState;
+for(const button of document.querySelectorAll('[data-state-action]'))button.onclick=async()=>{const action=button.dataset.stateAction;if(stateConfirmation.value!==statePhrases[action]){stateStatus.textContent='Type '+statePhrases[action]+' exactly before '+action+'.';return}if(action==='purge'&&!confirm('Permanently remove the archived workflow state? The private export and other files remain.'))return;button.disabled=true;stateStatus.textContent='Running '+action+'…';try{const response=await fetch('/api/state-control',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({action,confirmation:stateConfirmation.value})});const data=await response.json();if(!response.ok)throw Error(data.error);stateConfirmation.value='';await refreshState();stateStatus.textContent=data.action+' · '+stateStatus.textContent}catch(error){stateStatus.textContent=error.message}finally{button.disabled=false}};
 document.getElementById('save').onclick=async()=>{const current=files[selected];message.textContent='Saving…';try{const response=await fetch('/api/template/'+encodeURIComponent(current.name),{method:'PUT',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({content:editor.value,expectedSha256:current.sha256})});const data=await response.json();if(!response.ok)throw Error(data.error);files[selected]={...current,...data,content:editor.value};render();message.textContent='Saved privately';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('compile').onclick=async()=>{if(editor.value!==files[selected].content){message.textContent='Save this section before compiling';return}message.textContent='Validating profile…';try{const response=await fetch('/api/compile',{method:'POST',headers:{'x-openapply-token':token}});const data=await response.json();if(!response.ok)throw Error(data.error);message.textContent='Profile compiled privately · '+data.approvedClaims+' approved claims';await checkReadiness()}catch(error){message.textContent=error.message}};
 document.getElementById('preview-run').onclick=async()=>{const result=document.getElementById('preview-result');if(editor.value!==files[selected].content){result.textContent='Save this section before previewing';return}result.textContent='Checking…';try{const response=await fetch('/api/preview',{method:'POST',headers:{'content-type':'application/json','x-openapply-token':token},body:JSON.stringify({title:document.getElementById('preview-title').value,description:document.getElementById('preview-description').value})});const data=await response.json();if(!response.ok)throw Error(data.error);const match=data.match;result.textContent=(match.eligible?'Potential match':'Needs review')+' · score '+match.score+'\\n'+match.reasons.join('\\n')+'\\nMatched skills: '+(match.matchedSkills.join(', ')||'none')+(match.reviewFlags.length?'\\nReview: '+match.reviewFlags.join('; '):'')}catch(error){result.textContent=error.message}};
