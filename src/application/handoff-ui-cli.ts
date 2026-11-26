@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +7,7 @@ import { createNativeSecretStore, stateKeyReference } from "../storage/native-se
 import { openActiveSqliteRuntime } from "../storage/sqlite-runtime.js";
 import { startHandoffUi } from "./handoff-ui.js";
 import { readApplicationPackage } from "./package-file.js";
+import { runResumeChild } from "./resume-child.js";
 import type { ApplicationCheckpoint } from "./state-machine.js";
 
 const jobId = process.env.OPENAPPLY_JOB_ID;
@@ -48,18 +48,9 @@ const ui = await startHandoffUi({ jobId, jobLabel: `${pkg.job.company} — ${pkg
     env.OPENAPPLY_PACKAGE = checkpoint.packagePath!;
     env[finalApproval ? "OPENAPPLY_APPROVE_JOB_ID" : "OPENAPPLY_RESUME_JOB_ID"] = jobId;
     if (answerPayload) env.OPENAPPLY_APPROVED_ANSWERS_STDIN = "1";
-    const child = spawn(process.execPath,
+    await runResumeChild(
       [...process.execArgv, fileURLToPath(new URL("./cli.js", import.meta.url))],
-      { env, stdio: answerPayload ? ["pipe", "inherit", "inherit"] : "inherit" });
-    if (answerPayload) {
-      child.stdin!.on("error", () => { /* Child exit reports the failure below. */ });
-      child.stdin!.end(answerPayload);
-    }
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code) => resolve(code ?? 1));
-    });
-    if (exitCode !== 0) throw new Error("Application resume failed");
+      env, answerPayload);
 } });
 console.log(`Open private application handoff: ${ui.url}`);
 console.log("Press Ctrl+C to stop the local handoff server.");
