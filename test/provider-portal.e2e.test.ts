@@ -14,7 +14,10 @@ import type { Provider, DiscoveredJob } from "../src/types.js";
 
 type Scenario = "success" | "unknown-required" | "wrong-requisition"
   | "conditional-required" | "validation-error" | "identity-drift"
-  | "receipt-other-job" | "receipt-url-drift";
+  | "receipt-other-job" | "receipt-url-drift"
+  | "workday-three-step" | "workday-conditional-step" | "workday-validation-step"
+  | "workday-wrong-requisition" | "workday-receipt-other-job" | "workday-receipt-url-drift"
+  | "workday-receipt-generic";
 
 const candidate = candidateProfileSchema.parse({
   version: 1,
@@ -25,6 +28,34 @@ const candidate = candidateProfileSchema.parse({
 });
 
 function portal(provider: Provider, scenario: Scenario): string {
+  if (provider === "workday" && scenario.startsWith("workday-")) {
+    const conditional = scenario === "workday-conditional-step"
+      ? '<label id="conditional" hidden>Security clearance<input name="clearance" required></label>' : "";
+    const reveal = scenario === "workday-conditional-step"
+      ? "document.getElementById('conditional').hidden=false" : "";
+    const secondAction = scenario === "workday-validation-step"
+      ? "document.getElementById('validation').hidden=false"
+      : `document.getElementById('second').hidden=true;document.getElementById('third').hidden=false;${scenario === "workday-wrong-requisition"
+        ? "history.pushState({}, '', '/apply/654321')" : ""}`;
+    const receiptAction = scenario === "workday-receipt-url-drift"
+      ? "history.pushState({}, '', '/apply/654321')" : "";
+    const receipt = scenario === "workday-receipt-generic" ? ""
+      : scenario === "workday-receipt-other-job"
+        ? " to Another Co as Data Scientist" : " to Example Co as Software Engineer";
+    return `<!doctype html><title>Example Co Workday application</title>
+      <h1>Example Co Software Engineer</h1>
+      <section id="first"><label>Full name<input name="name" required></label>
+        <label>Primary Email<input type="email" name="email" required></label>
+        <button type="button" onclick="document.getElementById('first').hidden=true;document.getElementById('second').hidden=false">Continue</button></section>
+      <section id="second" hidden><label>Primary Phone<input name="phone" required oninput="${reveal}"></label>
+        ${conditional}<label>Resume<input type="file" name="resume" required></label>
+        <button type="button" onclick="${secondAction}">Continue</button></section>
+      <p id="validation" hidden>Employer validation rejected this step</p>
+      <section id="third" hidden><label>Are you legally authorized to work in the United States?
+        <select required><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+        <button type="submit" onclick="document.getElementById('done').hidden=false;this.hidden=true;${receiptAction}">Submit application</button></section>
+      <p id="done" hidden>Thank you for applying${receipt}</p>`;
+  }
   const nameLabel = scenario === "identity-drift" ? "Candidate name"
     : provider === "ashby" || provider === "lever" ? "Your name" : "Full name";
   const emailLabel = provider === "workday" ? "Primary Email" : "Email";
@@ -68,17 +99,22 @@ async function run(provider: Provider, scenario: Scenario) {
   const resumeBytes = Buffer.from("%PDF-1.4\nsynthetic fixture\n%%EOF\n");
   await writeFile(resumePath, resumeBytes);
   const pdfSha256 = createHash("sha256").update(resumeBytes).digest("hex");
+  const workday = provider === "workday";
   const job: DiscoveredJob = {
-    id: `${provider}:example:123456`, provider, company: "Example Co", title: "Software Engineer",
+    id: workday ? "workday:example:External:123456" : `${provider}:example:123456`,
+    provider, company: "Example Co", title: "Software Engineer",
     descriptionText: "Build software", location: "Remote", department: null,
     employmentType: null, workplaceType: "Remote", compensation: null,
-    applicationUrl: "https://jobs.example.com/apply/123456",
-    sourceUrl: "https://jobs.example.com/job/123456", sourcePublishedAt: null,
+    applicationUrl: workday ? "https://jobs.example.com/External/job/123456"
+      : "https://jobs.example.com/apply/123456",
+    sourceUrl: workday ? "https://jobs.example.com/External/job/123456"
+      : "https://jobs.example.com/job/123456", sourcePublishedAt: null,
     sourceUpdatedAt: null, firstSeenAt: "2026-11-24T00:00:00Z",
     discoveredAt: "2026-11-24T00:00:00Z", isNew: true, isFresh: true,
     freshnessBasis: "first-seen", matchedKeywords: [],
   };
-  const source = { provider, boardToken: "example", boardName: "example", site: "example",
+  const source = { provider, boardToken: "example", boardName: "example",
+    site: workday ? "External" : "example",
     companyIdentifier: "example", host: "jobs.example.com", tenant: "example", company: job.company,
     enabled: true, allowedApplicationHosts: ["jobs.example.com"] };
   const pkg = applicationPackageSchema.parse({ version: 1, job, source, candidate,
@@ -219,6 +255,50 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("controlled provider 
   for (const scenario of ["receipt-other-job", "receipt-url-drift"] as const) {
     it(`smartrecruiters keeps ${scenario} submission uncertain`, async () => {
       const result = await run("smartrecruiters", scenario);
+      expect(result.failure).toBeDefined();
+      expect(result.checkpoint.stage).toBe("submission-uncertain");
+      expect(result.confirmationVisible).toBe(true);
+    }, 30_000);
+  }
+
+  it("workday submits a three-step job-bound form after uploading the verified résumé", async () => {
+    const result = await run("workday", "workday-three-step");
+    expect(result.checkpoint.stage).toBe("submitted");
+    expect(result.phoneValue).toBe("555-0100");
+    expect(result.fileName).toBe("fixture-resume.pdf");
+    expect(result.authorizationValue).toBe("Yes");
+    expect(result.confirmationVisible).toBe(true);
+  }, 30_000);
+
+  it("workday pauses before upload when step two reveals a required question", async () => {
+    const result = await run("workday", "workday-conditional-step");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("New required field appeared after filling: Security clearance");
+    expect(result.phoneValue).toBe("555-0100");
+    expect(result.fileName).toBeUndefined();
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
+
+  it("workday pauses when step two validation prevents advancement", async () => {
+    const result = await run("workday", "workday-validation-step");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("Continue did not advance");
+    expect(result.validationVisible).toBe(true);
+    expect(result.fileName).toBe("fixture-resume.pdf");
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
+
+  it("workday stops after step two switches to another requisition", async () => {
+    const result = await run("workday", "workday-wrong-requisition");
+    expect(result.checkpoint.stage).toBe("waiting-human");
+    expect(result.checkpoint.blocker).toContain("original requisition");
+    expect(result.confirmationVisible).toBe(false);
+  }, 30_000);
+
+  for (const scenario of ["workday-receipt-other-job", "workday-receipt-url-drift",
+    "workday-receipt-generic"] as const) {
+    it(`workday keeps ${scenario} submission uncertain`, async () => {
+      const result = await run("workday", scenario);
       expect(result.failure).toBeDefined();
       expect(result.checkpoint.stage).toBe("submission-uncertain");
       expect(result.confirmationVisible).toBe(true);
