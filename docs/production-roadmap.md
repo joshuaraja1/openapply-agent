@@ -5,39 +5,27 @@ The remaining implementation sequence and measurable release gates are in
 
 ## Current implementation status
 
-The merged CLI supports scheduled discovery and guarded applications, official
-source validation, evidence-backed Jake résumés, Overleaf compilation, encrypted
-state, scoped mailbox OAuth, exact-domain account policy, and BrowserOS handoffs.
-Its owned browser supports individual applications and PDF rendering. Main
-branch protection requires Node 22/24 verification, browser and Windows smoke
-tests, secret scanning, dependency audit, and CodeQL.
+The beta release candidate combines scheduled discovery and guarded applications,
+official-source checks, evidence-backed Jake résumés, Overleaf compilation,
+encrypted SQLite state, an owned-browser queue, a private first-run editor, and
+job-bound human handoffs. Email alerts replay after a crash; a local screen
+accepts candidate answers and passes them to the resumed process without a
+plaintext answer file. BrowserOS credential pages pause for human sign-in;
+owned-browser credential entry requires a verified same-origin HTTPS POST form.
 
-As of November 25, 2026, the draft PR stack adds owned-browser scheduled runs
-[#81](https://github.com/joshuaraja1/openapply-agent/pull/81), limited owned
-handoff recovery [#87](https://github.com/joshuaraja1/openapply-agent/pull/87),
-dead-process profile-lock recovery [#88](https://github.com/joshuaraja1/openapply-agent/pull/88),
-hard-requirement matching [#86](https://github.com/joshuaraja1/openapply-agent/pull/86),
-verified ATS board leads [#84](https://github.com/joshuaraja1/openapply-agent/pull/84)
-[#85](https://github.com/joshuaraja1/openapply-agent/pull/85), and a private
-first-run editor [#89](https://github.com/joshuaraja1/openapply-agent/pull/89)
-with profile compilation [#91](https://github.com/joshuaraja1/openapply-agent/pull/91).
-Optional private email alerts [#118](https://github.com/joshuaraja1/openapply-agent/pull/118)
-and a local, job-bound handoff screen [#119](https://github.com/joshuaraja1/openapply-agent/pull/119)
-are also draft work. The screen resumes an existing checkpoint after the user
-provides exact answers and authorizes continuation; it does not solve CAPTCHA
-or MFA on behalf of the user.
-Durable alert replay [#121](https://github.com/joshuaraja1/openapply-agent/pull/121)
-is also under review. Notification delivery still needs a live sender account
-and monitored beta validation.
-These changes are **drafts, not merged into `main`**. Their combined local tree
-passes tests, but independent reviews and live beta validation are pending.
+Node 22/24 verification, controlled Chromium provider tests, Windows private
+storage smoke, secret scanning, dependency audit, and CodeQL run in CI. A
+controlled two-step Chromium test verifies a browser restart, fresh résumé
+upload, approved answer, and confirmed submission. One operator email alert
+was delivered through Resend's testing sender; delivery from the product's own
+domain and to beta candidates remains unverified.
 
-The product promise below is **not yet a release claim**. Complete provider
-adapters, a complete first-run setup, signed installer and updater,
-broader deduplication, live site coverage measurements, and the beta gates in
-the [release requirements](autonomy-release-requirements.md) remain open. The
-browser is not bundled into a consumer app. BrowserOS neo remains optional only
-after the owned queue stack merges and its beta gates pass.
+**This is a beta foundation, not an unattended public release.** Complete the
+first-run and exception flow, signed installers and updater with rollback,
+real-site provider validation, a monitored consented beta, measured completion
+and latency targets, and an independent security assessment before general
+availability. The browser is not yet bundled into a consumer app. The 99%
+completion aspiration must be measured rather than advertised as a fact.
 
 ## Product promise
 
