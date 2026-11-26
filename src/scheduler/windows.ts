@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { ensurePrivateDirectory, readPrivateFile } from "../storage/private-path.js";
+import { secureWindowsPrivatePath } from "../storage/windows-acl.js";
 import type { ScheduleConfig } from "./launchd.js";
 import { validateSchedule } from "./common.js";
 
@@ -64,6 +65,7 @@ export async function installWindowsTask(config: ScheduleConfig, nodePath = proc
   }
   await writeFile(path, windowsRunner(validated.config, nodePath, validated.script, validated.logs), { flag: "wx" });
   try {
+    await secureWindowsPrivatePath(path);
     await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
       windowsRegistrationScript(validated.config, path)], { timeout: 30_000 });
   } catch (error) {

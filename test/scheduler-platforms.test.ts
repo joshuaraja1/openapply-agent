@@ -7,6 +7,8 @@ import { promisify } from "node:util";
 import { scheduleConfigSchema } from "../src/scheduler/launchd.js";
 import { isManagedSystemdUnits, systemdUnits } from "../src/scheduler/systemd.js";
 import { windowsRegistrationScript, windowsRemovalScript, windowsRunner } from "../src/scheduler/windows.js";
+import { readPrivateFile } from "../src/storage/private-path.js";
+import { secureWindowsPrivatePath } from "../src/storage/windows-acl.js";
 
 const config = scheduleConfigSchema.parse({ version: 1,
   repositoryPath: "/private/OpenApply Project", queueConfigPath: "/private/queue.json",
@@ -76,5 +78,16 @@ describe("user-level recurring schedule rendering", () => {
     expect(removal).toContain("Refusing to remove a task not managed by OpenApply");
     expect(removal).toContain("$task.Actions[0].Arguments -ne");
     expect(removal).toContain("$task.Principal.LogonType -ne 'Interactive'");
+  });
+
+  it.runIf(process.platform === "win32")("protects a runner so removal can read it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openapply-schedule-acl-"));
+    try {
+      await secureWindowsPrivatePath(directory);
+      const path = join(directory, "scheduled-run.ps1");
+      await writeFile(path, windowsRunner(config, process.execPath, "C:\\run.js", directory));
+      await secureWindowsPrivatePath(path);
+      expect(await readPrivateFile(path)).toContain("# OpenApply managed schedule v1");
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });
