@@ -53,6 +53,7 @@
     "build:run-creator-lambda": "esbuild src/hosted/aws-run-creator-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-run-creator-lambda.cjs",
     "build:onboarding-lambda": "esbuild src/hosted/aws-onboarding-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-onboarding-lambda.cjs",
     "build:artifact-broker-lambda": "esbuild src/cloud/aws-artifact-credential-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-artifact-credential-lambda.cjs",
+    "build:fargate-launcher-lambda": "esbuild src/cloud/aws-fargate-launcher-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-fargate-launcher-lambda.cjs",
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
     "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
     "distribution:release-gate-smoke": "node --test scripts/verify-release-bundle.test.mjs",
@@ -73,6 +74,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1178.0",
+    "@aws-sdk/client-ecs": "^3.1178.0",
     "@aws-sdk/client-kms": "^3.1178.0",
     "@aws-sdk/client-lambda": "^3.1178.0",
     "@aws-sdk/client-s3": "^3.1178.0",

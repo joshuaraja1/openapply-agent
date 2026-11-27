@@ -2,10 +2,12 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { SQSClient } from "@aws-sdk/client-sqs";
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import Stripe from "stripe";
 import { handleBillingSchedule, handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 import { createHostedBillingRuntime } from "./billing-runtime.js";
 import { DynamoHostedRunAdmission, SqsApplicationQueueSender } from "../cloud/aws-enqueue-ports.js";
+import { DynamoApplicationDispatchStore } from "../cloud/aws-durable-dispatch.js";
 
 type Environment = Record<string, string | undefined>;
 type SecretReader = (arn: string) => Promise<string>;
@@ -52,6 +54,7 @@ export async function loadStagingBillingConfig(env: Environment, readSecret: Sec
 const secrets = new SecretsManagerClient({});
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const sqs = new SQSClient({});
+const lambda = new LambdaClient({});
 
 /** A staging host must opt in with both resource names and explicit IAM.
  * The default deployment exposes no application enqueue route. */
@@ -62,8 +65,27 @@ export function createStagingApplicationQueuePorts(env: Environment,
   const ledger = required(env, "RUN_LEDGER_TABLE_NAME");
   const queueUrl = required(env, "APPLICATION_QUEUE_URL");
   const admission = new DynamoHostedRunAdmission(runDb, ledger);
+  const launcherArn = env.FARGATE_LAUNCHER_ARN?.trim();
+  if (launcherArn && !/^arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:openapply-staging-fargate-launcher$/.test(launcherArn)) {
+    throw new Error("Invalid Fargate launcher ARN");
+  }
   return { runRecords: admission, authorization: admission,
-    queue: new SqsApplicationQueueSender(queueClient, queueUrl) };
+    queue: new SqsApplicationQueueSender(queueClient, queueUrl),
+    ...(launcherArn ? { dispatch: new DynamoApplicationDispatchStore(runDb, ledger) } : {}),
+    ...(launcherArn ? { launcher: { async launch(candidateId: string, runId: string) {
+      const result = await lambda.send(new InvokeCommand({ FunctionName: launcherArn,
+        InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify({ candidateId, runId })) }));
+      if (result.StatusCode !== 200 || result.FunctionError || !result.Payload) {
+        throw new Error("Fargate launch unavailable");
+      }
+      const response = JSON.parse(Buffer.from(result.Payload).toString("utf8")) as { status?: unknown };
+      if (response.status !== "started" && response.status !== "capacity_busy"
+        && response.status !== "already_stopped") {
+        throw new Error("Fargate launch capacity unavailable");
+      }
+      return response.status;
+    } } } : {}),
+  };
 }
 async function readSecret(arn: string): Promise<string> {
   const result = await secrets.send(new GetSecretValueCommand({ SecretId: arn }));
