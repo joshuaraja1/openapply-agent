@@ -52,7 +52,7 @@ class LedgerMemory {
         const item = this.items.get(this.key(Key?.pk, Key?.sk));
         if (ConditionExpression === "attribute_not_exists(pk)") {
           if (item) conflict();
-        } else if (Key?.sk === "CONSENT") {
+        } else if (String(Key?.sk).startsWith("CONSENT#")) {
           if (!item || item.runId !== values?.[":runId"] || item.version !== values?.[":version"]
             || item.state !== values?.[":granted"]) conflict();
         } else if (!item || item.ownerToken !== values?.[":token"]
@@ -70,7 +70,7 @@ class LedgerMemory {
       if (action.Update) {
         const { Key, ExpressionAttributeValues: values } = action.Update;
         const existing = this.items.get(this.key(Key?.pk, Key?.sk));
-        if (Key?.sk === "CONSENT") {
+        if (String(Key?.sk).startsWith("CONSENT#")) {
           if (values?.[":revoked"] !== undefined) {
             if (!existing || existing.version !== values?.[":version"] || existing.state !== "granted") conflict();
           } else if (existing && Number(existing.version) >= Number(values?.[":version"])) conflict();
@@ -92,7 +92,7 @@ class LedgerMemory {
         const { Key, ExpressionAttributeValues: values } = action.Update;
         const item: Record<string, unknown> = this.items.get(this.key(Key?.pk, Key?.sk))
           ?? { pk: Key?.pk, sk: Key?.sk };
-        if (Key?.sk === "CONSENT") {
+        if (String(Key?.sk).startsWith("CONSENT#")) {
           if (values?.[":revoked"] !== undefined) item.state = "revoked";
           else {
             item.runId = values?.[":runId"];
@@ -211,7 +211,7 @@ describe("durable cloud application journal", () => {
     const journal = db.journal();
     const token = (await journal.acquireLease(candidateId, firstRun))!;
     expect(await journal.grantConsent(candidateId.toUpperCase(), firstRun.toUpperCase(), 1)).toBe(true);
-    expect(await journal.revokeConsent(candidateId, 1)).toBe(true);
+    expect(await journal.revokeConsent(candidateId, firstRun, 1)).toBe(true);
     expect(await journal.beginSubmission(candidateId, token, firstRun, 1, job)).toBeNull();
     expect(await journal.submissionStatus(candidateId, job)).toBe("not_started");
     expect(await journal.grantConsent(candidateId, firstRun, 1)).toBe(false);
@@ -232,6 +232,21 @@ describe("durable cloud application journal", () => {
     await journal.grantConsent(candidateId, firstRun, 2);
     expect(await journal.beginSubmission(candidateId, token, firstRun, 1, job)).toBeNull();
     expect(await journal.beginSubmission(candidateId, token, firstRun, 2, job)).toBeTruthy();
+  });
+
+  it("keeps simultaneous jobs' consent independent", async () => {
+    const db = new LedgerMemory();
+    const journal = db.journal();
+    expect(await journal.grantConsent(candidateId, firstRun, 1)).toBe(true);
+    expect(await journal.grantConsent(candidateId, secondRun, 1)).toBe(true);
+    expect(await journal.revokeConsent(candidateId, firstRun, 1)).toBe(true);
+    const token = (await journal.acquireLease(candidateId, secondRun))!;
+    expect(await journal.beginSubmission(candidateId, token, secondRun, 1,
+      { ...job, requisitionId: "second" })).toBeTruthy();
+    expect(db.items.get(db.key(`CANDIDATE#${candidateId}`, `CONSENT#${firstRun}`))?.state)
+      .toBe("revoked");
+    expect(db.items.get(db.key(`CANDIDATE#${candidateId}`, `CONSENT#${secondRun}`))?.state)
+      .toBe("granted");
   });
 
   it("does not disguise a DynamoDB transaction failure as a duplicate", async () => {

@@ -39,7 +39,8 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   const header = (name: string) => Object.entries(event.headers ?? {})
     .find(([key]) => key.toLowerCase() === name)?.[1];
   const browserRoute = event.rawPath === "/api/billing/checkout"
-    || event.rawPath === "/api/applications/enqueue";
+    || event.rawPath === "/api/applications/enqueue"
+    || event.rawPath === "/api/applications/runs";
   if (browserRoute && method === "OPTIONS") {
     const requestedHeaders = (header("access-control-request-headers") ?? "")
       .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);

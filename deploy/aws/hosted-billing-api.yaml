@@ -45,6 +45,16 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableApplicationRunCreation:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  RunCreatorCodeKey:
+    Type: String
+    Default: ''
+  PrivateArtifactBucketName:
+    Type: String
+    Default: ''
   RunLedgerTableName:
     Type: String
     Default: ''
@@ -55,6 +65,7 @@ Parameters:
 
 Conditions:
   HostedEnqueueEnabled: !Equals [!Ref EnableApplicationEnqueue, 'true']
+  HostedRunCreationEnabled: !Equals [!Ref EnableApplicationRunCreation, 'true']
 
 Rules:
   HostedEnqueueConfiguration:
@@ -62,19 +73,117 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
         AssertDescription: Enqueue requires a durable run ledger table.
-
-  DistinctStripeSecrets:
+  HostedRunCreationConfiguration:
+    RuleCondition: !Equals [!Ref EnableApplicationRunCreation, 'true']
     Assertions:
-      - Assert: !Not [!Equals [!Ref StripeApiSecretArn, !Ref StripeReplaySecretArn]]
-        AssertDescription: API and replay must use distinct Stripe test secrets.
-
-Rules:
+      - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
+        AssertDescription: Run creation requires a durable run ledger table.
+      - Assert: !Not [!Equals [!Ref RunCreatorCodeKey, '']]
+        AssertDescription: Run creation requires its separate Lambda package.
+      - Assert: !Not [!Equals [!Ref PrivateArtifactBucketName, '']]
+        AssertDescription: Run creation requires a private artifact bucket.
   DistinctStripeSecrets:
     Assertions:
       - Assert: !Not [!Equals [!Ref StripeApiSecretArn, !Ref StripeReplaySecretArn]]
         AssertDescription: API and replay must use distinct Stripe test secrets.
 
 Resources:
+  RunCreatorRole:
+    Type: AWS::IAM::Role
+    Condition: HostedRunCreationEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyRunCreation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+
+  RunCreatorFunction:
+    Type: AWS::Lambda::Function
+    Condition: HostedRunCreationEnabled
+    Properties:
+      FunctionName: openapply-staging-run-creator
+      Runtime: nodejs22.x
+      Handler: aws-run-creator-lambda.handler
+      Role: !GetAtt RunCreatorRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref RunCreatorCodeKey }
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          RUN_CREATION_ENABLED: 'true'
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  RunCreatorIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RunCreatorFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RunCreatorRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/applications/runs'
+      Target: !Sub 'integrations/${RunCreatorIntegration}'
+
+  RunCreatorPreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/applications/runs'
+      Target: !Sub 'integrations/${RunCreatorIntegration}'
+
+  RunCreatorPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedRunCreationEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RunCreatorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/applications/runs'
+
+  RunCreatorPreflightPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedRunCreationEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RunCreatorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/applications/runs'
+
   BillingApiRole:
     Type: AWS::IAM::Role
     Properties:
