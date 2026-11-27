@@ -4,6 +4,8 @@ import { hostedEntitlementSchema, type HostedEntitlement } from "./entitlement.j
 const billingEvents = new Set([
   "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
   "invoice.paid", "invoice.payment_failed", "charge.refunded",
+  "charge.dispute.created", "charge.dispute.closed",
+  "charge.dispute.funds_withdrawn", "charge.dispute.funds_reinstated",
   "checkout.session.completed", "checkout.session.async_payment_succeeded",
   "checkout.session.async_payment_failed",
 ]);
@@ -34,10 +36,16 @@ export function verifiedBillingRequest(
     throw new Error("Stripe event mode does not match deployment");
   }
   if (!billingEvents.has(event.type)) return undefined;
-  const object = event.data.object as { id?: string; customer?: string | { id?: string } | null };
+  const object = event.data.object as { id?: string; customer?: string | { id?: string } | null;
+    charge?: string | { id?: string } | null };
   const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id;
-  if (event.type === "charge.refunded" && !customerId && event.id && object.id?.startsWith("ch_")) {
-    return { eventId: event.id, chargeId: object.id };
+  const dispute = event.type.startsWith("charge.dispute.");
+  const chargeId = dispute
+    ? typeof object.charge === "string" ? object.charge : object.charge?.id
+    : object.id;
+  if ((event.type === "charge.refunded" || dispute) && !customerId
+    && event.id && chargeId?.startsWith("ch_")) {
+    return { eventId: event.id, chargeId };
   }
   if (!customerId || !customerId.startsWith("cus_") || !event.id) {
     throw new Error("Verified Stripe event has no customer identity");

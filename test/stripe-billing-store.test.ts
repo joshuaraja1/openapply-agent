@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, QueryCommand, TransactWriteCommand,
+import { GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
   type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { describe, expect, it, vi } from "vitest";
 import { DynamoBillingStore } from "../src/hosted/stripe-billing-store.js";
@@ -49,6 +49,34 @@ describe("DynamoDB billing state", () => {
       return { Items: [{ eventId: "evt_1", customerId: "cus_1" }] };
     });
     expect(await storeWith(send).listReady()).toEqual([{ eventId: "evt_1", customerId: "cus_1" }]);
+  });
+
+  it("moves a claimed event's GSI due time to its lease expiry", async () => {
+    let command: UpdateCommand | undefined;
+    const store = storeWith(async input => {
+      if (!(input instanceof UpdateCommand)) throw new Error("expected Update");
+      command = input;
+      return {};
+    });
+    expect(await store.claim({ eventId: "evt_1", customerId: "cus_1" })).toBeTruthy();
+    expect(command?.input.ExpressionAttributeValues?.[":leaseSort"])
+      .toBe("2026-11-26T20:02:00.000Z#evt_1");
+  });
+
+  it("accepts an opaque OIDC subject only when both customer bindings agree", async () => {
+    const subjectId = "auth0|user@example.com";
+    const store = storeWith(async command => {
+      if (!(command instanceof GetCommand)) throw new Error("expected Get");
+      return command.input.Key?.pk === "CUSTOMER#cus_1"
+        ? { Item: { subjectId, customerId: "cus_1" } }
+        : { Item: { subjectId, customerId: "cus_1" } };
+    });
+    expect(await store.loadBinding("cus_1")).toEqual({ subjectId, customerId: "cus_1" });
+    const stale = storeWith(async command => command instanceof GetCommand
+      ? { Item: command.input.Key?.pk === "CUSTOMER#cus_1"
+        ? { subjectId, customerId: "cus_1" } : { subjectId, customerId: "cus_other" } }
+      : {});
+    await expect(stale.loadBinding("cus_1")).rejects.toThrow("reverse binding disagrees");
   });
 
   it("reads all entitlement pages and fails closed on a damaged record", async () => {

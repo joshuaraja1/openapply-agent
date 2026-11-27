@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 import { handleStripeWebhookHttp } from "../src/hosted/stripe-webhook-http.js";
+import type { TrustedChargeResolution } from "../src/hosted/stripe-webhook.js";
 
 const stripe = new Stripe("sk_test_local");
 const endpointSecret = "whsec_local_only";
@@ -24,7 +25,7 @@ function harness() {
     return "queued" as const;
   });
   return { endpointSecret, livemode: false, verifier: stripe.webhooks,
-    ports: { enqueueOnce, resolveCharge: async () => undefined,
+    ports: { enqueueOnce, resolveCharge: async (): Promise<TrustedChargeResolution | undefined> => undefined,
       recordGuestRefund: async () => {} } };
 }
 
@@ -35,6 +36,24 @@ describe("Stripe raw HTTP webhook", () => {
     expect((await handleStripeWebhookHttp(signedRequest(), h)).status).toBe(204);
     expect(h.ports.enqueueOnce).toHaveBeenCalledTimes(2);
     expect(h.ports.enqueueOnce).toHaveBeenCalledWith({ eventId: "evt_test_1",
+      customerId: "cus_test_1" });
+  });
+
+  it("resolves a signed dispute through its Charge before enqueue", async () => {
+    const h = harness();
+    const body = JSON.stringify({ id: "evt_dispute_1", object: "event",
+      type: "charge.dispute.created", livemode: false,
+      data: { object: { id: "dp_1", charge: "ch_1" } } });
+    const signature = stripe.webhooks.generateTestHeaderString({ payload: body,
+      secret: endpointSecret });
+    h.ports.resolveCharge = vi.fn(async () => ({ kind: "customer" as const,
+      customerId: "cus_test_1" }));
+    const request = new Request("https://openapply.example/webhooks/stripe", {
+      method: "POST", headers: { "stripe-signature": signature }, body,
+    });
+    expect((await handleStripeWebhookHttp(request, h)).status).toBe(204);
+    expect(h.ports.resolveCharge).toHaveBeenCalledWith("ch_1");
+    expect(h.ports.enqueueOnce).toHaveBeenCalledWith({ eventId: "evt_dispute_1",
       customerId: "cus_test_1" });
   });
 
