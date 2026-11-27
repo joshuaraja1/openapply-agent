@@ -68,5 +68,11 @@ job application was made.
 The API and scheduled replay Lambda were subsequently updated to use distinct
 Stripe test-key Secrets Manager ARNs. IAM simulation reports `implicitDeny`
 when the API role requests the replay secret and when the replay role requests
-the API secret. The API-key split smoke, authenticated billing status page,
-trusted queue admission, and candidate run remain separate release checks.
+the API secret. The API key is restricted; the replay role still uses the
+preexisting broader OpenApply test key until a separate read-only replay key is
+created and tested. After the split, a signed-in staging candidate created and
+retrieved an unpaid test Checkout Session using the restricted API key; the
+session was then expired. The authenticated billing status page subsequently
+showed active access for the semester test candidate and no access for the
+canceled monthly candidate. Trusted queue admission and candidate application
+runs remain unproven in deployed staging.
