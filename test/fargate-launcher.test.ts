@@ -86,6 +86,27 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("releases only the matching nonzero slot and job-seeker lock after STOPPED", async () => {
+    const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "started" as const, generation: 0,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000, taskArn, slotIndex: 1 };
+    const db = { send: vi.fn(async (command: TransactWriteCommand) => {
+      expect(command).toBeInstanceOf(TransactWriteCommand);
+      const entries = command.input.TransactItems ?? [];
+      expect(entries[1]?.Delete?.Key).toEqual({ pk: "LAUNCHER#staging", sk: "SLOT#1" });
+      expect(entries[2]?.Delete?.Key).toEqual({
+        pk: `CANDIDATE#${candidateId}`, sk: "ACTIVE_TASK" });
+      expect(entries[1]?.Delete?.ConditionExpression).toContain("clientToken=:token");
+      expect(entries[2]?.Delete?.ConditionExpression).toContain("clientToken=:token");
+      return {};
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markStopped(row);
+  });
+
   it("reserves separate durable slots for concurrent seekers and stops at the configured ceiling", async () => {
     const occupied = new Set<number>();
     const activeCandidates = new Set<string>();
