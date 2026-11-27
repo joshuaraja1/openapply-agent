@@ -19,7 +19,7 @@ export const defaultStacks = {
 const requirements = {
   controlPlane: { outputs: ['RunLedgerName', 'PrivateArtifactsBucket'] },
   billing: { outputs: ['EntitlementTableName', 'EntitlementTableArn'] },
-  browserSmoke: { outputs: ['ClusterArn', 'RepositoryUri'] },
+  browserSmoke: { outputs: ['ClusterArn', 'RepositoryUri', 'EgressOnlySecurityGroupId'] },
   code: { outputs: ['CodeBucketName'] },
   cognito: { outputs: ['Issuer', 'ClientId', 'JwksUrl'] },
   onboarding: { outputs: ['CandidateDataKeyArn'], parameters: {
@@ -92,6 +92,8 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       ['launcher', 'EcsClusterArn', output('browserSmoke', 'ClusterArn')],
       ['launcher', 'EcsTaskDefinitionArn', output('syntheticTask', 'TaskDefinitionArn')],
       ['launcher', 'EcsTaskRoleArn', output('syntheticTask', 'TaskRoleArn')],
+      ['launcher', 'EcsExecutionRoleArn', taskDefinition?.executionRoleArn],
+      ['launcher', 'EcsSecurityGroupId', output('browserSmoke', 'EgressOnlySecurityGroupId')],
       ['launcher', 'PrivateSubnetIds', output('egress', 'PrivateSubnetId')],
       ['broker', 'ArtifactKmsKeyArn', output('onboarding', 'CandidateDataKeyArn')],
       ['broker', 'ArtifactBucketName', output('controlPlane', 'PrivateArtifactsBucket')],

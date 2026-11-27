@@ -6,7 +6,7 @@ function readyFixture() {
   const outputs = {
     controlPlane: ['RunLedgerName', 'PrivateArtifactsBucket'],
     billing: ['EntitlementTableName', 'EntitlementTableArn'],
-    browserSmoke: ['ClusterArn', 'RepositoryUri'],
+    browserSmoke: ['ClusterArn', 'RepositoryUri', 'EgressOnlySecurityGroupId'],
     code: ['CodeBucketName'], cognito: ['Issuer', 'ClientId', 'JwksUrl'],
     onboarding: ['CandidateDataKeyArn'], broker: ['BrokerFunctionArn'],
     syntheticTask: ['TaskDefinitionArn', 'TaskRoleArn'],
@@ -35,6 +35,7 @@ function readyFixture() {
   };
   setOutput('controlPlane', 'PrivateArtifactsBucket', 'fixture-bucket');
   setOutput('browserSmoke', 'ClusterArn', 'arn:aws:ecs:us-east-1:123456789012:cluster/staging');
+  setOutput('browserSmoke', 'EgressOnlySecurityGroupId', 'sg-12345678');
   setOutput('onboarding', 'CandidateDataKeyArn', 'arn:aws:kms:us-east-1:123456789012:key/key-id');
   setOutput('broker', 'BrokerFunctionArn', 'arn:aws:lambda:us-east-1:123456789012:function:broker');
   setOutput('syntheticTask', 'TaskDefinitionArn', 'arn:aws:ecs:us-east-1:123456789012:task-definition/synthetic:1');
@@ -44,6 +45,8 @@ function readyFixture() {
     ['EcsClusterArn', stacks.browserSmoke.Outputs.find((item) => item.OutputKey === 'ClusterArn').OutputValue],
     ['EcsTaskDefinitionArn', stacks.syntheticTask.Outputs.find((item) => item.OutputKey === 'TaskDefinitionArn').OutputValue],
     ['EcsTaskRoleArn', stacks.syntheticTask.Outputs.find((item) => item.OutputKey === 'TaskRoleArn').OutputValue],
+    ['EcsExecutionRoleArn', 'arn:aws:iam::123456789012:role/execution'],
+    ['EcsSecurityGroupId', 'sg-12345678'],
     ['PrivateSubnetIds', 'subnet-12345678'],
   ]) setParameter('launcher', name, value);
   for (const key of ['broker', 'syntheticTask']) {
@@ -119,4 +122,16 @@ test('rejects a task with wrong entrypoint mode or a different task role', () =>
   const result = assessInventory('123456789012', '123456789012', stacks, task);
   assert.equal(result.inventoryComplete, false);
   assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
+});
+
+test('rejects launcher wired to an unreviewed security group or execution role', () => {
+  const { stacks, task } = readyFixture();
+  stacks.launcher.Parameters.find((item) => item.ParameterKey === 'EcsSecurityGroupId')
+    .ParameterValue = 'sg-open';
+  stacks.launcher.Parameters.find((item) => item.ParameterKey === 'EcsExecutionRoleArn')
+    .ParameterValue = 'arn:aws:iam::123456789012:role/other';
+  const result = assessInventory('123456789012', '123456789012', stacks, task);
+  assert.equal(result.inventoryComplete, false);
+  assert.match(result.checks.find((check) => check.gate === 'stack-wiring').detail,
+    /launcher.EcsExecutionRoleArn.*launcher.EcsSecurityGroupId/);
 });

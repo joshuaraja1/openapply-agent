@@ -20,7 +20,8 @@ cluster, code bucket, Cognito, onboarding/deletion, artifact and run-state
 broker, synthetic task definition, launcher, and private egress. It also checks
 that the task definition keeps synthetic-only mode and real submission disabled,
 and that the deployed stack parameters reference the exact reviewed task,
-broker, KMS key, bucket, cluster, and private subnet.
+broker, KMS key, bucket, cluster, execution role, no-ingress security group,
+and private subnet.
 Do not bypass a failed gate by invoking ECS directly.
 
 As of November 27, the control plane, billing, browser smoke, code bucket, and
