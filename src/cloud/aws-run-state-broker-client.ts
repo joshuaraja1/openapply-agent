@@ -5,6 +5,8 @@ import type { RunStateRequest } from "./run-state-broker.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const job = z.strictObject({ provider: z.string(), employerId: z.string(), requisitionId: z.string() });
+const syntheticJob = z.strictObject({ provider: z.literal("synthetic"),
+  employerId: z.literal("fixture"), requisitionId: z.string().regex(/^[a-zA-Z0-9-]{1,80}$/) });
 const identity = z.strictObject({ subjectId: z.string(), consentVersion: z.number().int().positive(), job });
 const submission = z.strictObject({ status: z.enum(["not_started", "confirmed", "needs_reconciliation"]),
   receiptArtifactId: uuid.optional(), receiptSha256: z.string().optional(), runId: uuid.optional() });
@@ -16,7 +18,11 @@ const dispatch = z.strictObject({ body: z.string().min(1).max(1024),
 export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, functionArn: string,
   capability: string, scope: { candidateId: string; runId: string }):
   Pick<CloudRunPorts, "billing" | "authorization" | "runRecords" | "journal"> & {
-    dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void> } } {
+    dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void> };
+    syntheticAudit: {
+      recordFinalClick(candidate: string, token: string, target: z.infer<typeof syntheticJob>): Promise<boolean>;
+      readClickAttempts(candidate: string, target: z.infer<typeof syntheticJob>): Promise<number>;
+    } } {
   const candidateId = uuid.parse(scope.candidateId);
   const runId = uuid.parse(scope.runId);
   if (!/^arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:openapply-[a-z0-9-]+-artifact-broker$/.test(functionArn)
@@ -75,6 +81,14 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
     dispatch: {
       async read() { return dispatch.parse(await call({ operation: "readDispatch" })); },
       async markCompleted() { await call({ operation: "markDispatchCompleted" }); },
+    },
+    syntheticAudit: {
+      async recordFinalClick(candidate, token, target) { exact(candidate);
+        return z.boolean().parse(await call({ operation: "recordSyntheticFinalClick",
+          leaseToken: uuid.parse(token), job: syntheticJob.parse(target) })); },
+      async readClickAttempts(candidate, target) { exact(candidate);
+        return z.number().int().nonnegative().parse(await call({ operation: "readSyntheticClickAttempts",
+          job: syntheticJob.parse(target) })); },
     },
   };
 }

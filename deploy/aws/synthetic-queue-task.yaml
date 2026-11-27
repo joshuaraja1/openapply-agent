@@ -22,6 +22,11 @@ Parameters:
   ArtifactBrokerArn:
     Type: String
     Default: ''
+  SyntheticCrashAt:
+    Type: String
+    Default: ''
+    AllowedValues: ['', after_intent, after_click, after_confirmation]
+    Description: One-off disposable .invalid fixture crash drill checkpoint; empty for normal staging.
 
 Conditions:
   TaskEnabled: !Equals [!Ref EnableSyntheticQueueTask, 'true']
@@ -98,6 +103,7 @@ Resources:
             - { Name: OPENAPPLY_CLOUD_SYNTHETIC_ONLY, Value: '1' }
             - { Name: OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK, Value: '1' }
             - { Name: OPENAPPLY_SUBMISSION_MODE, Value: disabled }
+            - { Name: OPENAPPLY_SYNTHETIC_CRASH_AT, Value: !Ref SyntheticCrashAt }
             - Name: OPENAPPLY_ARTIFACT_BUCKET
               Value: !Ref ArtifactBucketName
             - Name: OPENAPPLY_ARTIFACT_KMS_KEY_ARN

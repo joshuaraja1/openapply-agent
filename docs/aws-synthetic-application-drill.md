@@ -115,13 +115,44 @@ CloudWatch task IDs, dispatch states, journal states, ECS status, and broker
 decision codes; never record profile bytes, credentials, capabilities, or
 lease tokens.
 
+### Deterministic crash checkpoints and click audit
+
+The synthetic task has an optional CloudFormation `SyntheticCrashAt` parameter.
+Its empty default is the normal staging task. For each one-off crash scenario,
+update the **synthetic task stack** with one of `after_intent`, `after_click`,
+or `after_confirmation`. Wait for the new task definition revision, then update
+the launcher stack's `EcsTaskDefinitionArn` to that exact revision. Re-run
+`staging:synthetic:preflight` and require every gate to pass before seeding the
+disposable run. Do not launch while the task and launcher revisions disagree.
+Use a fresh fixture run for each checkpoint. Restore `SyntheticCrashAt` to
+empty, update the launcher to the restored task revision, and re-run preflight
+after the drill. Do not pass a crash stage through a candidate-facing API or
+start ECS directly; the launcher must still mint the capability and own its
+single slot.
+
+The task exits with code 86 at the selected checkpoint. The guarded task mode
+and exact `synthetic/fixture` job are required. `after_intent` exits after the
+durable intent and before click. `after_click` exits immediately after the
+intercepted Chromium click and before receipt storage. `after_confirmation`
+exits after the exact-job journal confirmation and before dispatch completion.
+The trusted broker writes `syntheticClickAttempts=1` on the exact `JOB#` row
+**before** allowing the browser to click. A second grant is rejected. This is
+a durable upper bound on actual final clicks: a crash after the audit write
+but before the browser click can yield one audit attempt and zero clicks.
+The `readSyntheticClickAttempts` broker operation reads that count using the
+signed run capability, so a task for A cannot read B's row. Confirm the same
+value with a consistent trusted-admin DynamoDB read when collecting evidence.
+For any run that reaches an intent, require `syntheticClickAttempts <= 1` on
+the first task and after recovery; if it rises, stop the drill and block launch.
+
 | Scenario | Required observation |
 | --- | --- |
 | Two-candidate backlog | The single launcher slot starts A, leaves B queued, and starts B only after A stops. Neither task reads or alters the other's dispatch. |
 | Tenant IAM denial | From A's task role, direct DynamoDB, SQS, S3, KMS, and `sts:AssumeRole` calls fail. A broker request naming B's subject or job fails. |
 | Pre-intent stop | Stop A before `beginSubmission`; the controller atomically marks its old task stopped, releases the slot, and queues a bounded retry with a new ECS client token. B can still progress. |
-| Post-intent stop | Stop A after durable submit intent. The run enters `needs_reconciliation` and no restart clicks Submit again. |
-| Confirmed crash | Stop A after exact-job receipt confirmation but before dispatch completion. The controller repairs dispatch to completed without another Submit. |
+| Post-intent crash | Use `after_intent`; the run enters `needs_reconciliation`, has click audit 0, and no restart clicks Submit. |
+| Post-click crash | Use `after_click`; the run enters `needs_reconciliation`, has click audit 1, and no restart clicks Submit. |
+| Confirmed crash | Use `after_confirmation`; the controller repairs dispatch to completed, click audit remains 1, and no second Submit occurs. |
 | Revocation and deletion | Withdraw A's consent while B remains active. A receives no new broker grants; its task reaches ECS `STOPPED`, active grants expire, and deletion removes all versions of A's artifacts without touching B. |
 | Retry exhaustion and outage | Exhaust the two pre-intent retries and simulate a transient Dynamo read failure. Exhaustion needs operator reconciliation; the transient error retains a retryable state and never creates a second final click. |
 

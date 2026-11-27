@@ -88,7 +88,9 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       && env.get('OPENAPPLY_CLOUD_TASK_MODE') === 'synthetic'
       && env.get('OPENAPPLY_CLOUD_SYNTHETIC_ONLY') === '1'
       && env.get('OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK') === '1'
-      && env.get('OPENAPPLY_SUBMISSION_MODE') === 'disabled';
+      && env.get('OPENAPPLY_SUBMISSION_MODE') === 'disabled'
+      && ['', 'after_intent', 'after_click', 'after_confirmation']
+        .includes(env.get('OPENAPPLY_SYNTHETIC_CRASH_AT') ?? '');
     checks.push({ gate: 'synthetic-task-mode', ok: Boolean(safe),
       detail: safe ? 'immutable image, synthetic only, real submission disabled'
         : 'task definition lacks an immutable reviewed image, roles, or safe mode settings' });

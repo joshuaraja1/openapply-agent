@@ -214,6 +214,62 @@ export class DurableApplicationJournal {
     }
   }
 
+  /** Durable upper bound on synthetic final clicks. The browser must receive this
+   * one-time grant before calling click(); a crash after this write can leave the
+   * count at one without a click, but no second grant can be issued. */
+  async recordSyntheticFinalClick(candidateId: string, token: string, runId: string,
+    consentVersion: number, job: OfficialJobIdentity): Promise<boolean> {
+    if (job.provider !== "synthetic" || job.employerId !== "fixture"
+      || !/^[a-zA-Z0-9-]{1,80}$/.test(job.requisitionId)) {
+      throw new Error("Synthetic click audit requires a fixture job");
+    }
+    const pk = this.candidateKey(candidateId);
+    uuid.parse(token);
+    const canonicalRunId = uuid.parse(runId).toLowerCase();
+    const epoch = consentEpoch(consentVersion);
+    const now = Math.floor(this.now() / 1000);
+    try {
+      await this.client.send(new TransactWriteCommand({ TransactItems: [
+        { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "DELETED" },
+          ConditionExpression: "attribute_not_exists(pk)" } },
+        { ConditionCheck: { TableName: this.tableName,
+          Key: { pk, sk: runConsentKey(canonicalRunId) },
+          ConditionExpression: "runId = :runId AND version = :version AND #state = :granted",
+          ExpressionAttributeNames: { "#state": "state" },
+          ExpressionAttributeValues: { ":runId": canonicalRunId, ":version": epoch,
+            ":granted": "granted" } } },
+        { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "LEASE" },
+          ConditionExpression: "ownerToken = :token AND runId = :runId AND expiresAt > :now",
+          ExpressionAttributeValues: { ":token": token, ":runId": canonicalRunId,
+            ":now": now } } },
+        { Update: { TableName: this.tableName, Key: { pk, sk: officialJobKey(job) },
+          UpdateExpression: "SET syntheticClickAttempts = :one",
+          ConditionExpression: "#state = :intent AND ownerToken = :token AND runId = :runId AND attribute_not_exists(syntheticClickAttempts)",
+          ExpressionAttributeNames: { "#state": "state" },
+          ExpressionAttributeValues: { ":one": 1, ":intent": "submit_intent",
+            ":token": token, ":runId": canonicalRunId } } },
+      ] }));
+      return true;
+    } catch (error) {
+      if (conditionalFailure(error)) return false;
+      throw error;
+    }
+  }
+
+  async readSyntheticClickAttempts(candidateId: string, job: OfficialJobIdentity): Promise<number> {
+    if (job.provider !== "synthetic" || job.employerId !== "fixture"
+      || !/^[a-zA-Z0-9-]{1,80}$/.test(job.requisitionId)) {
+      throw new Error("Synthetic click audit requires a fixture job");
+    }
+    const result = await this.client.send(new GetCommand({ TableName: this.tableName,
+      Key: { pk: this.candidateKey(candidateId), sk: officialJobKey(job) }, ConsistentRead: true }));
+    const value: unknown = result.Item?.syntheticClickAttempts ?? 0;
+    if (!Number.isSafeInteger(value) || (value as number) < 0) {
+      throw new Error("Synthetic click audit is malformed");
+    }
+    return value as number;
+  }
+
   /** Use after a click failed ambiguously; no future worker may retry the click. */
   async markUncertain(candidateId: string, token: string, job: OfficialJobIdentity): Promise<void> {
     const pk = this.candidateKey(candidateId);

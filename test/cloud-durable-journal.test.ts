@@ -77,6 +77,9 @@ class LedgerMemory {
         } else if (!existing) conflict();
         else if (Key?.sk === "LEASE") {
           if (existing.ownerToken !== values?.[":token"] || Number(existing.expiresAt) <= Number(values?.[":now"])) conflict();
+        } else if (action.Update.UpdateExpression?.includes("syntheticClickAttempts")) {
+          if (existing.state !== "submit_intent" || existing.ownerToken !== values?.[":token"]
+            || existing.runId !== values?.[":runId"] || existing.syntheticClickAttempts !== undefined) conflict();
         } else if (!action.Update.UpdateExpression?.includes(":confirmed")) {
           if (existing.state !== "submit_intent" || existing.ownerToken !== values?.[":token"]) conflict();
         } else if (!(["submit_intent", "uncertain"].includes(String(existing.state)))
@@ -100,6 +103,9 @@ class LedgerMemory {
             item.state = "granted";
           }
         } else if (Key?.sk === "LEASE") item.expiresAt = values?.[":expiresAt"];
+        else if (action.Update.UpdateExpression?.includes("syntheticClickAttempts")) {
+          item.syntheticClickAttempts = values?.[":one"];
+        }
         else if (!action.Update.UpdateExpression?.includes(":confirmed")) item.state = "uncertain";
         else {
           item.state = "confirmed";
@@ -165,6 +171,40 @@ describe("durable cloud application journal", () => {
     expect(await journal.beginSubmission(candidateId, next, secondRun, 2, job)).toBeNull();
     const stored = db.items.get(db.key(`CANDIDATE#${candidateId}`, officialJobKey(job)));
     expect(stored?.expiresAt).toBeUndefined();
+  });
+
+  it("grants only one durable synthetic final click per exact job and isolates candidates", async () => {
+    const db = new LedgerMemory();
+    const journal = db.journal();
+    const fixture = { provider: "synthetic", employerId: "fixture", requisitionId: "alpha" };
+    const otherCandidate = "11111111-1111-4111-8111-111111111111";
+    const first = (await journal.acquireLease(candidateId, firstRun))!;
+    const other = (await journal.acquireLease(otherCandidate, secondRun))!;
+    await journal.grantConsent(candidateId, firstRun, 1);
+    await journal.grantConsent(otherCandidate, secondRun, 1);
+    await journal.beginSubmission(candidateId, first, firstRun, 1, fixture);
+    await journal.beginSubmission(otherCandidate, other, secondRun, 1, fixture);
+    expect(await journal.recordSyntheticFinalClick(candidateId, first, firstRun, 1, fixture)).toBe(true);
+    expect(await journal.recordSyntheticFinalClick(candidateId, first, firstRun, 1, fixture)).toBe(false);
+    expect(await journal.recordSyntheticFinalClick(otherCandidate, other, secondRun, 1, fixture)).toBe(true);
+    expect(await journal.readSyntheticClickAttempts(candidateId, fixture)).toBe(1);
+    expect(await journal.readSyntheticClickAttempts(otherCandidate, fixture)).toBe(1);
+    expect(await journal.readSyntheticClickAttempts(candidateId, { ...fixture, requisitionId: "beta" }))
+      .toBe(0);
+    await expect(journal.recordSyntheticFinalClick(candidateId, first, firstRun, 1, job))
+      .rejects.toThrow("fixture job");
+  });
+
+  it("denies a synthetic click after intent if consent or lease expired", async () => {
+    const db = new LedgerMemory();
+    const journal = db.journal();
+    const fixture = { provider: "synthetic", employerId: "fixture", requisitionId: "alpha" };
+    const token = (await journal.acquireLease(candidateId, firstRun))!;
+    await journal.grantConsent(candidateId, firstRun, 1);
+    await journal.beginSubmission(candidateId, token, firstRun, 1, fixture);
+    await journal.revokeConsent(candidateId, firstRun, 1);
+    expect(await journal.recordSyntheticFinalClick(candidateId, token, firstRun, 1, fixture)).toBe(false);
+    expect(await journal.readSyntheticClickAttempts(candidateId, fixture)).toBe(0);
   });
 
   it("allows receipt confirmation after recovery but never overwrites a confirmed receipt", async () => {
