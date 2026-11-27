@@ -1,5 +1,6 @@
 import { createCognitoBrowserAuth } from '/cognito-browser-auth.js';
 import { stripeTestCheckoutUrl } from '/checkout-url.mjs';
+import { attachCandidateSetup } from '/onboarding.js';
 
 const status = document.querySelector('#status');
 const signIn = document.querySelector('#sign-in');
@@ -51,6 +52,7 @@ try {
       status.textContent = 'Signed in for this tab. Staging setup is in progress.';
       signOut.hidden = false;
       checkoutActions.hidden = config.checkoutEnabled !== true;
+      if (config.onboardingEnabled === true) attachCandidateSetup(auth);
     } catch {
       status.textContent = 'Sign-in failed or expired. Please try again.';
       signIn.hidden = false;

@@ -9,10 +9,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
-      if (url.pathname !== '/api/billing/checkout' || request.method !== 'POST') {
+      const onboarding = url.pathname === '/api/candidates/onboarding';
+      if ((!onboarding && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      if (!env.AWS_API_ORIGIN) {
+      const apiOrigin = onboarding ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
+      if (!apiOrigin) {
         return new Response('API not configured', { status: 503, headers: securityHeaders });
       }
       if (request.headers.get('origin') !== url.origin ||
@@ -22,7 +24,7 @@ export default {
       }
       let upstream;
       try {
-        upstream = new URL(env.AWS_API_ORIGIN);
+        upstream = new URL(apiOrigin);
         if (upstream.protocol !== 'https:' || upstream.username || upstream.password ||
             upstream.search || upstream.hash || upstream.pathname !== '/') throw new Error('Invalid upstream');
       } catch { return new Response('API not configured', { status: 503, headers: securityHeaders }); }
@@ -35,7 +37,7 @@ export default {
           const { done, value } = await reader.read();
           if (done) break;
           size += value.byteLength;
-          if (size > 1024) {
+          if (size > (onboarding ? 7_500_000 : 1024)) {
             await reader.cancel();
             return new Response('Request too large', { status: 413, headers: securityHeaders });
           }
@@ -48,7 +50,7 @@ export default {
       upstream.pathname = url.pathname;
       try {
         const response = await fetch(upstream, {
-          method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(10_000),
+          method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(onboarding ? 60_000 : 10_000),
           headers: {
             'authorization': request.headers.get('authorization'),
             'content-type': request.headers.get('content-type'),

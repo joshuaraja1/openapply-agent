@@ -20,6 +20,38 @@
       <button data-plan="monthly">Test $39 monthly checkout</button>
       <button data-plan="semester">Test $129 semester checkout</button>
     </div>
+    <section id="candidate-setup" hidden aria-labelledby="setup-heading">
+      <h2 id="setup-heading">Your candidate profile</h2>
+      <p class="note">Your answers are used as facts. The uploaded PDF is kept private; we do not turn its text into claims without your review.</p>
+      <form id="setup-form">
+        <label>Where are you now?
+          <select name="careerStage" required>
+            <option value="">Choose one</option><option value="student">Student</option>
+            <option value="new-graduate">New graduate</option><option value="workforce">Working professional</option>
+          </select>
+        </label>
+        <label>Roles you want, one per line<textarea name="targetRoles" required maxlength="1000"></textarea></label>
+        <label>Locations you accept, one per line<textarea name="locations" required maxlength="1000"></textarea></label>
+        <label>School or recent employer<input name="schoolOrEmployer" required maxlength="300"></label>
+        <label>Graduation date or experience summary<input name="graduationOrExperience" required maxlength="300"></label>
+        <label>Countries where you are authorized to work<input name="workAuthorization" required maxlength="300"></label>
+        <label class="check"><input type="checkbox" name="sponsorship"> I need work sponsorship now or later</label>
+        <label>Master résumé (PDF, up to 5 MB)<input type="file" name="masterResume" accept="application/pdf,.pdf" required></label>
+        <label>Transcript (optional PDF, up to 5 MB)<input type="file" name="transcript" accept="application/pdf,.pdf"></label>
+        <button type="submit">Review my answers</button>
+      </form>
+      <div id="setup-review" hidden>
+        <h3>Review before saving</h3>
+        <pre id="setup-summary"></pre>
+        <label class="check"><input id="review-confirmed" type="checkbox"> These answers are accurate and came from me</label>
+        <label class="check"><input id="storage-consent" type="checkbox"> I agree to store my profile and uploads privately</label>
+        <label class="check"><input id="automation-consent" type="checkbox"> I authorize OpenApply to use these answers for job matching and application automation, subject to its handoff rules</label>
+        <button id="setup-save" type="button">Save my profile</button>
+        <button id="setup-edit" type="button" class="secondary">Edit answers</button>
+      </div>
+      <p id="setup-status" role="status" aria-live="polite"></p>
+      <p id="plan-status" class="note">Plan status will appear after billing is connected.</p>
+    </section>
     <p class="note">Private test environment. Checkout uses Stripe test mode; no real card is charged.</p>
   </main>
 </body>
