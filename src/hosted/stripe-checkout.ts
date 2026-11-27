@@ -7,12 +7,14 @@ export interface CheckoutReservation {
   requestId: string;
   subjectId: string;
   customerId: string;
+  plan: HostedPlan;
   createdAt: string;
   session?: CheckoutSessionRecord;
 }
 
 export interface CheckoutSessionRecord {
   sessionId: string;
+  priceId: string;
   url: string;
   expiresAt: string;
 }
@@ -34,8 +36,9 @@ export interface CheckoutConfig {
 
 const MAX_RETRY_AGE_MS = 20 * 60 * 60 * 1000;
 
-function validSession(record: CheckoutSessionRecord, now: number): void {
+function validSession(record: CheckoutSessionRecord, now: number, expectedPriceId: string): void {
   if (!/^cs_[A-Za-z0-9_]+$/.test(record.sessionId)
+    || record.priceId !== expectedPriceId
     || new URL(record.url).origin !== "https://checkout.stripe.com"
     || !Number.isFinite(Date.parse(record.expiresAt))
     || Date.parse(record.expiresAt) <= now) {
@@ -81,7 +84,8 @@ export async function createHostedCheckout(
     throw new Error("Stripe price does not match the configured hosted plan");
   }
   const reservation = await ports.reserve(subjectId, plan);
-  if (reservation.subjectId !== subjectId || !/^[A-Za-z0-9_-]{1,160}$/.test(reservation.requestId)
+  if (reservation.subjectId !== subjectId || reservation.plan !== plan
+    || !/^[A-Za-z0-9_-]{1,160}$/.test(reservation.requestId)
     || !/^cus_[A-Za-z0-9]+$/.test(reservation.customerId)) {
     throw new Error("Checkout reservation is not bound to this candidate");
   }
@@ -91,7 +95,7 @@ export async function createHostedCheckout(
     throw new Error("Checkout reservation has an invalid creation time");
   }
   if (reservation.session) {
-    validSession(reservation.session, nowMs);
+    validSession(reservation.session, nowMs, priceId);
     return reservation.session;
   }
   // Stripe API v1 may forget an idempotency key after 24 hours. A crash after
@@ -113,9 +117,9 @@ export async function createHostedCheckout(
   if (!session.url || !session.expires_at) {
     throw new Error("Stripe did not return a hosted checkout session");
   }
-  const record = { sessionId: session.id, url: session.url,
+  const record = { sessionId: session.id, priceId, url: session.url,
     expiresAt: new Date(session.expires_at * 1000).toISOString() };
-  validSession(record, nowMs);
+  validSession(record, nowMs, priceId);
   await ports.recordSession(reservation.requestId, record);
   return record;
 }
