@@ -72,16 +72,10 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem]
-                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
-              - Effect: Allow
-                Action: dynamodb:Query
-                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
-              - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !Ref ArtifactBrokerArn
-              # Deliberately no direct S3 or KMS grants. The broker issues
-              # candidate-scoped temporary credentials after durable checks.
+              # No direct DynamoDB, SQS, S3, or KMS access. The broker checks
+              # run scope before each state operation or artifact credential.
 
   SyntheticQueueTask:
     Type: AWS::ECS::TaskDefinition
@@ -111,10 +105,6 @@ Resources:
             - { Name: OPENAPPLY_CLOUD_SYNTHETIC_ONLY, Value: '1' }
             - { Name: OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK, Value: '1' }
             - { Name: OPENAPPLY_SUBMISSION_MODE, Value: disabled }
-            - Name: OPENAPPLY_RUN_LEDGER_TABLE
-              Value: !Ref RunLedgerTableName
-            - Name: OPENAPPLY_ENTITLEMENT_TABLE
-              Value: !Ref EntitlementTableName
             - Name: OPENAPPLY_ARTIFACT_BUCKET
               Value: !Ref ArtifactBucketName
             - Name: OPENAPPLY_ARTIFACT_KMS_KEY_ARN

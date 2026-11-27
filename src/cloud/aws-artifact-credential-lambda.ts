@@ -8,6 +8,7 @@ import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { issueCandidateArtifactCredentials, storeEncryptedReceipt } from "./artifact-credential-broker.js";
 import { DynamoArtifactGrantFence } from "./aws-artifact-grant-fence.js";
 import { S3ArtifactStore } from "./aws-artifact-store.js";
+import { executeRunStateRequest } from "./run-state-broker.js";
 
 const env = process.env;
 const required = ["ARTIFACT_SIGNING_SECRET_ARN", "DATA_ROLE_ARN", "ARTIFACT_BUCKET",
@@ -22,7 +23,7 @@ export async function handler(event: unknown) {
   const leaseToken = (event as { leaseToken?: unknown } | null)?.leaseToken;
   const kind = (event as { kind?: unknown } | null)?.kind;
   if (typeof token !== "string" || token.length > 800
-    || typeof leaseToken !== "string") {
+    || (kind !== "run-state" && typeof leaseToken !== "string")) {
     throw new Error("Task capability unavailable");
   }
   const secrets = new SecretsManagerClient({});
@@ -43,6 +44,11 @@ export async function handler(event: unknown) {
     const admission = new DynamoHostedRunAdmission(dynamo, env.RUN_LEDGER_TABLE_NAME!);
     const grantFence = new DynamoArtifactGrantFence(dynamo, env.RUN_LEDGER_TABLE_NAME!);
     const billing = new DynamoCandidatePlanStatus(dynamo, env.ENTITLEMENT_TABLE_NAME!);
+    if (kind === "run-state") {
+      return await executeRunStateRequest((event as { request?: unknown }).request,
+        token, secret, nowEpoch, dynamo, { ledgerTable: env.RUN_LEDGER_TABLE_NAME!,
+          entitlementTable: env.ENTITLEMENT_TABLE_NAME! });
+    }
     if (kind === "receipt-upload") {
       const artifactId = (event as { artifactId?: unknown }).artifactId;
       const encoded = (event as { bodyBase64?: unknown }).bodyBase64;
@@ -53,14 +59,14 @@ export async function handler(event: unknown) {
       const body = Buffer.from(encoded, "base64");
       if (body.toString("base64") !== encoded) throw new Error("Receipt envelope unavailable");
       try {
-        return await storeEncryptedReceipt(token, leaseToken, artifactId, body,
+        return await storeEncryptedReceipt(token, leaseToken as string, artifactId, body,
           secret, nowEpoch, config, { admission, grantFence, billing,
             clock: () => Math.floor(Date.now() / 1000),
             receipts: new S3ArtifactStore(new S3Client({}), env.ARTIFACT_BUCKET!) });
       } finally { body.fill(0); }
     }
     if (kind !== "credentials") throw new Error("Unknown artifact broker request");
-    return await issueCandidateArtifactCredentials(token, leaseToken, secret,
+    return await issueCandidateArtifactCredentials(token, leaseToken as string, secret,
       nowEpoch, config, { admission, grantFence, billing,
         clock: () => Math.floor(Date.now() / 1000), sts: new STSClient({}) });
   } finally { secret.fill(0); }

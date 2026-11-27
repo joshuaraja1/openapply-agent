@@ -2,8 +2,10 @@ import { GetCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
+import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 import { verifyArtifactRunCapability } from "./artifact-credential-broker.js";
 import { DurableApplicationJournal, officialJobKey } from "./durable-journal.js";
+import { requireHostedAccess } from "../hosted/entitlement.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const job = z.strictObject({ provider: z.string().trim().min(1).max(200),
@@ -23,6 +25,8 @@ const request = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("markUncertain"), leaseToken: uuid, job }),
   z.strictObject({ operation: z.literal("confirmAfterVerification"), leaseToken: uuid, job,
     receipt: z.strictObject({ artifactId: uuid, sha256: z.string().regex(/^[a-f0-9]{64}$/) }) }),
+  z.strictObject({ operation: z.literal("readDispatch") }),
+  z.strictObject({ operation: z.literal("markDispatchCompleted") }),
 ]);
 export type RunStateRequest = z.infer<typeof request>;
 
@@ -48,6 +52,7 @@ export async function executeRunStateRequest(input: unknown, capability: string,
   }
   const admission = new DynamoHostedRunAdmission(db, config.ledgerTable);
   const journal = new DurableApplicationJournal(db, config.ledgerTable);
+  const dispatch = new DynamoApplicationDispatchStore(db, config.ledgerTable);
   const billing = new DynamoCandidatePlanStatus(db, config.entitlementTable);
   const run = await admission.loadIdentity(scope.candidateId, scope.runId);
   if ("job" in command && officialJobKey(command.job) !== officialJobKey(run.job)) {
@@ -63,12 +68,28 @@ export async function executeRunStateRequest(input: unknown, capability: string,
       return billing.loadEntitlements(run.subjectId);
     case "acquireLease": return journal.acquireLease(scope.candidateId, scope.runId);
     case "renewLease": return journal.renewLease(scope.candidateId, command.leaseToken);
-    case "releaseLease": return journal.releaseLease(scope.candidateId, command.leaseToken);
+    case "releaseLease":
+      await journal.releaseLease(scope.candidateId, command.leaseToken); return null;
     case "readSubmission": return journal.readSubmission(scope.candidateId, command.job);
-    case "beginSubmission": return journal.beginSubmission(scope.candidateId, command.leaseToken,
-      scope.runId, command.consentVersion, command.job);
-    case "markUncertain": return journal.markUncertain(scope.candidateId, command.leaseToken, command.job);
+    case "beginSubmission":
+      requireHostedAccess(run.subjectId, await billing.loadEntitlements(run.subjectId));
+      return journal.beginSubmission(scope.candidateId, command.leaseToken,
+        scope.runId, command.consentVersion, command.job);
+    case "markUncertain":
+      await journal.markUncertain(scope.candidateId, command.leaseToken, command.job); return null;
     case "confirmAfterVerification": return journal.confirmAfterVerification(scope.candidateId,
       command.leaseToken, command.job, command.receipt);
+    case "readDispatch": {
+      const row = await dispatch.read(scope.candidateId, scope.runId);
+      if (!row || (row.state !== "queued" && row.state !== "launched")) {
+        throw new Error("Exact dispatch is not ready");
+      }
+      return { body: row.body, state: row.state };
+    }
+    case "markDispatchCompleted": {
+      const submitted = await journal.readSubmission(scope.candidateId, run.job);
+      if (submitted.status !== "confirmed") throw new Error("Dispatch is not confirmed");
+      await dispatch.markCompleted(scope.candidateId, scope.runId); return null;
+    }
   }
 }
