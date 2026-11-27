@@ -83,6 +83,45 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("publishes a retryable row only in the same transaction that frees its old slot", async () => {
+    let slotHeld = true;
+    let taskState = "started";
+    let dispatchState = "launched";
+    let sawRace = false;
+    const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "started" as const, generation: 0,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000, taskArn };
+    const envelope = { version: 1 as const, candidateId, runId, kind: "apply" as const,
+      scheduledAt: "2026-11-26T20:00:00.000Z" };
+    const { encodeCloudRunEnvelope } = await import("../src/cloud/run-envelope.js");
+    const encoded = encodeCloudRunEnvelope(envelope);
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      if (command instanceof GetCommand) return { Item: {
+        pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}`,
+        candidateId, runId, state: dispatchState, ...encoded,
+        createdAt: envelope.scheduledAt } };
+      const items = command.input.TransactItems ?? [];
+      expect(items).toHaveLength(3);
+      expect(items[2]?.Update?.Key).toEqual({
+        pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}` });
+      // A concurrent controller can observe only the pre-commit state here.
+      sawRace = dispatchState === "queued" && taskState === "started";
+      expect(slotHeld).toBe(true);
+      expect(dispatchState).toBe("launched");
+      taskState = "stopped";
+      slotHeld = false;
+      dispatchState = "queued";
+      return {};
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markStopped(row, true);
+    expect(sawRace).toBe(false);
+    expect({ slotHeld, taskState, dispatchState }).toEqual({
+      slotHeld: false, taskState: "stopped", dispatchState: "queued" });
+  });
   it("reserves a fresh ECS token only after an observed stopped task", async () => {
     const oldToken = "a".repeat(64);
     let row: Record<string, unknown> = {

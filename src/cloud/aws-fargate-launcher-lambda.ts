@@ -101,11 +101,12 @@ async function sweepHandler(config: FargateLaunchConfig) {
   const ecs = new ECSClient({});
   const sweep = await sweepFargateSlot(config, { store, ecs,
     async onStopped(candidateId, runId, generation) {
-      await reconcileStoppedDispatch(candidateId, runId, generation, {
-      dispatch: new DynamoApplicationDispatchStore(db, config.ledgerTable),
-      admission: new DynamoHostedRunAdmission(db, config.ledgerTable),
-      journal: new DurableApplicationJournal(db, config.ledgerTable),
+      const outcome = await reconcileStoppedDispatch(candidateId, runId, generation, {
+        dispatch: new DynamoApplicationDispatchStore(db, config.ledgerTable),
+        admission: new DynamoHostedRunAdmission(db, config.ledgerTable),
+        journal: new DurableApplicationJournal(db, config.ledgerTable),
       });
+      return outcome === "retryable";
     },
   });
   if (sweep === "waiting" || sweep === "stopping") return { status: sweep };
@@ -127,7 +128,7 @@ async function sweepHandler(config: FargateLaunchConfig) {
  * Repair a confirmed run; hold every other outcome for explicit review. */
 export async function reconcileStoppedDispatch(candidateId: string, runId: string,
   generation: number, ports: {
-  dispatch: Pick<DynamoApplicationDispatchStore, "read" | "markCompleted" | "markNeedsReconciliation" | "markRetryable">;
+  dispatch: Pick<DynamoApplicationDispatchStore, "read" | "markCompleted" | "markNeedsReconciliation">;
   admission: Pick<DynamoHostedRunAdmission, "loadIdentity">;
   journal: Pick<DurableApplicationJournal, "readSubmission">;
 }): Promise<"absent" | "completed" | "retryable" | "needs_reconciliation"> {
@@ -145,7 +146,6 @@ export async function reconcileStoppedDispatch(candidateId: string, runId: strin
     return "completed";
   }
   if (submission.status === "not_started" && generation < 2) {
-    await ports.dispatch.markRetryable(candidateId, runId);
     return "retryable";
   }
   await ports.dispatch.markNeedsReconciliation(candidateId, runId);

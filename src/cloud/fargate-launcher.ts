@@ -3,6 +3,7 @@ import { DescribeTasksCommand, ListTasksCommand, RunTaskCommand, StopTaskCommand
 import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { mintArtifactRunCapability } from "./artifact-credential-broker.js";
+import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const arn = z.string().startsWith("arn:aws:");
@@ -174,7 +175,24 @@ export class DynamoFargateLaunchStore {
         ":reserved": "reserved", ":token": row.clientToken, ":hash": row.configHash } }));
   }
 
-  async markStopped(row: LaunchRow): Promise<void> {
+  private async retryDispatchUpdate(row: LaunchRow): Promise<NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]["TransactItems"]>[number]> {
+    const dispatch = await new DynamoApplicationDispatchStore(this.db, this.table)
+      .read(row.candidateId, row.runId);
+    if (!dispatch || (dispatch.state !== "launched" && dispatch.state !== "queued")) {
+      throw new Error("Stopped dispatch is not retryable");
+    }
+    return { Update: { TableName: this.table,
+      Key: { pk: dispatch.pk, sk: dispatch.sk },
+      UpdateExpression: "SET #state=:queued, gsi1pk=:index, gsi1sk=:order",
+      ConditionExpression: "#state IN (:launched, :queued)",
+      ExpressionAttributeNames: { "#state": "state" },
+      ExpressionAttributeValues: { ":queued": "queued", ":launched": "launched",
+        ":index": "APPLICATION_DISPATCH",
+        ":order": `${dispatch.createdAt}#${row.candidateId}#${row.runId}` } } };
+  }
+
+  async markStopped(row: LaunchRow, retry = false): Promise<void> {
+    const retryUpdate = retry ? await this.retryDispatchUpdate(row) : undefined;
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
         UpdateExpression: "SET #state=:stopped REMOVE capability",
@@ -186,10 +204,12 @@ export class DynamoFargateLaunchStore {
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
 
-  async markUnlaunched(row: LaunchRow): Promise<void> {
+  async markUnlaunched(row: LaunchRow, retry = false): Promise<void> {
+    const retryUpdate = retry ? await this.retryDispatchUpdate(row) : undefined;
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
         UpdateExpression: "SET #state=:stopped REMOVE capability",
@@ -201,6 +221,7 @@ export class DynamoFargateLaunchStore {
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
 }
@@ -299,7 +320,7 @@ export async function stopFargateRun(candidateId: string, runId: string,
  * after ECS confirms STOPPED. Missing/ambiguous ECS state stays fenced. */
 export async function sweepFargateSlot(config: FargateLaunchConfig,
   ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send">;
-    onStopped?(candidateId: string, runId: string, generation: number): Promise<void> },
+    onStopped?(candidateId: string, runId: string, generation: number): Promise<boolean> },
   nowEpoch = Math.floor(Date.now() / 1000)): Promise<"idle" | "waiting" | "stopping" | "stopped"> {
   validated(config);
   const slot = await ports.store.readActiveSlot();
@@ -335,8 +356,8 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
           cursor = active.nextToken;
         } while (cursor);
       }
-      await ports.onStopped?.(row.candidateId, row.runId, row.generation);
-      await ports.store.markUnlaunched(row);
+      const retry = await ports.onStopped?.(row.candidateId, row.runId, row.generation);
+      await ports.store.markUnlaunched(row, retry ?? false);
       return "stopped";
     }
   }
@@ -345,8 +366,8 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
   const task = result.tasks?.find(item => item.taskArn === row.taskArn);
   if (!task || result.failures?.length) throw new Error("Task state unavailable");
   if (task.lastStatus === "STOPPED") {
-    await ports.onStopped?.(row.candidateId, row.runId, row.generation);
-    await ports.store.markStopped(row);
+    const retry = await ports.onStopped?.(row.candidateId, row.runId, row.generation);
+    await ports.store.markStopped(row, retry ?? false);
     return "stopped";
   }
   if (nowEpoch - row.reservedAt >= 900) {

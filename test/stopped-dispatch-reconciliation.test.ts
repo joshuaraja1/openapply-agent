@@ -12,12 +12,11 @@ function harness(status: "not_started" | "needs_reconciliation" | "confirmed", g
     read: vi.fn(async () => ({ state: "launched" as const })),
     markCompleted: vi.fn(async () => {}),
     markNeedsReconciliation: vi.fn(async () => {}),
-    markRetryable: vi.fn(async () => {}),
   };
   const admission = { loadIdentity: vi.fn(async () => ({ job })) };
   const journal = { readSubmission: vi.fn(async () => ({ status })) };
   const ports = { dispatch: dispatch as unknown as Pick<DynamoApplicationDispatchStore,
-      "read" | "markCompleted" | "markNeedsReconciliation" | "markRetryable">,
+      "read" | "markCompleted" | "markNeedsReconciliation">,
     admission: admission as unknown as Pick<DynamoHostedRunAdmission, "loadIdentity">,
     journal: journal as unknown as Pick<DurableApplicationJournal, "readSubmission"> };
   return { ports, dispatch, admission, journal, generation };
@@ -28,13 +27,11 @@ describe("stopped exact dispatch reconciliation", () => {
     const h = harness("confirmed");
     expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports)).toBe("completed");
     expect(h.dispatch.markCompleted).toHaveBeenCalledWith(candidateId, runId);
-    expect(h.dispatch.markRetryable).not.toHaveBeenCalled();
     expect(h.dispatch.markNeedsReconciliation).not.toHaveBeenCalled();
   });
   it("requeues only pre-intent crashes with bounded fresh launch generation", async () => {
     const h = harness("not_started", 1);
     expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports)).toBe("retryable");
-    expect(h.dispatch.markRetryable).toHaveBeenCalledWith(candidateId, runId);
     expect(h.dispatch.markCompleted).not.toHaveBeenCalled();
   });
   it("holds uncertain or exhausted runs for reconciliation", async () => {
@@ -45,7 +42,6 @@ describe("stopped exact dispatch reconciliation", () => {
       expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports))
         .toBe("needs_reconciliation");
       expect(h.dispatch.markNeedsReconciliation).toHaveBeenCalledWith(candidateId, runId);
-      expect(h.dispatch.markRetryable).not.toHaveBeenCalled();
-    }
+      }
   });
 });
