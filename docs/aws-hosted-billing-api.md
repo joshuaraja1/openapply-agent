@@ -3,9 +3,11 @@
 `src/hosted/aws-billing-lambda.ts` makes the hosted billing runtime deployable
 behind an AWS HTTP API. It accepts only Stripe **test-mode** credentials from
 AWS Secrets Manager, uses the isolated OpenApply DynamoDB table, and never
-contains a card form. The two API Gateway routes are Checkout and the signed
-Stripe webhook. Application enqueue is deliberately **not routed** here until
-the candidate run ledger, consent records, and FIFO queue ports are deployed.
+contains a card form. The default API Gateway routes are Checkout and the signed
+Stripe webhook. Trusted run creation and application enqueue are separate
+off-by-default routes. Enabling them requires reviewed profile facts, a current
+official lead, the run ledger, consent records, and the exact-run launcher;
+the staging browser remains disabled for real employers.
 
 `deploy/aws/hosted-billing-api.yaml` defines the HTTP API, two Lambda
 functions, an EventBridge replay schedule, and separate IAM roles. The HTTP

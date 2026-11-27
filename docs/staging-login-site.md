@@ -55,10 +55,28 @@ controlled HTTPS route is live and tested.
 
 ## Same-origin API contract
 
-The Worker proxies only `POST /api/billing/checkout` when `AWS_API_ORIGIN` is
-configured; otherwise it returns 503. The trusted upstream origin comes from
-server configuration, never the request. It preserves only Authorization,
-Content-Type, Origin, and a body bounded to 1 KiB; uses a 10-second timeout;
-blocks redirects; strips cookies; and returns no-store. The AWS API verifies
-the JWT and applies billing and candidate authorization; the Worker grants no
-access. Other `/api/*` paths return 404 until separately implemented.
+The Worker proxies billing Checkout and the candidate onboarding, plan, and
+deletion routes to their configured AWS origins. It also has two separate,
+**off-by-default** staging switches:
+
+- `APPLICATION_RUN_CREATION_ENABLED=true` allows only
+  `POST /api/applications/runs` to the billing API origin. The AWS run-creator
+  route must also be deployed with `EnableApplicationRunCreation=true`.
+- `APPLICATION_ENQUEUE_ENABLED=true` allows only
+  `POST /api/applications/enqueue` to that origin. The AWS billing stack must
+  have `EnableApplicationEnqueue=true` and a deployed exact-run Fargate launcher.
+
+Keep both Worker switches unset until an official-source lead writer has
+created a current `LEAD#<id>/VERIFIED` row, onboarding has written a reviewed
+`applicationProfileReady=true` marker, and the hosted browser path is ready for
+the intended provider. The page does not yet present a job list or a Start
+Application action. These routes are an authenticated integration boundary,
+not a public automation feature by themselves.
+
+The trusted upstream origin comes from server configuration, never the
+request. The Worker forwards only Authorization, Content-Type, Origin, and a
+bounded body (2 KiB for run creation, 1 KiB for enqueue); it blocks redirects,
+strips cookies, and returns no-store. AWS independently verifies the JWT,
+current paid/free access, official lead, profile ownership and readiness,
+per-run consent, and durable dispatch. The Worker grants no access. Unknown
+`/api/*` paths return 404.

@@ -15,7 +15,7 @@ const leadSchema = z.object({ pk: z.string(), sk: z.literal("VERIFIED"),
   expiresAt: z.number().int().positive() });
 const profileSchema = z.object({ pk: z.string(), sk: z.string().startsWith("PROFILE#"),
   status: z.literal("verified"), candidateId: uuid, artifactId: uuid,
-  subjectId: z.string().min(1).max(160) });
+  subjectId: z.string().min(1).max(160), applicationProfileReady: z.literal(true) });
 const runSchema = z.object({ pk: z.string(), sk: z.string().startsWith("RUN#"),
   candidateId: uuid, runId: uuid, subjectId: z.string(), leadId: uuid,
   job: leadSchema.shape.job, jobKey: z.string(), profileArtifactId: uuid,
@@ -95,10 +95,11 @@ export class DynamoTrustedRunCreator {
             ":jobKey": record.jobKey } } },
         { ConditionCheck: { TableName: this.table,
           Key: { pk, sk: `PROFILE#${record.profileArtifactId}` },
-          ConditionExpression: "#status = :verified AND subjectId = :subject AND candidateId = :candidate AND artifactId = :artifact",
+          ConditionExpression: "#status = :verified AND subjectId = :subject AND candidateId = :candidate AND artifactId = :artifact AND applicationProfileReady = :ready",
           ExpressionAttributeNames: { "#status": "status" },
           ExpressionAttributeValues: { ":verified": "verified", ":subject": record.subjectId,
-            ":candidate": record.candidateId, ":artifact": record.profileArtifactId } } },
+            ":candidate": record.candidateId, ":artifact": record.profileArtifactId,
+            ":ready": true } } },
         { Put: { TableName: this.table, Item: { ...runKey, ...record },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { Put: { TableName: this.table,

@@ -67,6 +67,58 @@ describe('staging login Worker', () => {
     }
   });
 
+  it('keeps application run creation and enqueue closed until each staging flag is enabled', async () => {
+    const env = { ...assets(), AWS_API_ORIGIN: 'https://aws-api.example.com' };
+    const upstream = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    try {
+      for (const path of ['/api/applications/runs', '/api/applications/enqueue']) {
+        const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
+          method: 'POST', headers: { origin: 'https://test.workers.dev',
+            authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
+        }), env);
+        expect(response.status).toBe(404);
+      }
+      expect(upstream).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('forwards only bounded authenticated application calls to the billing API', async () => {
+    const env = { ...assets(), AWS_API_ORIGIN: 'https://aws-api.example.com',
+      APPLICATION_RUN_CREATION_ENABLED: 'true', APPLICATION_ENQUEUE_ENABLED: 'true' };
+    const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
+      new Response('{"status":"queued"}', { status: 202 }));
+    vi.stubGlobal('fetch', upstream);
+    const headers = { origin: 'https://test.workers.dev', authorization: 'Bearer a.b.c',
+      'content-type': 'application/json' };
+    try {
+      for (const path of ['/api/applications/runs', '/api/applications/enqueue']) {
+        const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
+          method: 'POST', headers: { ...headers, cookie: 'private=1' }, body: '{}',
+        }), env);
+        expect(response.status).toBe(202);
+      }
+      expect(upstream.mock.calls.map(call => String(call[0]))).toEqual([
+        'https://aws-api.example.com/api/applications/runs',
+        'https://aws-api.example.com/api/applications/enqueue',
+      ]);
+      for (const [, options] of upstream.mock.calls) {
+        expect(options.headers).toMatchObject({ authorization: 'Bearer a.b.c',
+          origin: 'https://test.workers.dev' });
+        expect((options.headers as Record<string, string>).cookie).toBeUndefined();
+      }
+      const tooLarge = await worker.fetch(new Request('https://test.workers.dev/api/applications/runs', {
+        method: 'POST', headers, body: 'x'.repeat(2049),
+      }), env);
+      expect(tooLarge.status).toBe(413);
+      const forged = await worker.fetch(new Request('https://test.workers.dev/api/applications/enqueue', {
+        method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: '{}',
+      }), env);
+      expect(forged.status).toBe(403);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('forwards only a bounded authenticated checkout request to configured AWS API', async () => {
     const env = { ...assets(), AWS_API_ORIGIN: 'https://aws-api.example.com' };
     const upstream = vi.fn(async (_url: URL, _options: RequestInit) => new Response('{"checkoutUrl":"https://checkout.stripe.com/test"}',
