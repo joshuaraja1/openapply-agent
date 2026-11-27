@@ -20,6 +20,11 @@ function consentEpoch(version: number): number {
   return version;
 }
 
+/** Each application run keeps its own revocable consent. */
+export function runConsentKey(runId: string): string {
+  return `CONSENT#${uuid.parse(runId).toLowerCase()}`;
+}
+
 /** Call only after the posting and requisition have been verified at the employer. */
 export function officialJobKey(identity: OfficialJobIdentity): string {
   const value = officialJobSchema.parse(identity);
@@ -65,7 +70,7 @@ export class DurableApplicationJournal {
         { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "DELETED" },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { Update: {
-          TableName: this.tableName, Key: { pk, sk: "CONSENT" },
+          TableName: this.tableName, Key: { pk, sk: runConsentKey(canonicalRunId) },
           UpdateExpression: "SET runId = :runId, version = :version, #state = :granted, updatedAt = :time",
           ConditionExpression: "attribute_not_exists(version) OR version < :version",
           ExpressionAttributeNames: { "#state": "state" },
@@ -80,15 +85,16 @@ export class DurableApplicationJournal {
     }
   }
 
-  async revokeConsent(candidateId: string, version: number): Promise<boolean> {
+  async revokeConsent(candidateId: string, runId: string, version: number): Promise<boolean> {
     const pk = this.candidateKey(candidateId);
+    const canonicalRunId = uuid.parse(runId).toLowerCase();
     const epoch = consentEpoch(version);
     try {
       await this.client.send(new TransactWriteCommand({ TransactItems: [
         { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "DELETED" },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { Update: {
-          TableName: this.tableName, Key: { pk, sk: "CONSENT" },
+          TableName: this.tableName, Key: { pk, sk: runConsentKey(canonicalRunId) },
           UpdateExpression: "SET #state = :revoked, updatedAt = :time",
           ConditionExpression: "version = :version AND #state = :granted",
           ExpressionAttributeNames: { "#state": "state" },
@@ -182,7 +188,7 @@ export class DurableApplicationJournal {
         { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "DELETED" },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { ConditionCheck: {
-          TableName: this.tableName, Key: { pk, sk: "CONSENT" },
+          TableName: this.tableName, Key: { pk, sk: runConsentKey(canonicalRunId) },
           ConditionExpression: "runId = :runId AND version = :version AND #state = :granted",
           ExpressionAttributeNames: { "#state": "state" },
           ExpressionAttributeValues: { ":runId": canonicalRunId, ":version": epoch, ":granted": "granted" },

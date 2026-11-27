@@ -30,3 +30,5 @@ jobs:
       - run: npm ci
       - run: npm run build:hosted-lambda
       - run: node -e 'const app = require("./dist-hosted/aws-billing-lambda.cjs"); if (typeof app.handler !== "function" || typeof app.scheduledHandler !== "function") process.exit(1)'
+      - run: npm run build:run-creator-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-run-creator-lambda.cjs"); if (typeof app.handler !== "function") process.exit(1)'
