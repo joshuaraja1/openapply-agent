@@ -34,6 +34,17 @@ The status route requires the same signed-in subject and reports only
 `none`, `pending`, or `complete`. A `503` never becomes a completion claim.
 No candidate deletion was run in AWS by this PR.
 
+The API deletion and retry Lambdas have separate DynamoDB roles. Neither has
+direct S3 or KMS access. Each purge assumes a deletion-only S3 role with an
+STS session policy intersecting that role's ceiling at exactly
+`candidates/<verified-candidate-id>/`. The policy covers all object versions
+under `artifacts/` and `runs/<run-id>/receipts/`, including delete markers,
+without GetObject, PutObject, or KMS decrypt. The claim and active-writer
+checks run before this role is assumed. The broker's transactionally reserved
+`GRANT#` records hold the purge until the 15-minute STS credential and its
+clock margin expire; malformed grants fail closed. An expired journal lease
+still does not prove the ECS task stopped, so this is not the final stop barrier.
+
 ## Staging migration and rollback
 
 Add `DeletionDueIndex` to the run ledger stack and wait for the index to become

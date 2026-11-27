@@ -40,7 +40,6 @@ export function attachCandidateDeletion(auth) {
     if (busy) return;
     busy = true;
     request.disabled = true;
-    setup.hidden = true;
     try { render(await call('/api/candidates/deletion-status')); }
     catch { render('unavailable'); }
     finally { busy = false; request.disabled = current !== 'none' || confirm.value !== 'DELETE'; }
@@ -51,6 +50,7 @@ export function attachCandidateDeletion(auth) {
     if (busy || current !== 'none' || confirm.value !== 'DELETE') return;
     busy = true;
     request.disabled = true;
+    setup.hidden = true;
     status.textContent = 'Recording your deletion request…';
     try { render(await call('/api/candidates/delete')); }
     catch { render('unavailable'); }

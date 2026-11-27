@@ -37,7 +37,7 @@ function canonicalId(id: string): string {
   return parsed;
 }
 
-function candidatePrefix(candidateId: string): string {
+export function candidatePrefix(candidateId: string): string {
   return `candidates/${canonicalId(candidateId)}/`;
 }
 

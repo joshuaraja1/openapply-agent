@@ -2,11 +2,13 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
+import { STSClient } from "@aws-sdk/client-sts";
 import { candidateIdForSubject } from "../cloud/hosted-run-creator.js";
 import { CandidateVault } from "../cloud/candidate-vault.js";
 import { KmsDataKeys, S3ArtifactStore } from "../cloud/aws-artifact-store.js";
 import { DynamoOnboardingMarkers } from "./aws-onboarding-store.js";
 import { DynamoCandidateDeletionStore } from "./aws-candidate-deletion-store.js";
+import { AssumeRoleCandidatePurger } from "./aws-candidate-purger.js";
 import { DynamoCandidatePlanStatus } from "./aws-plan-status.js";
 import { handleCandidateOnboardingHttp } from "./candidate-onboarding-http.js";
 import { handleCandidateDeletionHttp } from "./candidate-deletion-http.js";
@@ -37,7 +39,10 @@ function runtime() {
   const deletion = new DynamoCandidateDeletionStore(db, required("RUN_LEDGER_TABLE_NAME"));
   const plans = new DynamoCandidatePlanStatus(db, required("ENTITLEMENT_TABLE_NAME"));
   const candidateId = (subject: string) => candidateIdForSubject(issuer, subject);
-  const deletionDeps = { appOrigin, verifySubject, store: deletion, vault,
+  const deletionVault = process.env.CANDIDATE_DELETION_ENABLED === "true"
+    ? new AssumeRoleCandidatePurger(new STSClient({}), required("CANDIDATE_PURGE_ROLE_ARN"),
+      required("PRIVATE_ARTIFACT_BUCKET")) : vault;
+  const deletionDeps = { appOrigin, verifySubject, store: deletion, vault: deletionVault,
     candidateIdForSubject: candidateId };
   return { handleRequest: async (request: Request) => ["/api/candidates/delete",
     "/api/candidates/deletion-status"].includes(new URL(request.url).pathname)
@@ -72,4 +77,14 @@ export async function handler(event: HttpApiEvent) {
     return { statusCode: 503, headers: { "cache-control": "no-store" },
       body: "", isBase64Encoded: true as const };
   }
+}
+
+/** Dedicated API integration; cannot serve onboarding or plan requests. */
+export async function deletionHandler(event: HttpApiEvent) {
+  if (process.env.CANDIDATE_DELETION_ENABLED !== "true"
+    || !["/api/candidates/delete", "/api/candidates/deletion-status"].includes(event.rawPath)) {
+    return { statusCode: 404, headers: { "cache-control": "no-store" },
+      body: "", isBase64Encoded: true as const };
+  }
+  return handler(event);
 }
