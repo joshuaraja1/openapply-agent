@@ -21,9 +21,18 @@ const freeGrant = z.strictObject({
   endsAt: instant,
   revokedAt: instant.nullable(),
 });
+const semester = z.strictObject({
+  kind: z.literal("semester"),
+  subjectId: z.string().min(1),
+  checkoutSessionId: z.string().regex(/^cs_[A-Za-z0-9_]+$/),
+  paymentIntentId: z.string().regex(/^pi_[A-Za-z0-9]+$/),
+  startsAt: instant,
+  endsAt: instant,
+  revokedAt: instant.nullable(),
+});
 
 /** Records must be read from the trusted server store, never from a client request. */
-export const hostedEntitlementSchema = z.discriminatedUnion("kind", [subscription, freeGrant]);
+export const hostedEntitlementSchema = z.discriminatedUnion("kind", [subscription, freeGrant, semester]);
 export type HostedEntitlement = z.infer<typeof hostedEntitlementSchema>;
 
 export interface HostedAccess {
@@ -57,6 +66,7 @@ export function requireHostedAccess(
   eligible.sort((a, b) => Date.parse(accessUntil(b)) - Date.parse(accessUntil(a)));
   const chosen = eligible[0]!;
   return { kind: chosen.kind,
-    sourceId: chosen.kind === "subscription" ? chosen.subscriptionId : chosen.grantId,
+    sourceId: chosen.kind === "subscription" ? chosen.subscriptionId
+      : chosen.kind === "semester" ? chosen.checkoutSessionId : chosen.grantId,
     accessUntil: accessUntil(chosen) };
 }
