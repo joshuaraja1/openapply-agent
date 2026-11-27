@@ -5,6 +5,7 @@
   "compatibility_date": "2026-11-26",
   "workers_dev": true,
   "routes": [{ "pattern": "staging.openapplyagent.xyz", "custom_domain": true }],
+  "keep_vars": true,
   "observability": { "enabled": false, "traces": { "enabled": false } },
   "assets": {
     "directory": "../staging-login-dist",
