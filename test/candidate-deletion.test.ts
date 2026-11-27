@@ -9,6 +9,7 @@ const t0 = new Date("2026-11-26T12:00:00.000Z");
 function fixture() {
   let marker: { state: "pending" | "complete"; subjectId: string; notBeforeEpoch: number } | undefined;
   let active = false;
+  let unstoppedTask = false;
   let claimed = false;
   const purge = vi.fn(async () => {});
   const deps: CandidateDeletionDeps = {
@@ -24,6 +25,7 @@ function fixture() {
         ? [{ candidateId, subjectId }] : [], malformed: 0 }; },
       async defer() {},
       async hasActiveWriters() { return active; },
+      async hasUnstoppedTasks() { return unstoppedTask; },
       async claimPurge() { if (claimed) return false; claimed = true; return true; },
       async releasePurge() { claimed = false; },
       async purgeMetadata() { return true; },
@@ -31,10 +33,29 @@ function fixture() {
     },
   };
   return { deps, purge, setActive(value: boolean) { active = value; },
+    setUnstoppedTask(value: boolean) { unstoppedTask = value; },
     marker: () => marker };
 }
 
 describe("hosted candidate deletion", () => {
+  it("waits for candidate-wide STOPPED acknowledgement and the active GRANT fence", async () => {
+    const test = fixture();
+    test.setUnstoppedTask(true);
+    test.setActive(true); // The store's active-writer result covers GRANT# rows.
+    const stop = vi.fn(async () => "stopping" as "stopping" | "stopped");
+    test.deps.stopCandidateTasks = stop;
+    expect(await deleteCandidateAccount(subjectId, test.deps, t0)).toEqual({ state: "pending" });
+    expect(stop).toHaveBeenCalledExactlyOnceWith(candidateId);
+    const later = new Date(t0.getTime() + 241_000);
+    expect(await deleteCandidateAccount(subjectId, test.deps, later)).toEqual({ state: "pending" });
+    test.deps.stopCandidateTasks = async () => "stopped";
+    expect(await deleteCandidateAccount(subjectId, test.deps, later)).toEqual({ state: "pending" });
+    test.setUnstoppedTask(false);
+    expect(await deleteCandidateAccount(subjectId, test.deps, later)).toEqual({ state: "pending" });
+    test.setActive(false);
+    expect(await deleteCandidateAccount(subjectId, test.deps, later)).toEqual({ state: "complete" });
+    expect(test.purge).toHaveBeenCalledTimes(1);
+  });
   it("writes a durable tombstone first, waits out uploads, then retries a full purge", async () => {
     const test = fixture();
     test.setActive(true);

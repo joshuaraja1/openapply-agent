@@ -27,6 +27,18 @@ export interface FargateLaunchConfig {
   environment: "staging";
 }
 
+export interface FargateStopConfig {
+  clusterArn: string;
+  ledgerTable: string;
+}
+
+function validatedStop(config: FargateStopConfig): void {
+  if (!/^arn:aws[a-z-]*:ecs:[a-z0-9-]+:\d{12}:cluster\/[A-Za-z0-9_-]+$/.test(config.clusterArn)
+    || config.ledgerTable !== "openapply-staging-run-ledger") {
+    throw new Error("Invalid Fargate stop configuration");
+  }
+}
+
 function validated(config: FargateLaunchConfig): FargateLaunchConfig {
   if (!config.enabled) throw new Error("Fargate launcher disabled");
   if (!/^arn:aws[a-z-]*:ecs:[a-z0-9-]+:\d{12}:cluster\/[A-Za-z0-9_-]+$/.test(config.clusterArn)
@@ -227,9 +239,9 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
 /** Deletion or consent withdrawal calls this before clearing candidate rows.
  * The caller must wait for a subsequent STOPPED observation before erasure. */
 export async function stopFargateRun(candidateId: string, runId: string,
-  config: FargateLaunchConfig, ports: { store: DynamoFargateLaunchStore;
+  config: FargateStopConfig, ports: { store: DynamoFargateLaunchStore;
     ecs: Pick<ECSClient, "send"> }): Promise<"stopping" | "stopped" | "unlaunched"> {
-  validated(config);
+  validatedStop(config);
   const row = await ports.store.read(candidateId, runId);
   if (!row) return "unlaunched";
   if (row.state === "stopped") return "stopped";
@@ -310,8 +322,9 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
 /** Deletion gate for the one-slot staging deployment. Call this before data
  * erasure and repeat until STOPPED. A missing ECS state cannot authorize erase. */
 export async function stopCandidateFargateTask(candidateId: string,
-  config: FargateLaunchConfig,
+  config: FargateStopConfig,
   ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send"> }): Promise<"stopped" | "stopping"> {
+  validatedStop(config);
   uuid.parse(candidateId);
   const rows = await ports.store.listCandidateTasks(candidateId);
   let stopping = false;

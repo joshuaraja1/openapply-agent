@@ -1,12 +1,10 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { KMSClient } from "@aws-sdk/client-kms";
-import { S3Client } from "@aws-sdk/client-s3";
 import { SQSClient } from "@aws-sdk/client-sqs";
+import { LambdaClient } from "@aws-sdk/client-lambda";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runBrowserSmoke } from "./browser-smoke-cli.js";
-import { runOneApplicationQueueTick } from "./aws-queue-consumer.js";
 import { createAwsQueuedRunRuntime, type AwsQueuedRunConfiguration }
   from "./aws-queued-run-runtime.js";
 import { SyntheticBrowserApplication, SyntheticReceiptVerifier }
@@ -26,6 +24,7 @@ function configuration(): AwsQueuedRunConfiguration {
     artifactBucket: required("OPENAPPLY_ARTIFACT_BUCKET"),
     artifactKmsKeyArn: required("OPENAPPLY_ARTIFACT_KMS_KEY_ARN"),
     applicationQueueUrl: required("OPENAPPLY_APPLICATION_QUEUE_URL"),
+    artifactBrokerArn: required("OPENAPPLY_ARTIFACT_BROKER_ARN"),
   };
 }
 
@@ -42,17 +41,20 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
   const config = configuration();
   const region = required("AWS_REGION");
   const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
-  const kms = new KMSClient({ region });
-  const s3 = new S3Client({ region });
+  const lambda = new LambdaClient({ region });
   const sqs = new SQSClient({ region });
   try {
-    const runtime = createAwsQueuedRunRuntime({ dynamo, kms, s3, sqs }, config,
+    const runtime = createAwsQueuedRunRuntime({ dynamo, lambda, sqs }, config,
+      { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
+        runId: required("OPENAPPLY_RUN_ID"),
+        capability: required("OPENAPPLY_RUN_CAPABILITY") },
       new SyntheticBrowserApplication(), new SyntheticReceiptVerifier());
-    const outcome = await runOneApplicationQueueTick(runtime.receiver, runtime.ports);
+    const message = await runtime.receiver.receiveOne();
+    const outcome = message ? await runtime.handle(message) : "empty";
     process.stdout.write(`Cloud synthetic queue task outcome: ${outcome}\n`);
     return outcome;
   } finally {
-    dynamo.destroy(); kms.destroy(); s3.destroy(); sqs.destroy();
+    dynamo.destroy(); lambda.destroy(); sqs.destroy();
   }
 }
 

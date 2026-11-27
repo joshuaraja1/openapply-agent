@@ -3,6 +3,7 @@ import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
 import { STSClient } from "@aws-sdk/client-sts";
+import { ECSClient } from "@aws-sdk/client-ecs";
 import { candidateIdForSubject } from "../cloud/hosted-run-creator.js";
 import { CandidateVault } from "../cloud/candidate-vault.js";
 import { KmsDataKeys, S3ArtifactStore } from "../cloud/aws-artifact-store.js";
@@ -13,6 +14,7 @@ import { DynamoCandidatePlanStatus } from "./aws-plan-status.js";
 import { handleCandidateOnboardingHttp } from "./candidate-onboarding-http.js";
 import { handleCandidateDeletionHttp } from "./candidate-deletion-http.js";
 import { retryCandidateDeletions } from "./candidate-deletion.js";
+import { DynamoFargateLaunchStore, stopCandidateFargateTask } from "../cloud/fargate-launcher.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 
@@ -42,8 +44,15 @@ function runtime() {
   const deletionVault = process.env.CANDIDATE_DELETION_ENABLED === "true"
     ? new AssumeRoleCandidatePurger(new STSClient({}), required("CANDIDATE_PURGE_ROLE_ARN"),
       required("PRIVATE_ARTIFACT_BUCKET")) : vault;
+  const stopCandidateTasks = process.env.FARGATE_DELETION_STOP_ENABLED === "true"
+    ? (candidate: string) => stopCandidateFargateTask(candidate,
+      { clusterArn: required("ECS_CLUSTER_ARN"), ledgerTable: required("RUN_LEDGER_TABLE_NAME") },
+      { store: new DynamoFargateLaunchStore(db, required("RUN_LEDGER_TABLE_NAME")),
+        ecs: new ECSClient({}) })
+    : undefined;
   const deletionDeps = { appOrigin, verifySubject, store: deletion, vault: deletionVault,
-    candidateIdForSubject: candidateId };
+    candidateIdForSubject: candidateId,
+    ...(stopCandidateTasks ? { stopCandidateTasks } : {}) };
   return { handleRequest: async (request: Request) => ["/api/candidates/delete",
     "/api/candidates/deletion-status"].includes(new URL(request.url).pathname)
     ? process.env.CANDIDATE_DELETION_ENABLED === "true"

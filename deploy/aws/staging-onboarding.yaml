@@ -14,6 +14,13 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableDeletionEcsStop:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EcsClusterArn:
+    Type: String
+    Default: ''
   CodeBucket:
     Type: String
   CodeKey:
@@ -42,6 +49,18 @@ Conditions:
   RetryEnabled: !And
     - !Condition DeletionEnabled
     - !Equals [!Ref EnableDeletionRetry, 'true']
+  StopEnabled: !And
+    - !Condition DeletionEnabled
+    - !Equals [!Ref EnableDeletionEcsStop, 'true']
+
+Rules:
+  StopConfiguration:
+    RuleCondition: !Equals [!Ref EnableDeletionEcsStop, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref EnableCandidateDeletion, 'true']
+        AssertDescription: ECS stop requires candidate deletion.
+      - Assert: !Not [!Equals [!Ref EcsClusterArn, '']]
+        AssertDescription: ECS stop requires the staging cluster ARN.
 
 Resources:
   CandidateDataKey:
@@ -202,6 +221,24 @@ Resources:
             Action: dynamodb:Query
             Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}/index/DeletionDueIndex'
 
+  DeletionEcsStopPolicy:
+    Type: AWS::IAM::Policy
+    Condition: StopEnabled
+    Properties:
+      PolicyName: CandidateDeletionStopTasks
+      Roles:
+        - !Ref DeletionApiRole
+        - !If [RetryEnabled, !Ref DeletionRetryRole, !Ref 'AWS::NoValue']
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ecs:DescribeTasks, ecs:StopTask]
+            Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !Ref EcsClusterArn
+
   DeletionFunction:
     Type: AWS::Lambda::Function
     Condition: DeletionEnabled
@@ -218,6 +255,8 @@ Resources:
         Variables:
           ONBOARDING_ENABLED: 'true'
           CANDIDATE_DELETION_ENABLED: 'true'
+          FARGATE_DELETION_STOP_ENABLED: !If [StopEnabled, 'true', 'false']
+          ECS_CLUSTER_ARN: !Ref EcsClusterArn
           CANDIDATE_PURGE_ROLE_ARN: !GetAtt CandidatePurgeRole.Arn
           APP_ORIGIN: !Ref AppOrigin
           COGNITO_ISSUER: !Ref CognitoIssuer
@@ -301,6 +340,8 @@ Resources:
         Variables:
           ONBOARDING_ENABLED: 'true'
           CANDIDATE_DELETION_ENABLED: 'true'
+          FARGATE_DELETION_STOP_ENABLED: !If [StopEnabled, 'true', 'false']
+          ECS_CLUSTER_ARN: !Ref EcsClusterArn
           CANDIDATE_PURGE_ROLE_ARN: !GetAtt CandidatePurgeRole.Arn
           APP_ORIGIN: !Ref AppOrigin
           COGNITO_ISSUER: !Ref CognitoIssuer

@@ -89,7 +89,7 @@ describe("synthetic-only cloud browser adapter", () => {
         runRecords: { async loadIdentity() { return { subjectId: candidateId,
           consentVersion: 1, job }; }, async loadProfileArtifactId() { return runId; } },
         vault: { async restoreToPrivateTemp() { restores++; return { path: profilePath,
-          async cleanup() {} }; }, async put(_candidateId, _artifactId, bytes) { savedReceipt = bytes; } },
+          async cleanup() {} }; }, async put(_candidateId, _runId, _leaseToken, _artifactId, bytes) { savedReceipt = bytes; } },
         application: { async prepare(path, identity, candidate) {
           const prepared = await application.prepare(path, identity, candidate);
           return { ...prepared, async submitOnce() { clicks++; return prepared.submitOnce(); } };
@@ -107,6 +107,56 @@ describe("synthetic-only cloud browser adapter", () => {
       expect(await handleQueuedApplication(message, ports)).toBe("already_confirmed");
       expect({ clicks, restores, acknowledgements }).toEqual({ clicks: 1, restores: 1,
         acknowledgements: 2 });
+    }), 45_000,
+  );
+
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "fails closed on unpaid access and holds a post-click crash for reconciliation",
+    async () => withProfile(candidateId, async profilePath => {
+      let paid = false;
+      let status: "not_started" | "needs_reconciliation" = "not_started";
+      let clicks = 0;
+      let receipt: VerifiedReceipt | undefined;
+      const application = new SyntheticBrowserApplication();
+      const verifier = new SyntheticReceiptVerifier();
+      const ports: CloudRunPorts = {
+        billing: { async loadEntitlements() { return paid ? [{ kind: "free-grant",
+          subjectId: candidateId, grantId: "synthetic", approvedBy: "staging",
+          startsAt: "2020-01-01T00:00:00Z", endsAt: "2099-01-01T00:00:00Z",
+          revokedAt: null }] : []; } },
+        authorization: { async ownsRun() { return true; }, async hasCurrentConsent() { return true; } },
+        journal: {
+          async acquireLease() { return runId; }, async renewLease() { return true; },
+          async releaseLease() {}, async readSubmission() { return { status }; },
+          async beginSubmission() { status = "needs_reconciliation"; return artifactId; },
+          async markUncertain() {}, async confirmAfterVerification() { throw new Error("not reached"); },
+        },
+        runRecords: { async loadIdentity() { return { subjectId: candidateId,
+          consentVersion: 1, job }; }, async loadProfileArtifactId() { return runId; } },
+        vault: { async restoreToPrivateTemp() { return { path: profilePath,
+          async cleanup() {} }; }, async put(_candidate, _run, _lease, reservedId, bytes) {
+          expect(reservedId).toBe(artifactId);
+          receipt = { job, evidence: bytes };
+          throw new Error("simulated broker outage after final click");
+        } },
+        application: { async prepare(path, identity, candidate) {
+          const prepared = await application.prepare(path, identity, candidate);
+          return { ...prepared, async submitOnce() { clicks++; return prepared.submitOnce(); } };
+        } },
+        receiptVerifier: verifier,
+        queue: { async acknowledge() { throw new Error("must not acknowledge uncertain run"); } },
+      };
+      const message = { body: encodeCloudRunEnvelope({ version: 1, candidateId, runId,
+        kind: "apply", scheduledAt: "2026-11-26T20:00:00Z" }).body,
+        receiptHandle: "synthetic-crash-handle" };
+      expect(await handleQueuedApplication(message, ports)).toBe("payment_required");
+      expect(clicks).toBe(0);
+      paid = true;
+      await expect(handleQueuedApplication(message, ports)).rejects.toThrow("simulated broker outage");
+      expect(clicks).toBe(1);
+      expect(receipt && await verifier.verify(receipt, job)).toBe(true);
+      expect(await handleQueuedApplication(message, ports)).toBe("needs_reconciliation");
+      expect(clicks).toBe(1);
     }), 45_000,
   );
 });

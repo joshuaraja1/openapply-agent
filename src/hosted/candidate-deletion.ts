@@ -19,6 +19,7 @@ export interface CandidateDeletionStore {
   }>;
   defer(candidateId: string, subjectId: string, nextEpoch: number): Promise<void>;
   hasActiveWriters(candidateId: string, nowEpoch: number): Promise<boolean>;
+  hasUnstoppedTasks(candidateId: string): Promise<boolean>;
   claimPurge(candidateId: string, subjectId: string, nowEpoch: number, owner: string): Promise<boolean>;
   releasePurge(candidateId: string, subjectId: string, owner: string): Promise<void>;
   /** Delete candidate ledger rows in bounded batches, retaining DELETED. */
@@ -56,6 +57,7 @@ export interface CandidateDeletionDeps {
   store: CandidateDeletionStore;
   vault: Pick<CandidateVault, "deleteCandidate">;
   candidateIdForSubject(subjectId: string): string;
+  stopCandidateTasks?(candidateId: string): Promise<"stopped" | "stopping">;
 }
 
 export async function deleteCandidateAccount(subjectId: string, deps: CandidateDeletionDeps,
@@ -66,6 +68,12 @@ export async function deleteCandidateAccount(subjectId: string, deps: CandidateD
   const marker = await deps.store.begin(candidateId, subjectId, nowEpoch + DELETE_HOLD_SECONDS);
   if (marker.subjectId !== subjectId) throw new Error("Deletion ownership mismatch");
   if (marker.state === "complete") return { state: "complete" };
+  // Stop every registered browser task as soon as the tombstone is durable.
+  // An absent stop integration cannot turn a live task into purge permission.
+  if (deps.stopCandidateTasks && await deps.stopCandidateTasks(candidateId) !== "stopped") {
+    return { state: "pending" };
+  }
+  if (await deps.store.hasUnstoppedTasks(candidateId)) return { state: "pending" };
   if (nowEpoch < marker.notBeforeEpoch
     || await deps.store.hasActiveWriters(candidateId, nowEpoch)) return { state: "pending" };
   const owner = randomUUID();
@@ -75,7 +83,8 @@ export async function deleteCandidateAccount(subjectId: string, deps: CandidateD
   // The tombstone blocks new uploads, run creation, queue admission, and
   // journal writes before any object version is removed.
   try {
-    if (await deps.store.hasActiveWriters(candidateId, nowEpoch)) return { state: "pending" };
+    if (await deps.store.hasUnstoppedTasks(candidateId)
+      || await deps.store.hasActiveWriters(candidateId, nowEpoch)) return { state: "pending" };
     await deps.vault.deleteCandidate(candidateId);
     if (!await deps.store.purgeMetadata(candidateId)) return { state: "pending" };
     await deps.store.markComplete(candidateId, subjectId);

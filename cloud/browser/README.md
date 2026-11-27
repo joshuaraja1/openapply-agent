@@ -15,7 +15,9 @@ candidate. Set `OPENAPPLY_CLOUD_TASK_MODE=synthetic`,
 `OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK=1`, plus `AWS_REGION`,
 `OPENAPPLY_RUN_LEDGER_TABLE`, `OPENAPPLY_ENTITLEMENT_TABLE`,
 `OPENAPPLY_ARTIFACT_BUCKET`, `OPENAPPLY_ARTIFACT_KMS_KEY_ARN`, and
-`OPENAPPLY_APPLICATION_QUEUE_URL`. The task receives at most one message and
+`OPENAPPLY_APPLICATION_QUEUE_URL`, `OPENAPPLY_ARTIFACT_BROKER_ARN`, and the
+launcher-only `OPENAPPLY_CANDIDATE_ID`, `OPENAPPLY_RUN_ID`, and
+`OPENAPPLY_RUN_CAPABILITY`. The task receives at most one message and
 exits. It accepts only the `synthetic` / `fixture` job identity; the browser
 intercepts the `.invalid` fixture host and blocks every other request. The
 reviewed profile must belong to the run's candidate and contain explicit
@@ -24,11 +26,15 @@ consent, writes the durable submit intent before the one final click, verifies
 an exact requisition receipt, then acknowledges SQS. Browser and plaintext
 profile temporary files are closed/removed on every return path.
 
-The image is **not a production application worker**. The AWS runtime here
-still uses the broad staging artifact ports from its base PR. Restack on the
-tenant-scoped credential broker (#248) and trusted receipt writer (#252), wire
-the reviewed on-demand launcher (#251), and prove an actual Fargate kill/retry
-and deletion drill before enabling synthetic queue mode in AWS. No real-site
-mode exists in this image. A later provider adapter needs a reviewed official
+The image is **not a production application worker**. The integrated staging
+task definition in `deploy/aws/synthetic-queue-task.yaml` supplies the broker,
+queue and table configuration, while the launcher supplies one run capability.
+Its task role has no direct S3 or KMS grants. The task definition and launcher
+remain disabled by default. A live Fargate kill/retry and deletion drill is
+still required before enabling synthetic queue mode in AWS. The shared SQS
+queue can deliver a different candidate's message to a run-scoped task, so
+this staging slice is limited to one disposable candidate/run at a time until
+queue routing is made exact; a scope mismatch stays unacknowledged.
+No real-site mode exists in this image. A later provider adapter needs a reviewed official
 lead URL, a login handoff, long-run lease/SQS visibility renewal, provider
 receipt proof, and a separate security review.

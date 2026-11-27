@@ -149,6 +149,22 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
     return false;
   }
 
+  async hasUnstoppedTasks(candidateId: string): Promise<boolean> {
+    const pk = key(candidateId).pk;
+    let cursor: Record<string, unknown> | undefined;
+    for (let page = 0; page < 100; page++) {
+      const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+        ExpressionAttributeValues: { ":pk": pk, ":prefix": "TASK#" },
+        ConsistentRead: true, Limit: 100,
+        ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
+      if ((result.Items ?? []).some(row => row.state !== "stopped")) return true;
+      if (!result.LastEvaluatedKey) return false;
+      cursor = result.LastEvaluatedKey;
+    }
+    return true; // An unbounded registry cannot prove every task has stopped.
+  }
+
   async claimPurge(candidateId: string, subjectId: string, nowEpoch: number,
     owner: string): Promise<boolean> {
     try {

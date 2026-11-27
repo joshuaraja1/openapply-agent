@@ -21,25 +21,32 @@ operation; worker credentials cannot Put to S3. See
 `docs/aws-artifact-credential-broker.md`. The trusted run row,
 not the SQS body, supplies the subject, job, and profile artifact ID. The vault
 restores plaintext to an owner-only task-local file and removes it after use.
-The next staging slice adds `SyntheticBrowserApplication` and
+The integrated staging slice adds `SyntheticBrowserApplication` and
 `SyntheticReceiptVerifier`. They use the existing owned Playwright browser on
 an intercepted `.invalid` host, fill only two reviewed profile answers, and
 accept only explicit confirmation containing the exact requisition ID. The
-Docker entrypoint defaults to its existing smoke. Synthetic queue mode needs
-three deliberate environment flags and accepts no real provider identity.
+Docker entrypoint defaults to its existing smoke. The disabled-by-default
+`deploy/aws/synthetic-queue-task.yaml` sets the three deliberate synthetic
+flags, broker ARN, and durable store names. The launcher adds the
+candidate/run IDs and signed capability at launch. It accepts no real provider
+identity.
 The adapter closes its private browser before the queue receipt is deleted.
 This is a controlled fixture, not evidence of real ATS completion.
 
 ## Enablement order
 
-1. Finish hosted profile deletion and consent withdrawal, including worker
-   interruption and purge of every S3 version (issue #243).
+1. Enable the hosted deletion ECS stop gate in the onboarding stack and verify
+   that every candidate task reaches STOPPED and all GRANT# rows expire before
+   version purge. The gate is wired in code and remains disabled in AWS.
 2. Deploy and test the artifact credential broker. The task role must have no
    direct S3/KMS access; a 15-minute STS grant must be restricted to one
    candidate. The trusted launcher, capability distribution, cross-tenant IAM
    proof, and credential expiry behavior remain untested. Deny public CDP/VNC
    and task metadata access from untrusted browser pages.
-3. Install an on-demand task launcher and a reviewed provider adapter. Bound
+3. Supply the tested synthetic task definition and run one disposable candidate
+   through the on-demand launcher and outbox. A shared FIFO queue may deliver
+   another candidate's message to a run-scoped task, so do not admit concurrent
+   candidates until exact message routing is implemented. Bound
    task lifetime, renew the durable lease during long preparation, and extend
    SQS visibility or reconcile redelivery. Keep real submission disabled until
    crash tests prove that every post-intent restart makes zero duplicate clicks.

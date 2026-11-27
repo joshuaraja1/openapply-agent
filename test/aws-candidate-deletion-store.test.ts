@@ -133,6 +133,20 @@ describe("candidate deletion Dynamo boundary", () => {
     expect(await store.hasActiveWriters(candidateId, 3000)).toBe(false);
   });
 
+  it("requires every candidate task registry row to report stopped before purge", async () => {
+    let taskState = "started";
+    const send = vi.fn(async (command: unknown) => command instanceof QueryCommand
+      ? { Items: [{ pk, sk: "TASK#run-one", state: taskState }] } : {});
+    const store = new DynamoCandidateDeletionStore({ send } as unknown as
+      Pick<DynamoDBDocumentClient, "send">, "ledger");
+    expect(await store.hasUnstoppedTasks(candidateId)).toBe(true);
+    taskState = "stopped";
+    expect(await store.hasUnstoppedTasks(candidateId)).toBe(false);
+    const query = send.mock.calls[0]![0] as QueryCommand;
+    expect(query.input.ConsistentRead).toBe(true);
+    expect(query.input.ExpressionAttributeValues?.[":prefix"]).toBe("TASK#");
+  });
+
   it("serializes purge attempts with a bounded owner lease", async () => {
     const commands: UpdateCommand[] = [];
     let occupied = false;
