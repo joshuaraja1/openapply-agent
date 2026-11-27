@@ -51,10 +51,13 @@ function readyFixture() {
     setParameter(key, 'ArtifactBucketName', 'fixture-bucket');
   }
   setParameter('syntheticTask', 'ArtifactBrokerArn', stacks.broker.Outputs[0].OutputValue);
+  setParameter('syntheticTask', 'ExecutionRoleArn', 'arn:aws:iam::123456789012:role/execution');
   const task = { taskRoleArn: 'arn:aws:iam::123456789012:role/synthetic',
     executionRoleArn: 'arn:aws:iam::123456789012:role/execution',
     containerDefinitions: [{ name: 'browser-worker', environment: [
+      { name: 'OPENAPPLY_CLOUD_TASK_MODE', value: 'synthetic' },
       { name: 'OPENAPPLY_CLOUD_SYNTHETIC_ONLY', value: '1' },
+      { name: 'OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK', value: '1' },
       { name: 'OPENAPPLY_SUBMISSION_MODE', value: 'disabled' },
     ], image: `example.dkr.ecr.us-east-1.amazonaws.com/openapply@sha256:${'a'.repeat(64)}` }] };
   return { stacks, task };
@@ -65,9 +68,10 @@ test('blocks a missing tenant boundary, deletion gate, or safe task mode', () =>
   delete stacks.broker;
   stacks.onboarding.Parameters = stacks.onboarding.Parameters.filter(
     (item) => item.ParameterKey !== 'EnableDeletionEcsStop');
-  task.containerDefinitions[0].environment[1].value = 'live';
+  task.containerDefinitions[0].environment.find((item) =>
+    item.name === 'OPENAPPLY_SUBMISSION_MODE').value = 'live';
   const result = assessInventory('123456789012', '123456789012', stacks, task);
-  assert.equal(result.ready, false);
+  assert.equal(result.inventoryComplete, false);
   assert.deepEqual(result.checks.filter((check) => !check.ok).map((check) => check.gate),
     ['onboarding', 'broker', 'synthetic-task-mode']);
 });
@@ -75,14 +79,15 @@ test('blocks a missing tenant boundary, deletion gate, or safe task mode', () =>
 test('blocks wrong account even when staging resources appear ready', () => {
   const { stacks, task } = readyFixture();
   const result = assessInventory('999999999999', '123456789012', stacks, task);
-  assert.equal(result.ready, false);
+  assert.equal(result.inventoryComplete, false);
   assert.equal(result.checks[0].gate, 'account');
 });
 
 test('permits a synthetic drill only when all declared prerequisites exist', () => {
   const { stacks, task } = readyFixture();
   const result = assessInventory('123456789012', '123456789012', stacks, task);
-  assert.equal(result.ready, true);
+  assert.equal(result.inventoryComplete, true);
+  assert.equal(result.scope, 'structural-prerequisites-only');
   assert.ok(result.checks.every((check) => check.ok));
 });
 
@@ -90,7 +95,7 @@ test('rejects a mutable or unrelated browser image', () => {
   const { stacks, task } = readyFixture();
   task.containerDefinitions[0].image = 'example.dkr.ecr.us-east-1.amazonaws.com/openapply:latest';
   const result = assessInventory('123456789012', '123456789012', stacks, task);
-  assert.equal(result.ready, false);
+  assert.equal(result.inventoryComplete, false);
   assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
 });
 
@@ -101,7 +106,17 @@ test('rejects launcher or broker wired to another staging resource', () => {
   stacks.syntheticTask.Parameters.find((item) => item.ParameterKey === 'ArtifactBrokerArn')
     .ParameterValue = 'arn:aws:lambda:us-east-1:123456789012:function:other';
   const result = assessInventory('123456789012', '123456789012', stacks, task);
-  assert.equal(result.ready, false);
+  assert.equal(result.inventoryComplete, false);
   assert.match(result.checks.find((check) => check.gate === 'stack-wiring').detail,
     /launcher.PrivateSubnetIds.*syntheticTask.ArtifactBrokerArn/);
+});
+
+test('rejects a task with wrong entrypoint mode or a different task role', () => {
+  const { stacks, task } = readyFixture();
+  task.containerDefinitions[0].environment.find((item) =>
+    item.name === 'OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK').value = '0';
+  task.taskRoleArn = 'arn:aws:iam::123456789012:role/broad';
+  const result = assessInventory('123456789012', '123456789012', stacks, task);
+  assert.equal(result.inventoryComplete, false);
+  assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
 });

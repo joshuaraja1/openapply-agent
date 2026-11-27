@@ -10,6 +10,9 @@ node scripts/aws-synthetic-drill-preflight.mjs --account-id 205064803661
 ```
 
 The `--json` option emits machine-readable gate results without secret values.
+Its `scope=structural-prerequisites-only` and `inventoryComplete` fields mean
+only that required stacks and settings are present; they are not permission to
+launch a task until the IAM and deletion checks below pass.
 The preflight exits 2 while a required gate is missing and exits 1 on an AWS
 read error. It is a **prerequisite inventory**, not proof of tenant IAM safety
 or a completed browser application. It checks the account, control plane, billing store, browser
@@ -37,7 +40,8 @@ deleted after the test. That result does not exercise application state.
    deploying it. Configure only a test-mode/free-grant entitlement.
 3. Deploy the signed-capability broker and synthetic task role. The task role
    may invoke the named broker and must have no direct DynamoDB, SQS, S3, KMS,
-   or STS permissions. Before launching a browser, use IAM policy simulation
+   or `sts:AssumeRole` permission. `sts:GetCallerIdentity` may succeed without
+   an IAM allow and can identify the probe role. Before launching a browser, use IAM policy simulation
    for those denied actions against the actual shared ledger, queue, bucket,
    and key, and confirm `lambda:InvokeFunction` is allowed only for the named
    broker. The preflight cannot establish this policy boundary. Verify its task definition has
@@ -106,7 +110,7 @@ lease tokens.
 | Scenario | Required observation |
 | --- | --- |
 | Two-candidate backlog | The single launcher slot starts A, leaves B queued, and starts B only after A stops. Neither task reads or alters the other's dispatch. |
-| Tenant IAM denial | From A's task role, direct DynamoDB, SQS, S3, KMS, and STS calls fail. A broker request naming B's subject or job fails. |
+| Tenant IAM denial | From A's task role, direct DynamoDB, SQS, S3, KMS, and `sts:AssumeRole` calls fail. A broker request naming B's subject or job fails. |
 | Pre-intent stop | Stop A before `beginSubmission`; the controller atomically marks its old task stopped, releases the slot, and queues a bounded retry with a new ECS client token. B can still progress. |
 | Post-intent stop | Stop A after durable submit intent. The run enters `needs_reconciliation` and no restart clicks Submit again. |
 | Confirmed crash | Stop A after exact-job receipt confirmation but before dispatch completion. The controller repairs dispatch to completed without another Submit. |

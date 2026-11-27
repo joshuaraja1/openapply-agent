@@ -67,9 +67,16 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       item.OutputKey === 'RepositoryUri')?.OutputValue;
     const immutableImage = repository && browser?.image?.startsWith(`${repository}@sha256:`)
       && /^[a-f0-9]{64}$/.test(browser.image.slice(`${repository}@sha256:`.length));
-    const safe = taskDefinition?.taskRoleArn && taskDefinition?.executionRoleArn
+    const taskRole = stacks.syntheticTask?.Outputs?.find((item) =>
+      item.OutputKey === 'TaskRoleArn')?.OutputValue;
+    const executionRole = stacks.syntheticTask?.Parameters?.find((item) =>
+      item.ParameterKey === 'ExecutionRoleArn')?.ParameterValue;
+    const safe = taskRole && taskDefinition?.taskRoleArn === taskRole
+      && executionRole && taskDefinition?.executionRoleArn === executionRole
       && immutableImage
+      && env.get('OPENAPPLY_CLOUD_TASK_MODE') === 'synthetic'
       && env.get('OPENAPPLY_CLOUD_SYNTHETIC_ONLY') === '1'
+      && env.get('OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK') === '1'
       && env.get('OPENAPPLY_SUBMISSION_MODE') === 'disabled';
     checks.push({ gate: 'synthetic-task-mode', ok: Boolean(safe),
       detail: safe ? 'immutable image, synthetic only, real submission disabled'
@@ -97,7 +104,8 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
     checks.push({ gate: 'stack-wiring', ok: bad.length === 0,
       detail: bad.length ? `mismatched ${bad.join(', ')}` : 'exact resource links' });
   }
-  return { ready: checks.every((check) => check.ok), checks };
+  return { scope: 'structural-prerequisites-only',
+    inventoryComplete: checks.every((check) => check.ok), checks };
 }
 
 function awsJson(region, args) {
@@ -142,7 +150,7 @@ function main(args) {
   else for (const item of result.checks) {
     process.stdout.write(`${item.ok ? 'PASS' : 'BLOCK'} ${item.gate}: ${item.detail}\n`);
   }
-  process.exitCode = result.ready ? 0 : 2;
+  process.exitCode = result.inventoryComplete ? 0 : 2;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
