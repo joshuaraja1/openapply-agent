@@ -46,7 +46,9 @@ export class DynamoTrustedRunCreator {
     const result = await this.db.send(new GetCommand({ TableName: this.table,
       Key: key, ConsistentRead: true }));
     if (!result.Item) return undefined;
-    const row = leadSchema.parse(result.Item);
+    const parsed = leadSchema.safeParse(result.Item);
+    if (!parsed.success) return undefined;
+    const row = parsed.data;
     if (row.pk !== key.pk || row.leadId !== id || row.jobKey !== officialJobKey(row.job)) return undefined;
     return row;
   }
@@ -57,7 +59,9 @@ export class DynamoTrustedRunCreator {
     const result = await this.db.send(new GetCommand({ TableName: this.table,
       Key: key, ConsistentRead: true }));
     if (!result.Item) return undefined;
-    const row = profileSchema.parse(result.Item);
+    const parsed = profileSchema.safeParse(result.Item);
+    if (!parsed.success) return undefined;
+    const row = parsed.data;
     if (row.pk !== key.pk || row.sk !== key.sk) return undefined;
     return row;
   }
