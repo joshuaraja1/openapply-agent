@@ -12,7 +12,9 @@ Parameters:
   EntitlementTableName:
     Type: String
     Default: openapply-staging-entitlements
-  StripeTestSecretArn:
+  StripeApiSecretArn:
+    Type: String
+  StripeReplaySecretArn:
     Type: String
   StripeWebhookSecretArn:
     Type: String
@@ -56,7 +58,7 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref StripeTestSecretArn
+                  - !Ref StripeApiSecretArn
                   - !Ref StripeWebhookSecretArn
         - PolicyName: OpenApplyApiJournalWrites
           PolicyDocument:
@@ -91,7 +93,7 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref StripeTestSecretArn
+                  - !Ref StripeReplaySecretArn
                   - !Ref StripeWebhookSecretArn
         - PolicyName: OpenApplyReconciliationState
           PolicyDocument:
@@ -129,7 +131,7 @@ Resources:
       Environment:
         Variables:
           STRIPE_MODE: test
-          STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
+          STRIPE_TEST_SECRET_ARN: !Ref StripeApiSecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
           BILLING_TABLE_NAME: !Ref BillingTableName
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
@@ -153,7 +155,7 @@ Resources:
       Environment:
         Variables:
           STRIPE_MODE: test
-          STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
+          STRIPE_TEST_SECRET_ARN: !Ref StripeReplaySecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
           BILLING_TABLE_NAME: !Ref BillingTableName
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName

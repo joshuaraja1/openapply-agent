@@ -20,7 +20,7 @@ Build the self-contained Node 22 Lambda bundle with
 ZIP archive, upload it to the private S3 bucket created by
 `deploy/aws/staging-code-bucket.yaml`, and pass that
 bucket and object key to the CloudFormation template. Provide the **ARNs** of
-the separate test key and webhook signing secret, the staging site origin,
+distinct API and replay test keys and the webhook signing secret, the staging site origin,
 Stripe test price IDs, Cognito issuer/JWKS/client ID, and both billing journal
 and entitlement table names. Never pass key values as CloudFormation parameters.
 
