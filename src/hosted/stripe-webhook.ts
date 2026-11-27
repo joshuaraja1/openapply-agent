@@ -4,6 +4,8 @@ import { hostedEntitlementSchema, type HostedEntitlement } from "./entitlement.j
 const billingEvents = new Set([
   "customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
   "invoice.paid", "invoice.payment_failed", "charge.refunded",
+  "checkout.session.completed", "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
 ]);
 
 export interface BillingReconcileRequest {
@@ -24,9 +26,13 @@ export function verifiedBillingRequest(
   signature: string,
   endpointSecret: string,
   verifier: Pick<Stripe["webhooks"], "constructEvent">,
+  expectedLivemode?: boolean,
 ): BillingReconcileRequest | UnresolvedChargeRequest | undefined {
   if (!signature || !endpointSecret) throw new Error("Stripe webhook signature configuration is missing");
   const event = verifier.constructEvent(rawBody, signature, endpointSecret);
+  if (expectedLivemode !== undefined && event.livemode !== expectedLivemode) {
+    throw new Error("Stripe event mode does not match deployment");
+  }
   if (!billingEvents.has(event.type)) return undefined;
   const object = event.data.object as { id?: string; customer?: string | { id?: string } | null };
   const customerId = typeof object.customer === "string" ? object.customer : object.customer?.id;
@@ -48,8 +54,10 @@ export async function acceptBillingWebhook(
   enqueueOnce: (request: BillingReconcileRequest) => Promise<"queued" | "duplicate">,
   resolveCharge?: (chargeId: string) => Promise<TrustedChargeResolution | undefined>,
   recordGuestRefund?: (request: UnresolvedChargeRequest) => Promise<void>,
+  expectedLivemode?: boolean,
 ): Promise<"queued" | "duplicate" | "ignored" | "guest-acknowledged"> {
-  const request = verifiedBillingRequest(rawBody, signature, endpointSecret, verifier);
+  const request = verifiedBillingRequest(rawBody, signature, endpointSecret, verifier,
+    expectedLivemode);
   if (!request) return "ignored";
   if ("customerId" in request) return enqueueOnce(request);
   // A null customer field in the event is not proof that the refund is unrelated
