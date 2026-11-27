@@ -27,13 +27,28 @@ function fixture(send: (command: GetCommand | TransactWriteCommand) => Promise<u
 }
 
 describe("Dynamo trusted run creator", () => {
+  it("loads only a reviewed, ready application profile marker", async () => {
+    const { port } = fixture(async () => ({ Item: { pk, sk: `PROFILE#${artifactId}`,
+      status: "verified", candidateId, artifactId, subjectId: "subject",
+      applicationProfileReady: true } }));
+    expect(await port.loadProfile(candidateId, artifactId)).toMatchObject({
+      candidateId, artifactId, subjectId: "subject", applicationProfileReady: true,
+    });
+  });
+
+  it("does not accept a legacy verified marker without a reviewed application profile", async () => {
+    const { port } = fixture(async () => ({ Item: { pk, sk: `PROFILE#${artifactId}`,
+      status: "verified", candidateId, artifactId, subjectId: "subject" } }));
+    expect(await port.loadProfile(candidateId, artifactId)).toBeUndefined();
+  });
+
   it("treats malformed stored lead and profile rows as unavailable", async () => {
     const { port } = fixture(async command => ({ Item: command instanceof GetCommand
       && command.input.Key?.sk === "VERIFIED"
       ? { pk: `LEAD#${leadId}`, sk: "VERIFIED", status: "open", ...lead,
           canonicalUrl: "not-a-url" }
       : { pk, sk: `PROFILE#${artifactId}`, status: "verified", candidateId,
-          artifactId, subjectId: "" } }));
+          artifactId, subjectId: "", applicationProfileReady: true } }));
     expect(await port.loadLead(leadId)).toBeUndefined();
     expect(await port.loadProfile(candidateId, artifactId)).toBeUndefined();
   });
@@ -49,6 +64,8 @@ describe("Dynamo trusted run creator", () => {
     expect(items[0]?.ConditionCheck?.Key).toEqual({ pk, sk: "DELETED" });
     expect(items[1]?.ConditionCheck?.Key).toEqual({ pk: `LEAD#${leadId}`, sk: "VERIFIED" });
     expect(items[2]?.ConditionCheck?.Key).toEqual({ pk, sk: `PROFILE#${artifactId}` });
+    expect(items[2]?.ConditionCheck?.ConditionExpression).toContain("applicationProfileReady = :ready");
+    expect(items[2]?.ConditionCheck?.ExpressionAttributeValues).toMatchObject({ ":ready": true });
     expect(items[3]?.Put?.Item?.sk).toBe(`RUN#${runId}`);
     expect(items[4]?.Put?.Item).toMatchObject({ pk, sk: `CONSENT#${runId}`,
       runId, state: "granted", scope: "apply-one-job", version: 1 });
