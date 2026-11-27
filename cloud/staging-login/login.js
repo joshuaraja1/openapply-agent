@@ -5,6 +5,10 @@ const status = document.querySelector('#status');
 const signIn = document.querySelector('#sign-in');
 const signOut = document.querySelector('#sign-out');
 const checkoutActions = document.querySelector('#checkout-actions');
+const returnPath = location.pathname;
+if (returnPath === '/billing/success' || returnPath === '/billing/cancel') {
+  history.replaceState(null, '', returnPath); // Drop Stripe session ID before configuration fetch.
+}
 
 try {
   const response = await fetch('/config.json', { cache: 'no-store' });
@@ -71,11 +75,9 @@ try {
       signIn.hidden = false;
     }
   } else {
-    if (location.pathname === '/billing/success') {
-      history.replaceState(null, '', '/billing/success');
+    if (returnPath === '/billing/success') {
       status.textContent = 'Stripe returned from test checkout. Sign in to check your verified paid-access status.';
-    } else if (location.pathname === '/billing/cancel') {
-      history.replaceState(null, '', '/billing/cancel');
+    } else if (returnPath === '/billing/cancel') {
       status.textContent = 'Test checkout was canceled. Sign in to check your current paid-access status.';
     } else {
       status.textContent = 'Sign in to test your OpenApply candidate account.';
