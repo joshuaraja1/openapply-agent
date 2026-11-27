@@ -1,5 +1,5 @@
 import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
-  type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+  type DynamoDBDocumentClient, type QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.js";
 
@@ -18,6 +18,21 @@ function key(candidateId: string, runId: string) {
     sk: `DISPATCH#${uuid.parse(runId)}` };
 }
 
+function parseDispatchRow(value: unknown): DurableDispatchRecord {
+  const row = rowSchema.parse(value);
+  if (row.pk !== `CANDIDATE#${row.candidateId}` || row.sk !== `DISPATCH#${row.runId}`) {
+    throw new Error("Dispatch key mismatch");
+  }
+  const envelope = decodeCloudRunEnvelope(row.body);
+  const encoded = encodeCloudRunEnvelope(envelope);
+  if (envelope.kind !== "apply" || envelope.candidateId !== row.candidateId
+    || envelope.runId !== row.runId || row.groupId !== encoded.groupId
+    || row.deduplicationId !== encoded.deduplicationId) {
+    throw new Error("Dispatch envelope mismatch");
+  }
+  return row;
+}
+
 /** An outbox written before SQS send closes the send-to-launch crash gap.
  * The scheduler may resend the same FIFO envelope after its deduplication
  * window; the durable submission journal still prevents another Submit. */
@@ -32,15 +47,8 @@ export class DynamoApplicationDispatchStore {
     const item = (await this.db.send(new GetCommand({ TableName: this.table,
       Key: expected, ConsistentRead: true }))).Item;
     if (!item) return undefined;
-    const row = rowSchema.parse(item);
+    const row = parseDispatchRow(item);
     if (row.pk !== expected.pk || row.sk !== expected.sk) throw new Error("Dispatch key mismatch");
-    const envelope = decodeCloudRunEnvelope(row.body);
-    const encoded = encodeCloudRunEnvelope(envelope);
-    if (envelope.kind !== "apply" || envelope.candidateId !== candidateId
-      || envelope.runId !== runId || row.groupId !== encoded.groupId
-      || row.deduplicationId !== encoded.deduplicationId) {
-      throw new Error("Dispatch envelope mismatch");
-    }
     return row;
   }
 
@@ -117,11 +125,28 @@ export class DynamoApplicationDispatchStore {
 
   async listPending(limit = 25): Promise<DurableDispatchRecord[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new Error("Invalid dispatch limit");
-    const result = await this.db.send(new QueryCommand({ TableName: this.table,
-      IndexName: "gsi1", KeyConditionExpression: "gsi1pk=:pk",
-      ExpressionAttributeValues: { ":pk": "APPLICATION_DISPATCH" },
-      Limit: limit }));
-    return (result.Items ?? []).map(item => rowSchema.parse(item));
+    const rows: DurableDispatchRecord[] = [];
+    let cursor: QueryCommandInput["ExclusiveStartKey"];
+    let invalid = 0;
+    // Bounded pagination skips malformed/stale index rows without allowing
+    // one damaged record to abort every scheduled dispatch tick.
+    for (let page = 0; page < 4 && rows.length < limit; page++) {
+      const result = await this.db.send(new QueryCommand({ TableName: this.table,
+        IndexName: "gsi1", KeyConditionExpression: "gsi1pk=:pk",
+        ExpressionAttributeValues: { ":pk": "APPLICATION_DISPATCH" },
+        Limit: 25, ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
+      for (const item of result.Items ?? []) {
+        try {
+          const row = parseDispatchRow(item);
+          if (row.state === "pending_queue" || row.state === "queued") rows.push(row);
+        } catch { invalid++; }
+        if (rows.length >= limit) break;
+      }
+      cursor = result.LastEvaluatedKey;
+      if (!cursor) break;
+    }
+    if (invalid) console.warn(`OpenApply dispatch skipped ${invalid} malformed index row(s)`);
+    return rows;
   }
 }
 

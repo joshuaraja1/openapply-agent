@@ -45,6 +45,9 @@ does not receive from SQS merely to inspect work: each receive consumes a
 redrive attempt. The current queue sends a message to the DLQ after three
 receives. An ambiguous launch reconciled as unlaunched becomes
 `needs_reconciliation`; it is not silently claimed as completed.
+The GSI scan checks at most four pages per tick, skips malformed rows, and
+logs only their count. A corrupt row cannot abort dispatch for a valid row in
+those pages; repeated warnings require operator repair of the damaged index.
 
 ## Consent withdrawal and deletion
 

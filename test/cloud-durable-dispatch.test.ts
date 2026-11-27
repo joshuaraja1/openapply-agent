@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { GetCommand, TransactWriteCommand, UpdateCommand,
+import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
   type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { dispatchOnePendingApplication,
   DynamoApplicationDispatchStore, type DurableDispatchRecord }
@@ -41,6 +41,35 @@ function harness() {
 }
 
 describe("durable application outbox dispatch", () => {
+  it("skips malformed index rows and paginates to a valid queued run", async () => {
+    const valid: DurableDispatchRecord = {
+      pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}`,
+      candidateId, runId, state: "queued", body: encoded.body,
+      groupId: encoded.groupId, deduplicationId: encoded.deduplicationId,
+      createdAt: "2026-11-26T20:00:00.000Z",
+    };
+    let page = 0;
+    const send = vi.fn(async (command: QueryCommand) => {
+      expect(command).toBeInstanceOf(QueryCommand);
+      page++;
+      if (page === 1) return { Items: Array.from({ length: 25 }, () => ({
+        ...valid, body: "private malformed content" })),
+        LastEvaluatedKey: { pk: "cursor", sk: "one" } };
+      expect(command.input.ExclusiveStartKey).toEqual({ pk: "cursor", sk: "one" });
+      return { Items: [{ ...valid, state: "launched" }, valid] };
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new DynamoApplicationDispatchStore(
+        { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+        "openapply-staging-run-ledger");
+      expect(await store.listPending()).toEqual([valid]);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(warning).toHaveBeenCalledWith("OpenApply dispatch skipped 25 malformed index row(s)");
+      expect(warning.mock.calls.join(" ")).not.toContain("private malformed content");
+    } finally { warning.mockRestore(); }
+  });
+
   it("persists intent with a tombstone fence before permitting a queue send", async () => {
     let item: Record<string, unknown> | undefined;
     const send = vi.fn(async (command: GetCommand | TransactWriteCommand | UpdateCommand) => {
