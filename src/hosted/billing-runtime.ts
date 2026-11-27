@@ -1,6 +1,7 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import type Stripe from "stripe";
 import { createOidcSubjectVerifier, handleCheckoutHttp, type OidcConfig } from "./checkout-http.js";
+import { handleBillingStatusHttp } from "./billing-status-http.js";
 import { assertNoPaidAccessFromBilling, DynamoCheckoutJournal } from "./checkout-journal.js";
 import { DynamoBillingStore } from "./stripe-billing-store.js";
 import { StripeBillingReader } from "./stripe-billing-reader.js";
@@ -44,11 +45,15 @@ export function createHostedBillingRuntime(
   const verifySubject = createOidcSubjectVerifier(config.oidc);
 
   return {
-    /** Only these two exact paths are exposed. Redirects never grant access. */
+    /** Explicit billing paths only. Redirects never grant access. */
     handleRequest(request: Request): Promise<Response> {
       const path = new URL(request.url).pathname;
       if (path === "/api/billing/checkout") return handleCheckoutHttp(request, {
         config: config.checkout, verifySubject, stripe, ports: journal,
+      });
+      if (path === "/api/billing/status") return handleBillingStatusHttp(request, {
+        appOrigin: config.checkout.appOrigin, verifySubject,
+        loadEntitlements: subjectId => billing.loadEntitlements(subjectId),
       });
       if (path === "/api/billing/stripe-webhook") return handleStripeWebhookHttp(request, {
         endpointSecret: config.stripeWebhookSecret,
