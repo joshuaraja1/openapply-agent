@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install cfn-lint==1.46.0
-      - run: cfn-lint cloud/aws-control-plane.yaml cloud/aws-browser-smoke.yaml deploy/aws/hosted-billing-table.yaml deploy/aws/hosted-billing-api.yaml deploy/aws/staging-code-bucket.yaml deploy/aws/artifact-credential-broker.yaml
+      - run: cfn-lint cloud/aws-control-plane.yaml cloud/aws-browser-smoke.yaml deploy/aws/hosted-billing-table.yaml deploy/aws/hosted-billing-api.yaml deploy/aws/staging-code-bucket.yaml deploy/aws/artifact-credential-broker.yaml deploy/aws/staging-onboarding.yaml deploy/aws/fargate-launcher-staging.yaml deploy/aws/synthetic-queue-task.yaml
 
   hosted-billing-lambda:
     runs-on: ubuntu-latest
@@ -32,3 +32,7 @@ jobs:
       - run: node -e 'const app = require("./dist-hosted/aws-billing-lambda.cjs"); if (typeof app.handler !== "function" || typeof app.scheduledHandler !== "function") process.exit(1)'
       - run: npm run build:run-creator-lambda
       - run: node -e 'const app = require("./dist-hosted/aws-run-creator-lambda.cjs"); if (typeof app.handler !== "function") process.exit(1)'
+      - run: npm run build:onboarding-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-onboarding-lambda.cjs"); if (typeof app.deletionHandler !== "function" || typeof app.retryHandler !== "function") process.exit(1)'
+      - run: npm run build:fargate-launcher-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-fargate-launcher-lambda.cjs"); if (typeof app.handler !== "function") process.exit(1)'
