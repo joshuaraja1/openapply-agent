@@ -1,0 +1,41 @@
+name: AWS browser template lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cloudformation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cfn-lint==1.46.0
+      - run: cfn-lint cloud/aws-control-plane.yaml cloud/aws-browser-smoke.yaml deploy/aws/hosted-billing-table.yaml deploy/aws/hosted-billing-api.yaml deploy/aws/staging-code-bucket.yaml deploy/aws/artifact-credential-broker.yaml deploy/aws/staging-onboarding.yaml deploy/aws/staging-browser-egress.yaml
+      # Disabled-by-default task stacks intentionally use empty optional ARNs.
+      # CloudFormation Rules reject those values when either task is enabled.
+      - run: cfn-lint -i W1030 -- deploy/aws/fargate-launcher-staging.yaml deploy/aws/synthetic-queue-task.yaml
+
+  hosted-billing-lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build:hosted-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-billing-lambda.cjs"); if (typeof app.handler !== "function" || typeof app.scheduledHandler !== "function") process.exit(1)'
+      - run: npm run build:run-creator-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-run-creator-lambda.cjs"); if (typeof app.handler !== "function") process.exit(1)'
+      - run: npm run build:onboarding-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-onboarding-lambda.cjs"); if (typeof app.deletionHandler !== "function" || typeof app.retryHandler !== "function") process.exit(1)'
+      - run: npm run build:fargate-launcher-lambda
+      - run: node -e 'const app = require("./dist-hosted/aws-fargate-launcher-lambda.cjs"); if (typeof app.handler !== "function") process.exit(1)'

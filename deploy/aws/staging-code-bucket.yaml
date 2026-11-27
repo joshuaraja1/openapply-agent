@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private, isolated code artifact bucket for OpenApply staging Lambdas.
+
+Resources:
+  StagingCodeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'openapply-staging-lambda-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+  StagingCodeBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StagingCodeBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt StagingCodeBucket.Arn
+              - !Sub '${StagingCodeBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  CodeBucketName:
+    Value: !Ref StagingCodeBucket

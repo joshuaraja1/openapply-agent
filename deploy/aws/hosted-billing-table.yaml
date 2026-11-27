@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Staging-only OpenApply hosted billing state and pending-event index.
+
+Parameters:
+  TableName:
+    Type: String
+    Default: openapply-staging-billing
+    AllowedPattern: '[A-Za-z0-9_.-]{3,255}'
+
+Resources:
+  HostedBillingTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: gsi1pk, AttributeType: S }
+        - { AttributeName: gsi1sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: gsi1
+          KeySchema:
+            - { AttributeName: gsi1pk, KeyType: HASH }
+            - { AttributeName: gsi1sk, KeyType: RANGE }
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes: [eventId, customerId]
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - { Key: app, Value: openapply }
+        - { Key: environment, Value: staging }
+
+  HostedEntitlementTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: openapply-staging-entitlements
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - { Key: app, Value: openapply }
+        - { Key: environment, Value: staging }
+        - { Key: data, Value: paid-entitlements }
+
+  HostedBillingAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Scoped access for the OpenApply staging billing service.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: BillingTableRows
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:Query
+              - dynamodb:ConditionCheckItem
+            Resource: !GetAtt HostedBillingTable.Arn
+          - Sid: PendingEventIndex
+            Effect: Allow
+            Action: dynamodb:Query
+            Resource: !Sub '${HostedBillingTable.Arn}/index/gsi1'
+
+Outputs:
+  BillingTableName:
+    Value: !Ref HostedBillingTable
+  BillingTableArn:
+    Value: !GetAtt HostedBillingTable.Arn
+  EntitlementTableName:
+    Value: !Ref HostedEntitlementTable
+  EntitlementTableArn:
+    Value: !GetAtt HostedEntitlementTable.Arn
+  BillingAccessPolicyArn:
+    Value: !Ref HostedBillingAccessPolicy

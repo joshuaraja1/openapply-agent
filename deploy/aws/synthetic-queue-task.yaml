@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Disabled-by-default synthetic-only browser queue task for disposable staging candidates.
+
+Parameters:
+  EnableSyntheticQueueTask:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  BrowserImageUri:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^.+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[a-f0-9]{64}$'
+  ExecutionRoleArn:
+    Type: String
+    Default: ''
+  ArtifactBucketName:
+    Type: String
+    Default: ''
+  ArtifactKmsKeyArn:
+    Type: String
+    Default: ''
+  ArtifactBrokerArn:
+    Type: String
+    Default: ''
+
+Conditions:
+  TaskEnabled: !Equals [!Ref EnableSyntheticQueueTask, 'true']
+
+Rules:
+  EnabledConfiguration:
+    RuleCondition: !Equals [!Ref EnableSyntheticQueueTask, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BrowserImageUri, '']]
+        AssertDescription: An immutable browser image digest is required.
+      - Assert: !Not [!Equals [!Ref ExecutionRoleArn, '']]
+        AssertDescription: The browser image pull role is required.
+      - Assert: !Not [!Equals [!Ref ArtifactBucketName, '']]
+        AssertDescription: Private artifact bucket is required.
+      - Assert: !Not [!Equals [!Ref ArtifactKmsKeyArn, '']]
+        AssertDescription: Candidate artifact KMS key is required.
+      - Assert: !Not [!Equals [!Ref ArtifactBrokerArn, '']]
+        AssertDescription: Candidate artifact broker is required.
+
+Resources:
+  SyntheticQueueLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: TaskEnabled
+    Properties:
+      LogGroupName: /openapply/staging/synthetic-queue
+      RetentionInDays: 14
+
+  SyntheticQueueTaskRole:
+    Type: AWS::IAM::Role
+    Condition: TaskEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OneSyntheticQueueRun
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref ArtifactBrokerArn
+              # No direct DynamoDB, SQS, S3, or KMS access. The broker checks
+              # run scope before each state operation or artifact credential.
+
+  SyntheticQueueTask:
+    Type: AWS::ECS::TaskDefinition
+    Condition: TaskEnabled
+    Properties:
+      Family: openapply-staging-synthetic-queue
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      Cpu: '1024'
+      Memory: '4096'
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      TaskRoleArn: !GetAtt SyntheticQueueTaskRole.Arn
+      ContainerDefinitions:
+        - Name: browser-worker
+          Image: !Ref BrowserImageUri
+          Essential: true
+          User: '10001:10001'
+          ReadonlyRootFilesystem: false
+          LinuxParameters:
+            Capabilities:
+              Drop: [ALL]
+          Environment:
+            - { Name: OPENAPPLY_CLOUD_TASK_MODE, Value: synthetic }
+            - { Name: OPENAPPLY_CLOUD_SYNTHETIC_ONLY, Value: '1' }
+            - { Name: OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK, Value: '1' }
+            - { Name: OPENAPPLY_SUBMISSION_MODE, Value: disabled }
+            - Name: OPENAPPLY_ARTIFACT_BUCKET
+              Value: !Ref ArtifactBucketName
+            - Name: OPENAPPLY_ARTIFACT_KMS_KEY_ARN
+              Value: !Ref ArtifactKmsKeyArn
+            - Name: OPENAPPLY_ARTIFACT_BROKER_ARN
+              Value: !Ref ArtifactBrokerArn
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref SyntheticQueueLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: synthetic-queue
+
+Outputs:
+  TaskDefinitionArn:
+    Condition: TaskEnabled
+    Value: !Ref SyntheticQueueTask
+  TaskRoleArn:
+    Condition: TaskEnabled
+    Value: !GetAtt SyntheticQueueTaskRole.Arn
