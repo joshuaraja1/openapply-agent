@@ -103,6 +103,21 @@ export function projectPaidStripeAccess(
   });
 }
 
+export function projectSubscriptionSet(
+  binding: { subjectId: string; customerId: string },
+  current: readonly TrustedStripeBillingSnapshot[],
+): Extract<HostedEntitlement, { kind: "subscription" }>[] {
+  const seen = new Set<string>();
+  const entitlements: Extract<HostedEntitlement, { kind: "subscription" }>[] = [];
+  for (const snapshot of current) {
+    if (seen.has(snapshot.subscriptionId)) throw new Error("Duplicate Stripe subscription in current state");
+    seen.add(snapshot.subscriptionId);
+    const entitlement = projectPaidStripeAccess(binding, snapshot);
+    if (entitlement?.kind === "subscription") entitlements.push(entitlement);
+  }
+  return entitlements;
+}
+
 /** Run requests serially per customer. Replace the complete paid set, not one ID. */
 export async function reconcileBillingRequest(
   request: BillingReconcileRequest,
@@ -120,13 +135,5 @@ export async function reconcileBillingRequest(
     throw new Error("Stripe customer is not bound to the candidate");
   }
   const current = await ports.loadCurrent(request.customerId);
-  const seen = new Set<string>();
-  const entitlements: Extract<HostedEntitlement, { kind: "subscription" }>[] = [];
-  for (const snapshot of current) {
-    if (seen.has(snapshot.subscriptionId)) throw new Error("Duplicate Stripe subscription in current state");
-    seen.add(snapshot.subscriptionId);
-    const entitlement = projectPaidStripeAccess(binding, snapshot);
-    if (entitlement?.kind === "subscription") entitlements.push(entitlement);
-  }
-  await ports.replaceSubscriptions(binding.subjectId, entitlements);
+  await ports.replaceSubscriptions(binding.subjectId, projectSubscriptionSet(binding, current));
 }

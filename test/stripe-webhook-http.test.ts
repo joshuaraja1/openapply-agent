@@ -58,6 +58,24 @@ describe("Stripe raw HTTP webhook", () => {
     expect((await handleStripeWebhookHttp(signedRequest(), h)).status).toBe(503);
   });
 
+  it("stops reading an oversized stream without a Content-Length header", async () => {
+    const h = harness();
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        reads++;
+        controller.enqueue(new Uint8Array(600_000));
+      },
+    });
+    const request = new Request("https://openapply.example/webhooks/stripe", {
+      method: "POST", headers: { "stripe-signature": "any" }, body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    expect((await handleStripeWebhookHttp(request, h)).status).toBe(413);
+    expect(reads).toBeLessThan(5);
+    expect(h.ports.enqueueOnce).not.toHaveBeenCalled();
+  });
+
   it("does not mutate state for a non-POST request", async () => {
     const h = harness();
     expect((await handleStripeWebhookHttp(new Request("https://openapply.example/webhooks/stripe"),
