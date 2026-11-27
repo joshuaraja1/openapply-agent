@@ -11,6 +11,7 @@ import type { NormalizedJob } from "../types.js";
 
 async function fetchSmartRecruitersJobs(
   source: Extract<JobSource, { provider: "smartrecruiters" }>, maxJobs: number,
+  request: typeof fetch,
 ): Promise<NormalizedJob[]> {
   const summaries: NormalizedJob[] = [];
   const seen = new Set<string>();
@@ -20,7 +21,7 @@ async function fetchSmartRecruitersJobs(
     const url = new URL(sourceUrl(source));
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("limit", String(Math.min(100, maxJobs + 1 - summaries.length)));
-    const response = await fetch(url);
+    const response = await request(url);
     if (!response.ok) throw new Error(`${source.company} smartrecruiters returned HTTP ${response.status}`);
     const payload: unknown = await response.json();
     const page = z.object({ offset: z.number().int().nonnegative(),
@@ -44,7 +45,7 @@ async function fetchSmartRecruitersJobs(
     details.push(...await Promise.all(summaries.slice(start, start + 10).map(async (summary) => {
       const id = summary.id.split(":").at(-1);
       const url = `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(source.companyIdentifier)}/postings/${encodeURIComponent(id ?? "")}`;
-      const response = await fetch(url);
+      const response = await request(url);
       if (!response.ok) throw new Error(`${source.company} smartrecruiters detail returned HTTP ${response.status}`);
       const [detail] = parseSmartRecruitersJobs([await response.json()], {
         companyIdentifier: source.companyIdentifier, company: source.company,
@@ -58,6 +59,7 @@ async function fetchSmartRecruitersJobs(
 
 async function fetchWorkdayJobs(
   source: Extract<JobSource, { provider: "workday" }>, now: Date, maxJobs: number,
+  request: typeof fetch,
 ): Promise<NormalizedJob[]> {
   const jobs: NormalizedJob[] = [];
   const seen = new Set<string>();
@@ -65,7 +67,7 @@ async function fetchWorkdayJobs(
   let total: number | undefined;
   while (jobs.length <= maxJobs && (total === undefined || offset < total)) {
     const limit = Math.min(20, maxJobs + 1 - jobs.length);
-    const response = await fetch(sourceUrl(source), {
+    const response = await request(sourceUrl(source), {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ appliedFacets: {}, limit, offset, searchText: source.searchText }),
     });
@@ -91,10 +93,11 @@ async function fetchWorkdayJobs(
   return jobs;
 }
 
-export async function fetchSource(source: JobSource, now = new Date(), maxJobs = 1_000): Promise<NormalizedJob[]> {
-  if (source.provider === "smartrecruiters") return fetchSmartRecruitersJobs(source, maxJobs);
-  if (source.provider === "workday") return fetchWorkdayJobs(source, now, maxJobs);
-  const response = await fetch(sourceUrl(source));
+export async function fetchSource(source: JobSource, now = new Date(), maxJobs = 1_000,
+  request: typeof fetch = fetch): Promise<NormalizedJob[]> {
+  if (source.provider === "smartrecruiters") return fetchSmartRecruitersJobs(source, maxJobs, request);
+  if (source.provider === "workday") return fetchWorkdayJobs(source, now, maxJobs, request);
+  const response = await request(sourceUrl(source));
   if (!response.ok) throw new Error(`${source.company} ${source.provider} returned HTTP ${response.status}`);
   if (source.provider === "jsonld") {
     return parseJsonLdJobs(await response.text(), { sourceUrl: source.url, company: source.company });
