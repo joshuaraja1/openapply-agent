@@ -11,7 +11,8 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       const onboarding = url.pathname === '/api/candidates/onboarding';
       const plan = url.pathname === '/api/candidates/plan';
-      const deletion = url.pathname === '/api/candidates/delete';
+      const deletion = url.pathname === '/api/candidates/delete'
+        || url.pathname === '/api/candidates/deletion-status';
       if (deletion && env.CANDIDATE_DELETION_ENABLED !== 'true') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }

@@ -40,7 +40,7 @@ describe('staging login Worker', () => {
     vi.stubGlobal('fetch', upstream);
     try {
       for (const path of ['/api/candidates/onboarding', '/api/candidates/plan',
-        '/api/candidates/delete']) {
+        '/api/candidates/delete', '/api/candidates/deletion-status']) {
         const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
           method: 'POST', headers: { origin: 'https://test.workers.dev',
             authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
@@ -51,17 +51,20 @@ describe('staging login Worker', () => {
         'https://candidate.example.com/api/candidates/onboarding',
         'https://candidate.example.com/api/candidates/plan',
         'https://candidate.example.com/api/candidates/delete',
+        'https://candidate.example.com/api/candidates/deletion-status',
       ]);
     } finally { vi.unstubAllGlobals(); }
   });
 
   it('keeps the deletion proxy closed while onboarding is staged', async () => {
     const env = { ...assets(), ONBOARDING_API_ORIGIN: 'https://candidate.example.com' };
-    const response = await worker.fetch(new Request('https://test.workers.dev/api/candidates/delete', {
-      method: 'POST', headers: { origin: 'https://test.workers.dev',
-        authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
-    }), env);
-    expect(response.status).toBe(404);
+    for (const path of ['/api/candidates/delete', '/api/candidates/deletion-status']) {
+      const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
+        method: 'POST', headers: { origin: 'https://test.workers.dev',
+          authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
+      }), env);
+      expect(response.status).toBe(404);
+    }
   });
 
   it('forwards only a bounded authenticated checkout request to configured AWS API', async () => {

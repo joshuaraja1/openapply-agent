@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 const source = resolve('cloud/staging-login');
 const target = resolve('cloud/staging-login-dist');
 await mkdir(resolve(target, 'auth/callback'), { recursive: true });
-for (const file of ['index.html', 'style.css', 'login.js', 'onboarding.js', 'checkout-url.mjs', '_headers', '_redirects']) {
+for (const file of ['index.html', 'style.css', 'login.js', 'onboarding.js', 'deletion.js', 'checkout-url.mjs', '_headers', '_redirects']) {
   await copyFile(resolve(source, file), resolve(target, file));
 }
 await copyFile(resolve(source, 'index.html'), resolve(target, 'auth/callback/index.html'));
@@ -18,6 +18,7 @@ const configured = issuer && clientId && loginDomain;
 await writeFile(resolve(target, 'config.json'), JSON.stringify(configured
   ? { issuer, clientId, loginDomain, appOrigin,
     checkoutEnabled: process.env.OPENAPPLY_STAGING_CHECKOUT_ENABLED === 'true',
-    onboardingEnabled: process.env.OPENAPPLY_STAGING_ONBOARDING_ENABLED === 'true' }
-  : { issuer: '', clientId: '', loginDomain: '', appOrigin, checkoutEnabled: false, onboardingEnabled: false }) + '\n');
+    onboardingEnabled: process.env.OPENAPPLY_STAGING_ONBOARDING_ENABLED === 'true',
+    deletionEnabled: process.env.OPENAPPLY_STAGING_DELETION_ENABLED === 'true' }
+  : { issuer: '', clientId: '', loginDomain: '', appOrigin, checkoutEnabled: false, onboardingEnabled: false, deletionEnabled: false }) + '\n');
 console.log(`Built staging login site (${configured ? 'configured' : 'setup pending'}).`);
