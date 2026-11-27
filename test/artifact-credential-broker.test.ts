@@ -38,7 +38,9 @@ describe("candidate-scoped artifact credentials", () => {
   it("mints a bounded per-run capability and rejects tampering and expiry", () => {
     const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
     expect(verifyArtifactRunCapability(token, secret, nowEpoch)).toMatchObject({ candidateId, runId });
-    expect(() => verifyArtifactRunCapability(`${token.slice(0, -1)}A`, secret, nowEpoch)).toThrow();
+    const tampered = `${token.slice(0, -1)}${token.endsWith("A") ? "Q" : "A"}`;
+    expect(tampered).not.toBe(token);
+    expect(() => verifyArtifactRunCapability(tampered, secret, nowEpoch)).toThrow();
     expect(() => verifyArtifactRunCapability(token, secret, nowEpoch + 1800)).toThrow();
     expect(() => mintArtifactRunCapability(otherCandidateId, runId, Buffer.alloc(16), nowEpoch)).toThrow();
   });
