@@ -21,7 +21,7 @@ admission disabled until the deployed two-candidate IAM denial drill, crash
 recovery, deletion drill, and independent security review are complete. This
 change tracks [issue #258](https://github.com/joshuaraja1/openapply-agent/issues/258).
 
-For the deployed drill, run `sts simulate-principal-policy` against the task
+For the deployed drill, run `aws iam simulate-principal-policy` against the task
 role for another candidate's ledger row and the global slot, then verify
 actual calls from a disposable task are denied. Exercise the broker with a
 second candidate's subject and official job, a stopped task, and a deleted

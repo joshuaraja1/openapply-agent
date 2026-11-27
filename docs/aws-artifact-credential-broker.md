@@ -12,11 +12,10 @@ durable run operations use the broker's explicit method allowlist described in
 `docs/aws-run-state-broker-staging.md`. A trusted task launcher
 checks the durable run, retrieves a 256-bit signing key from Secrets Manager,
 and mints a random, HMAC-authenticated capability for one candidate and run.
-It passes that capability privately in the ECS task override; SQS carries only
-opaque candidate and run IDs. The signing key stays with the launcher and
-broker, never in the task. The launcher and task override are still missing;
-the broker must not be deployed for candidates until they exist and have been
-reviewed.
+It passes that capability privately in the ECS task override; hosted browser
+tasks do not receive from SQS. The signing key stays with the launcher and
+broker, never in the task. The launcher and task override are implemented in
+draft PR #257, but they and the broker are not deployed for candidates.
 
 The worker obtains the journal lease before requesting credentials. On each
 request, it sends the lease token with the capability. The broker verifies the
@@ -32,8 +31,9 @@ the scoped KMS grant, then directly invokes the broker with a bounded encrypted
 envelope. The broker verifies the live lease, exact reserved submit-intent
 receipt ID, consent, billing, and deletion fence before it performs one S3
 `PutObject` with `If-None-Match: *` under the exact run receipt key. The broker
-role is the sole receipt writer. The runtime rejects another SQS candidate/run
-before reading AWS state and requests credentials only after lease acquisition.
+role is the sole receipt writer. The broker derives run scope from the signed
+capability before reading AWS state, and the runtime requests credentials only
+after lease acquisition.
 A confirmed, uncertain, expired, or released lease cannot obtain another grant
 or brokered receipt upload.
 
