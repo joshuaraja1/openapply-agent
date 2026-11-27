@@ -27,6 +27,17 @@ function fixture(send: (command: GetCommand | TransactWriteCommand) => Promise<u
 }
 
 describe("Dynamo trusted run creator", () => {
+  it("treats malformed stored lead and profile rows as unavailable", async () => {
+    const { port } = fixture(async command => ({ Item: command instanceof GetCommand
+      && command.input.Key?.sk === "VERIFIED"
+      ? { pk: `LEAD#${leadId}`, sk: "VERIFIED", status: "open", ...lead,
+          canonicalUrl: "not-a-url" }
+      : { pk, sk: `PROFILE#${artifactId}`, status: "verified", candidateId,
+          artifactId, subjectId: "" } }));
+    expect(await port.loadLead(leadId)).toBeUndefined();
+    expect(await port.loadProfile(candidateId, artifactId)).toBeUndefined();
+  });
+
   it("atomically checks deletion, lead and profile before writing run and scoped consent", async () => {
     const commands: (GetCommand | TransactWriteCommand)[] = [];
     const { port, s3send } = fixture(async command => { commands.push(command); return {}; });
