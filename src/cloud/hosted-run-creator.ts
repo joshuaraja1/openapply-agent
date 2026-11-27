@@ -24,6 +24,8 @@ export interface VerifiedCandidateProfile {
   candidateId: string;
   artifactId: string;
   subjectId: string;
+  /** Set only after the candidate reviewed a usable application profile. */
+  applicationProfileReady: true;
 }
 export interface TrustedRunRecord {
   candidateId: string;
@@ -82,7 +84,8 @@ export async function createTrustedApplicationRun(
     || lead.jobKey !== officialJobKey(lead.job)
     || profile.candidateId !== candidateId
     || profile.artifactId !== input.profileArtifactId
-    || profile.subjectId !== subjectId) {
+    || profile.subjectId !== subjectId
+    || profile.applicationProfileReady !== true) {
     throw new RunInputsUnavailableError("Verified application inputs unavailable");
   }
   let url: URL;

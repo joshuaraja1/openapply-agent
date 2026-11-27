@@ -85,6 +85,8 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
         AssertDescription: Enqueue requires a durable run ledger table.
+      - Assert: !Not [!Equals [!Ref FargateLauncherArn, '']]
+        AssertDescription: Enqueue requires the exact-run Fargate launcher; browser tasks do not consume shared SQS.
   HostedRunCreationConfiguration:
     RuleCondition: !Equals [!Ref EnableApplicationRunCreation, 'true']
     Assertions:
@@ -239,9 +241,6 @@ Resources:
                 - Effect: Allow
                   Action: dynamodb:GetItem
                   Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
-                - Effect: Allow
-                  Action: sqs:SendMessage
-                  Resource: !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ApplicationQueueName}'
           - !Ref AWS::NoValue
         - !If
           - FargateLauncherEnabled

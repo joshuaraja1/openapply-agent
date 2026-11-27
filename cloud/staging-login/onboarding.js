@@ -41,7 +41,39 @@ export function attachCandidateSetup(auth) {
   void refreshPlan();
 
   const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  form.addEventListener('input', () => { pending = null; review.hidden = true; });
+  const taggedFacts = value => lines(value).map(line => {
+    const divider = line.lastIndexOf(' | ');
+    if (divider < 1) return null;
+    const claim = line.slice(0, divider).trim();
+    const skills = line.slice(divider + 3).split(',').map(skill => skill.trim());
+    return claim && skills.length <= 12 && skills.every(Boolean) ? { claim, skills } : null;
+  });
+  const invalidate = () => { pending = null; review.hidden = true; };
+  const value = (row, name) => row.querySelector(`[name="${name}"]`).value.trim();
+  const optionalUrl = (row, name) => {
+    const url = value(row, name);
+    return url ? { [name]: url } : {};
+  };
+  const experiences = () => [...form.querySelectorAll('.experience-entry')].map(row => ({
+    employer: value(row, 'employer'), title: value(row, 'title'),
+    employmentType: value(row, 'employmentType'), start: value(row, 'start'),
+    end: value(row, 'end'), claims: taggedFacts(value(row, 'claims')),
+  }));
+  const projects = () => [...form.querySelectorAll('.project-entry')].map(row => ({
+    name: value(row, 'name'), ...optionalUrl(row, 'url'), claims: taggedFacts(value(row, 'claims')),
+  }));
+  form.addEventListener('input', invalidate);
+  for (const kind of ['experience', 'project']) {
+    document.getElementById(`add-${kind}`).addEventListener('click', () => {
+      const list = document.getElementById(`${kind}-list`);
+      if (list.children.length >= 12) { status.textContent = `You can add up to 12 ${kind} entries.`; return; }
+      const row = document.getElementById(`${kind}-template`).content.cloneNode(true);
+      list.append(row);
+      const added = list.lastElementChild;
+      added.querySelector('.remove-entry').addEventListener('click', () => { added.remove(); invalidate(); });
+      invalidate();
+    });
+  }
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -55,24 +87,64 @@ export function attachCandidateSetup(auth) {
     }
     const roles = lines(String(data.get('targetRoles') ?? ''));
     const locations = lines(String(data.get('locations') ?? ''));
-    if (!roles.length || !locations.length || roles.length > 12 || locations.length > 12) {
-      status.textContent = 'Enter up to 12 roles and 12 locations.';
+    const countries = lines(String(data.get('authorizedCountries') ?? ''));
+    const skills = lines(String(data.get('skills') ?? ''));
+    const education = taggedFacts(String(data.get('educationFacts') ?? ''));
+    const experience = experiences();
+    const projectFacts = projects();
+    if (!roles.length || !locations.length || !countries.length
+      || roles.length > 12 || locations.length > 12 || countries.length > 12
+      || skills.length > 80 || education.length > 12
+      || !['yes', 'no'].includes(String(data.get('sponsorship')))) {
+      status.textContent = 'Check your roles, locations, work authorization, and facts before review.';
       return;
     }
+    if (!education.length && !experience.length && !projectFacts.length) {
+      status.textContent = 'Enter at least one education, experience, or project fact.';
+      return;
+    }
+    if (education.includes(null) || experience.some(item => item.claims.includes(null))
+      || projectFacts.some(item => item.claims.includes(null))) {
+      status.textContent = 'Each fact needs its own accurate skill tags after a |, separated by commas.';
+      return;
+    }
+    const sponsorshipRequiredNowOrFuture = data.get('sponsorship') === 'yes';
+    const applicationFacts = {
+      identity: {
+        fullName: String(data.get('fullName')).trim(),
+        email: String(data.get('applicationEmail')).trim(),
+        phone: String(data.get('phone')).trim(),
+        location: String(data.get('currentLocation')).trim(),
+        ...optionalUrl(form, 'portfolio'), ...optionalUrl(form, 'github'),
+        ...optionalUrl(form, 'linkedin'),
+      },
+      authorization: { countries, sponsorshipRequiredNowOrFuture },
+      skills, education, experience, projects: projectFacts,
+    };
     pending = {
       version: 1, submissionId: crypto.randomUUID(), careerStage: String(data.get('careerStage')),
       targetRoles: roles, locations,
       schoolOrEmployer: String(data.get('schoolOrEmployer')).trim(),
       graduationOrExperience: String(data.get('graduationOrExperience')).trim(),
-      workAuthorization: String(data.get('workAuthorization')).trim(),
-      sponsorshipRequiredNowOrFuture: data.has('sponsorship'), resume, transcript,
+      workAuthorization: countries.join(', '), sponsorshipRequiredNowOrFuture,
+      applicationFacts, resume, transcript,
     };
     summary.textContent = [
       `Stage: ${pending.careerStage}`, `Roles: ${roles.join(', ')}`, `Locations: ${locations.join(', ')}`,
+      `Name: ${applicationFacts.identity.fullName}`, `Application email: ${applicationFacts.identity.email}`,
+      `Phone: ${applicationFacts.identity.phone}`, `Current location: ${applicationFacts.identity.location}`,
+      ...['portfolio', 'github', 'linkedin'].filter(key => applicationFacts.identity[key])
+        .map(key => `${key}: ${applicationFacts.identity[key]}`),
       `School or employer: ${pending.schoolOrEmployer}`,
       `Graduation or experience: ${pending.graduationOrExperience}`,
-      `Work authorization: ${pending.workAuthorization}`,
+      `Authorized countries: ${pending.workAuthorization}`,
       `Needs sponsorship: ${pending.sponsorshipRequiredNowOrFuture ? 'Yes' : 'No'}`,
+      `Skills: ${skills.join('; ') || 'None entered'}`,
+      ...education.map(item => `Education fact: ${item.claim} [skills used: ${item.skills.join(', ')}]`),
+      ...experience.flatMap(item => [`Experience: ${item.employer} — ${item.title} (${item.employmentType}, ${item.start} to ${item.end})`,
+        ...item.claims.map(claim => `  Achievement: ${claim.claim} [skills used: ${claim.skills.join(', ')}]`)]),
+      ...projectFacts.flatMap(item => [`Project: ${item.name}${item.url ? ` (${item.url})` : ''}`,
+        ...item.claims.map(claim => `  Project fact: ${claim.claim} [skills used: ${claim.skills.join(', ')}]`)]),
       `Master résumé: ${resume.name}`,
       ...(transcript instanceof File && transcript.size ? [`Transcript: ${transcript.name}`] : []),
     ].join('\n');
@@ -135,6 +207,8 @@ export function attachCandidateSetup(auth) {
       if (!response.ok) throw new Error('Save failed');
       pending = null;
       form.reset();
+      document.getElementById('experience-list').replaceChildren();
+      document.getElementById('project-list').replaceChildren();
       form.hidden = true;
       review.hidden = true;
       status.textContent = 'Your reviewed profile was saved. Application runs are not enabled in this staging preview.';

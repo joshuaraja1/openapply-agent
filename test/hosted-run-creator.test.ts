@@ -21,7 +21,8 @@ function fixture() {
       endsAt: "2026-12-01T00:00:00.000Z", revokedAt: null }]) },
     loadLead: vi.fn(async () => ({ leadId, job, jobKey: officialJobKey(job),
       canonicalUrl: "https://jobs.example.com/job-42", expiresAt: 1795737600 })),
-    loadProfile: vi.fn(async () => ({ candidateId, artifactId, subjectId })),
+    loadProfile: vi.fn(async () => ({ candidateId, artifactId, subjectId,
+      applicationProfileReady: true as const })),
     profileObjectExists: vi.fn(async () => true),
     createOrGet: vi.fn(async () => "created" as const),
   };
@@ -57,12 +58,19 @@ describe("trusted hosted application run", () => {
     missing.profileObjectExists.mockResolvedValueOnce(false);
     await expect(createTrustedApplicationRun(issuer, subjectId, body, missing, now)).rejects.toThrow();
     const wrongOwner = fixture();
-    wrongOwner.loadProfile.mockResolvedValueOnce({ candidateId: runId, artifactId, subjectId });
+    wrongOwner.loadProfile.mockResolvedValueOnce({ candidateId: runId, artifactId, subjectId,
+      applicationProfileReady: true });
     await expect(createTrustedApplicationRun(issuer, subjectId, body, wrongOwner, now)).rejects.toThrow();
     const expired = fixture();
     expired.loadLead.mockResolvedValueOnce({ leadId, job, jobKey: officialJobKey(job),
       canonicalUrl: "https://jobs.example.com/job-42", expiresAt: 1 });
     await expect(createTrustedApplicationRun(issuer, subjectId, body, expired, now)).rejects.toThrow();
+    const incomplete = fixture();
+    incomplete.loadProfile.mockResolvedValueOnce({ candidateId: candidateIdForSubject(issuer, subjectId),
+      artifactId, subjectId,
+      applicationProfileReady: false as never });
+    await expect(createTrustedApplicationRun(issuer, subjectId, body, incomplete, now)).rejects.toThrow();
+    expect(incomplete.createOrGet).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed trusted lead URL before writing a run", async () => {
