@@ -16,6 +16,11 @@ only secret ARNs to CloudFormation. Verify the API role cannot read the replay
 secret and the replay role cannot read the API secret with IAM simulation or
 an equivalent denied-access test. Confirm Checkout creation and scheduled
 reconciliation with test-mode events before enabling candidate payments.
+When the webhook signing secret rotates, set `WebhookSecretVersion` to the
+new Secrets Manager version ID in the CloudFormation update. This nonsecret
+environment marker refreshes both warm Lambda runtimes so they reload the
+new signing secret; changing a secret value alone does not refresh cached
+configuration.
 
 This split does **not** by itself prevent a compromised API from inducing an
 indirect grant. The API still controls customer bindings and reads provider

@@ -18,6 +18,10 @@ Parameters:
     Type: String
   StripeWebhookSecretArn:
     Type: String
+  WebhookSecretVersion:
+    Type: String
+    Default: bootstrap
+    AllowedPattern: '^[A-Za-z0-9-]{1,128}$'
   AppOrigin:
     Type: String
     AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
@@ -133,6 +137,7 @@ Resources:
           STRIPE_MODE: test
           STRIPE_TEST_SECRET_ARN: !Ref StripeApiSecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          WEBHOOK_SECRET_VERSION: !Ref WebhookSecretVersion
           BILLING_TABLE_NAME: !Ref BillingTableName
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           APP_ORIGIN: !Ref AppOrigin
@@ -157,6 +162,7 @@ Resources:
           STRIPE_MODE: test
           STRIPE_TEST_SECRET_ARN: !Ref StripeReplaySecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          WEBHOOK_SECRET_VERSION: !Ref WebhookSecretVersion
           BILLING_TABLE_NAME: !Ref BillingTableName
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           APP_ORIGIN: !Ref AppOrigin
