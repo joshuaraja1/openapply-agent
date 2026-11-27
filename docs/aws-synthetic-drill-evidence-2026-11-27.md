@@ -4,6 +4,14 @@ Status: **staging fixture evidence only**. No real employer application, live
 Stripe charge, or customer data was used. This does not establish public
 release readiness.
 
+The six disposable "candidates" were fake **job seeker accounts** used to
+exercise OpenApply, not people applying to work for OpenApply. A–E exercised
+the browser queue and crash recovery against `.invalid` fixture jobs; F
+exercised scheduled deletion only. "Purged" means their OpenApply staging
+artifacts and run records were removed after the drill. It says nothing about
+real employer applications or whether the product can apply autonomously for
+customers.
+
 ## Reviewed build and deployment
 
 - The drill used the reviewed stacked changes in PRs #262 through #266. PR
