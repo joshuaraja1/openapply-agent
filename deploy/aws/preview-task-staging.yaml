@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Disabled-by-default pre-submit browser preview task for hosted job seekers.
+
+Parameters:
+  EnablePreviewTask:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  BrowserImageUri:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^.+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[a-f0-9]{64}$'
+  ArtifactBucketName:
+    Type: String
+    Default: ''
+  ArtifactKmsKeyArn:
+    Type: String
+    Default: ''
+  ArtifactBrokerArn:
+    Type: String
+    Default: ''
+
+Conditions:
+  TaskEnabled: !Equals [!Ref EnablePreviewTask, 'true']
+
+Rules:
+  EnabledConfiguration:
+    RuleCondition: !Equals [!Ref EnablePreviewTask, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref BrowserImageUri, '']]
+        AssertDescription: An immutable browser image digest is required.
+      - Assert: !Not [!Equals [!Ref ArtifactBucketName, '']]
+        AssertDescription: Private artifact bucket is required.
+      - Assert: !Not [!Equals [!Ref ArtifactKmsKeyArn, '']]
+        AssertDescription: Artifact encryption key is required.
+      - Assert: !Not [!Equals [!Ref ArtifactBrokerArn, '']]
+        AssertDescription: Exact-run broker is required.
+
+Resources:
+  PreviewLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: TaskEnabled
+    Properties:
+      LogGroupName: /openapply/staging/browser-preview
+      RetentionInDays: 14
+
+  PreviewExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: TaskEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullPreviewImageAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer, ecr:BatchGetImage]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/openapply-staging-browser'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/openapply/staging/browser-preview:*'
+
+  PreviewTaskRole:
+    Type: AWS::IAM::Role
+    Condition: TaskEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeExactRunBroker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref ArtifactBrokerArn
+              # The browser task receives no direct DynamoDB, SQS, S3, or KMS permissions.
+
+  PreviewTask:
+    Type: AWS::ECS::TaskDefinition
+    Condition: TaskEnabled
+    Properties:
+      Family: openapply-staging-browser-preview
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      RuntimePlatform: { OperatingSystemFamily: LINUX, CpuArchitecture: X86_64 }
+      Cpu: '1024'
+      Memory: '4096'
+      ExecutionRoleArn: !GetAtt PreviewExecutionRole.Arn
+      TaskRoleArn: !GetAtt PreviewTaskRole.Arn
+      ContainerDefinitions:
+        - Name: browser-worker
+          Image: !Ref BrowserImageUri
+          Essential: true
+          User: '10001:10001'
+          ReadonlyRootFilesystem: false
+          LinuxParameters:
+            Capabilities:
+              Drop: [ALL]
+          Environment:
+            - { Name: OPENAPPLY_CLOUD_TASK_MODE, Value: preview }
+            - { Name: OPENAPPLY_CLOUD_PREVIEW_ONLY, Value: '1' }
+            - { Name: OPENAPPLY_SUBMISSION_MODE, Value: disabled }
+            - { Name: AWS_REGION, Value: !Ref 'AWS::Region' }
+            - { Name: OPENAPPLY_ARTIFACT_BUCKET, Value: !Ref ArtifactBucketName }
+            - { Name: OPENAPPLY_ARTIFACT_KMS_KEY_ARN, Value: !Ref ArtifactKmsKeyArn }
+            - { Name: OPENAPPLY_ARTIFACT_BROKER_ARN, Value: !Ref ArtifactBrokerArn }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PreviewLogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: browser-preview
+
+Outputs:
+  TaskDefinitionArn:
+    Condition: TaskEnabled
+    Value: !Ref PreviewTask
+  TaskRoleArn:
+    Condition: TaskEnabled
+    Value: !GetAtt PreviewTaskRole.Arn
+  ExecutionRoleArn:
+    Condition: TaskEnabled
+    Value: !GetAtt PreviewExecutionRole.Arn
