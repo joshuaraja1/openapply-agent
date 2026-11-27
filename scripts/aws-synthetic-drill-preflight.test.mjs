@@ -27,6 +27,30 @@ function readyFixture() {
     Parameters: (parameters[key] ?? []).map((ParameterKey) =>
       ({ ParameterKey, ParameterValue: 'true' })),
   }]));
+  const setOutput = (key, name, value) => {
+    stacks[key].Outputs.find((item) => item.OutputKey === name).OutputValue = value;
+  };
+  const setParameter = (key, name, value) => {
+    stacks[key].Parameters.push({ ParameterKey: name, ParameterValue: value });
+  };
+  setOutput('controlPlane', 'PrivateArtifactsBucket', 'fixture-bucket');
+  setOutput('browserSmoke', 'ClusterArn', 'arn:aws:ecs:us-east-1:123456789012:cluster/staging');
+  setOutput('onboarding', 'CandidateDataKeyArn', 'arn:aws:kms:us-east-1:123456789012:key/key-id');
+  setOutput('broker', 'BrokerFunctionArn', 'arn:aws:lambda:us-east-1:123456789012:function:broker');
+  setOutput('syntheticTask', 'TaskDefinitionArn', 'arn:aws:ecs:us-east-1:123456789012:task-definition/synthetic:1');
+  setOutput('syntheticTask', 'TaskRoleArn', 'arn:aws:iam::123456789012:role/synthetic');
+  setOutput('egress', 'PrivateSubnetId', 'subnet-12345678');
+  for (const [name, value] of [
+    ['EcsClusterArn', stacks.browserSmoke.Outputs.find((item) => item.OutputKey === 'ClusterArn').OutputValue],
+    ['EcsTaskDefinitionArn', stacks.syntheticTask.Outputs.find((item) => item.OutputKey === 'TaskDefinitionArn').OutputValue],
+    ['EcsTaskRoleArn', stacks.syntheticTask.Outputs.find((item) => item.OutputKey === 'TaskRoleArn').OutputValue],
+    ['PrivateSubnetIds', 'subnet-12345678'],
+  ]) setParameter('launcher', name, value);
+  for (const key of ['broker', 'syntheticTask']) {
+    setParameter(key, 'ArtifactKmsKeyArn', stacks.onboarding.Outputs[0].OutputValue);
+    setParameter(key, 'ArtifactBucketName', 'fixture-bucket');
+  }
+  setParameter('syntheticTask', 'ArtifactBrokerArn', stacks.broker.Outputs[0].OutputValue);
   const task = { taskRoleArn: 'arn:aws:iam::123456789012:role/synthetic',
     executionRoleArn: 'arn:aws:iam::123456789012:role/execution',
     containerDefinitions: [{ name: 'browser-worker', environment: [
@@ -68,4 +92,16 @@ test('rejects a mutable or unrelated browser image', () => {
   const result = assessInventory('123456789012', '123456789012', stacks, task);
   assert.equal(result.ready, false);
   assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
+});
+
+test('rejects launcher or broker wired to another staging resource', () => {
+  const { stacks, task } = readyFixture();
+  stacks.launcher.Parameters.find((item) => item.ParameterKey === 'PrivateSubnetIds')
+    .ParameterValue = 'subnet-other';
+  stacks.syntheticTask.Parameters.find((item) => item.ParameterKey === 'ArtifactBrokerArn')
+    .ParameterValue = 'arn:aws:lambda:us-east-1:123456789012:function:other';
+  const result = assessInventory('123456789012', '123456789012', stacks, task);
+  assert.equal(result.ready, false);
+  assert.match(result.checks.find((check) => check.gate === 'stack-wiring').detail,
+    /launcher.PrivateSubnetIds.*syntheticTask.ArtifactBrokerArn/);
 });

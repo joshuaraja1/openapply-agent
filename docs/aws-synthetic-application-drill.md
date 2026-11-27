@@ -11,10 +11,13 @@ node scripts/aws-synthetic-drill-preflight.mjs --account-id 205064803661
 
 The `--json` option emits machine-readable gate results without secret values.
 The preflight exits 2 while a required gate is missing and exits 1 on an AWS
-read error. It checks the account, control plane, billing store, browser
+read error. It is a **prerequisite inventory**, not proof of tenant IAM safety
+or a completed browser application. It checks the account, control plane, billing store, browser
 cluster, code bucket, Cognito, onboarding/deletion, artifact and run-state
 broker, synthetic task definition, launcher, and private egress. It also checks
-that the task definition keeps synthetic-only mode and real submission disabled.
+that the task definition keeps synthetic-only mode and real submission disabled,
+and that the deployed stack parameters reference the exact reviewed task,
+broker, KMS key, bucket, cluster, and private subnet.
 Do not bypass a failed gate by invoking ECS directly.
 
 As of November 27, the control plane, billing, browser smoke, code bucket, and
@@ -34,25 +37,37 @@ deleted after the test. That result does not exercise application state.
    deploying it. Configure only a test-mode/free-grant entitlement.
 3. Deploy the signed-capability broker and synthetic task role. The task role
    may invoke the named broker and must have no direct DynamoDB, SQS, S3, KMS,
-   or STS permissions. Verify its task definition has
+   or STS permissions. Before launching a browser, use IAM policy simulation
+   for those denied actions against the actual shared ledger, queue, bucket,
+   and key, and confirm `lambda:InvokeFunction` is allowed only for the named
+   broker. The preflight cannot establish this policy boundary. Verify its task definition has
    `OPENAPPLY_CLOUD_SYNTHETIC_ONLY=1` and
    `OPENAPPLY_SUBMISSION_MODE=disabled`.
 4. Provision the private egress stack only for the test window. Record its
    subnet ID and use `AssignPublicIp=DISABLED`, the no-ingress security group,
    and an exact image digest. Add a cost alarm before recurring launches.
-5. Enable the single-slot launcher only after the deletion stop/ack path has
-   been tested. Keep real provider adapters and public candidate admission
-   disabled. Run preflight again and retain its sanitized output.
+5. Run the local deletion stop/ack, journal recovery, and broker boundary tests
+   against the exact deployment commit. Confirm the onboarding stack invokes
+   candidate-wide ECS stop and its retry worker is enabled. Then enable the
+   **single-slot synthetic launcher** for one controlled fixture run; this is
+   the first deployed stop/ack test, so keep public candidate admission and
+   real provider adapters disabled. Run preflight again and retain its
+   sanitized output. If deployed deletion fails, disable new launches, stop
+   the fixture task, and keep public admission closed.
 
 ## Disposable fixture seeding
 
 Use a separate `synthetic-drill-<random>` billing subject for A and B and
 derive each opaque candidate ID with `candidateIdForSubject` using the same
 Cognito issuer as the staging run creator. Seed a short-lived `free-grant`
-record for each subject in the **staging entitlement table** under
-`SUBJECT#<subject>/ENTITLEMENT#<grant-id>`; each record must include its exact
-subject, a unique grant ID, `approvedBy=staging-drill`, a bounded start/end
-window, and `revokedAt=null`. Do not create Stripe customers or payments.
+record for each subject in the **staging entitlement table**. The Dynamo item
+shape is `{ pk: 'SUBJECT#<subject>', sk: 'ENTITLEMENT#<grant-id>', record:
+{ kind: 'free-grant', subjectId: '<subject>', grantId: '<grant-id>',
+approvedBy: 'staging-drill', startsAt: '<ISO instant>', endsAt: '<ISO instant>',
+revokedAt: null } }`. Both instants must bound the short test window.
+`DynamoCandidatePlanStatus.loadEntitlements(subject)` must return exactly the
+seeded grant before launch; it parses the nested `record` field. Do not create
+Stripe customers or payments.
 Delete both grant rows during cleanup; the entitlement table has no TTL.
 
 For each candidate, call `saveCandidateOnboarding` with a distinct submission

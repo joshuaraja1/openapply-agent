@@ -75,6 +75,28 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       detail: safe ? 'immutable image, synthetic only, real submission disabled'
         : 'task definition lacks an immutable reviewed image, roles, or safe mode settings' });
   }
+  const output = (key, name) => stacks[key]?.Outputs?.find((item) =>
+    item.OutputKey === name)?.OutputValue;
+  const parameter = (key, name) => stacks[key]?.Parameters?.find((item) =>
+    item.ParameterKey === name)?.ParameterValue;
+  if (['controlPlane', 'browserSmoke', 'onboarding', 'broker', 'syntheticTask',
+    'launcher', 'egress'].every((key) => stacks[key])) {
+    const links = [
+      ['launcher', 'EcsClusterArn', output('browserSmoke', 'ClusterArn')],
+      ['launcher', 'EcsTaskDefinitionArn', output('syntheticTask', 'TaskDefinitionArn')],
+      ['launcher', 'EcsTaskRoleArn', output('syntheticTask', 'TaskRoleArn')],
+      ['launcher', 'PrivateSubnetIds', output('egress', 'PrivateSubnetId')],
+      ['broker', 'ArtifactKmsKeyArn', output('onboarding', 'CandidateDataKeyArn')],
+      ['broker', 'ArtifactBucketName', output('controlPlane', 'PrivateArtifactsBucket')],
+      ['syntheticTask', 'ArtifactKmsKeyArn', output('onboarding', 'CandidateDataKeyArn')],
+      ['syntheticTask', 'ArtifactBucketName', output('controlPlane', 'PrivateArtifactsBucket')],
+      ['syntheticTask', 'ArtifactBrokerArn', output('broker', 'BrokerFunctionArn')],
+    ];
+    const bad = links.filter(([key, name, value]) => !value || parameter(key, name) !== value)
+      .map(([key, name]) => `${key}.${name}`);
+    checks.push({ gate: 'stack-wiring', ok: bad.length === 0,
+      detail: bad.length ? `mismatched ${bad.join(', ')}` : 'exact resource links' });
+  }
   return { ready: checks.every((check) => check.ok), checks };
 }
 
