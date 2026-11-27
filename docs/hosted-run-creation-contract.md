@@ -1,7 +1,8 @@
 # Trusted hosted run creation (staging)
 
 `POST /api/applications/runs` is disabled by default. Enabling it requires a separate
-Lambda package, the durable run ledger, and the private encrypted artifact bucket.
+Lambda package, the durable run ledger, the private encrypted artifact bucket,
+and the onboarding KMS key ARN for decrypt-only access.
 The route records consent and a pending run. It does not enqueue or execute it.
 
 The browser sends only a UUID `runId` (idempotency key), a verified `leadId`, a
@@ -25,7 +26,17 @@ Two trusted writers must be deployed before enabling this route:
   candidateId, artifactId, subjectId}`. The writer must check the candidate
   `DELETED` marker and bind the marker to the authenticated subject.
 
-Creation checks those rows and object, then transactionally checks the deletion
+Creation decrypts the bounded profile artifact, checks its candidate ID and
+candidate-reviewed consent, and checks the referenced résumé and optional
+transcript under that same candidate's artifact prefix. Each document must
+have the encrypted-object content type, fit the upload size bound, decrypt with
+its artifact ID and candidate encryption context, and begin with a PDF header.
+The browser cannot provide document IDs. Missing or malformed documents prevent
+run creation. The run creator role gets `kms:Decrypt` for the onboarding key,
+`s3:GetObject` for candidate artifacts, and no KMS data-key generation or S3
+write access.
+
+Creation then transactionally checks the deletion
 marker and current lead/profile rows and writes `RUN#<runId>` plus
 `CONSENT#<runId>`. Consent is per run so two queued jobs cannot invalidate each
 other. A repeated ID succeeds only if the committed run and granted consent match;

@@ -22,7 +22,7 @@ function fixture() {
     loadLead: vi.fn(async () => ({ leadId, job, jobKey: officialJobKey(job),
       canonicalUrl: "https://jobs.example.com/job-42", expiresAt: 1795737600 })),
     loadProfile: vi.fn(async () => ({ candidateId, artifactId, subjectId })),
-    profileObjectExists: vi.fn(async () => true),
+    profileArtifactsAvailable: vi.fn(async () => true),
     createOrGet: vi.fn(async () => "created" as const),
   };
   return ports;
@@ -54,7 +54,7 @@ describe("trusted hosted application run", () => {
     await expect(createTrustedApplicationRun(issuer, subjectId, body, unpaid, now)).rejects.toThrow();
     expect(unpaid.createOrGet).not.toHaveBeenCalled();
     const missing = fixture();
-    missing.profileObjectExists.mockResolvedValueOnce(false);
+    missing.profileArtifactsAvailable.mockResolvedValueOnce(false);
     await expect(createTrustedApplicationRun(issuer, subjectId, body, missing, now)).rejects.toThrow();
     const wrongOwner = fixture();
     wrongOwner.loadProfile.mockResolvedValueOnce({ candidateId: runId, artifactId, subjectId });

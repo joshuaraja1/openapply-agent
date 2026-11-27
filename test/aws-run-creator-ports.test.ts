@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GetCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { HeadObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { DynamoTrustedRunCreator } from "../src/cloud/aws-run-creator-ports.js";
+import type { CandidateVault } from "../src/cloud/candidate-vault.js";
 import { officialJobKey } from "../src/cloud/durable-journal.js";
 import type { TrustedRunRecord, VerifiedOfficialLead } from "../src/cloud/hosted-run-creator.js";
 
@@ -17,13 +18,34 @@ const record: TrustedRunRecord = { candidateId, runId, subjectId: "subject",
   consentVersion: 1, policyVersion: "v1", createdAt: "2026-11-26T00:00:00.000Z" };
 const pk = `CANDIDATE#${candidateId}`;
 
-function fixture(send: (command: GetCommand | TransactWriteCommand) => Promise<unknown>) {
-  const s3send = vi.fn(async (_command: HeadObjectCommand) => ({
-    ContentType: "application/vnd.openapply.encrypted+json" }));
+const resumeId = "00000000-0000-4000-8000-000000000005";
+const transcriptId = "00000000-0000-4000-8000-000000000006";
+function profile(documents: { resumeId?: string; transcriptId?: string; candidateId?: string } = {}) {
+  return Buffer.from(JSON.stringify({ version: 1, provenance: "candidate-entered-and-reviewed",
+    candidateId: documents.candidateId ?? candidateId,
+    masterResume: { artifactId: documents.resumeId ?? resumeId,
+      name: "resume.pdf", mimeType: "application/pdf" },
+    ...(documents.transcriptId ? { transcript: { artifactId: documents.transcriptId,
+      name: "transcript.pdf", mimeType: "application/pdf" } } : {}),
+    consent: { storage: true, automation: true, reviewed: true } }));
+}
+
+function fixture(send: (command: GetCommand | TransactWriteCommand) => Promise<unknown>,
+  overrides: { profile?: Buffer; missingKey?: string; wrongContentTypeKey?: string;
+    corruptPdfKey?: string } = {}) {
+  const s3send = vi.fn(async (command: HeadObjectCommand) => {
+    if (command.input.Key === overrides.missingKey) throw Object.assign(new Error("missing"), { name: "NotFound" });
+    return { ContentType: command.input.Key === overrides.wrongContentTypeKey ? "text/plain"
+      : "application/vnd.openapply.encrypted+json", ContentLength: 1024 };
+  });
+  const vaultRead = vi.fn(async (_candidateId: string, id: string) => id === artifactId
+    ? Buffer.from(overrides.profile ?? profile())
+    : Buffer.from(id === overrides.corruptPdfKey ? "not a PDF" : "%PDF-1.4\nvalid"));
   const port = new DynamoTrustedRunCreator({ send } as unknown as
     Pick<DynamoDBDocumentClient, "send">, { send: s3send } as unknown as
-    Pick<S3Client, "send">, "ledger", "private-bucket");
-  return { port, s3send };
+    Pick<S3Client, "send">, { read: vaultRead } as Pick<CandidateVault, "read">,
+    "ledger", "private-bucket");
+  return { port, s3send, vaultRead };
 }
 
 describe("Dynamo trusted run creator", () => {
@@ -52,8 +74,29 @@ describe("Dynamo trusted run creator", () => {
     expect(items[3]?.Put?.Item?.sk).toBe(`RUN#${runId}`);
     expect(items[4]?.Put?.Item).toMatchObject({ pk, sk: `CONSENT#${runId}`,
       runId, state: "granted", scope: "apply-one-job", version: 1 });
-    expect(await port.profileObjectExists(candidateId, artifactId)).toBe(true);
+    expect(await port.profileArtifactsAvailable(candidateId, artifactId)).toBe(true);
     expect(s3send.mock.calls[0]?.[0]).toBeInstanceOf(HeadObjectCommand);
+  });
+
+  it("requires every PDF referenced by the candidate's decrypted profile", async () => {
+    const good = fixture(async () => ({}), { profile: profile({ transcriptId }) });
+    expect(await good.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(true);
+    expect(good.vaultRead).toHaveBeenCalledTimes(3);
+    const missing = fixture(async () => ({}), { profile: profile({ transcriptId }),
+      missingKey: `candidates/${candidateId}/artifacts/${transcriptId}` });
+    expect(await missing.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(false);
+    const wrongType = fixture(async () => ({}), { wrongContentTypeKey:
+      `candidates/${candidateId}/artifacts/${resumeId}` });
+    expect(await wrongType.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(false);
+    const badPdf = fixture(async () => ({}), { corruptPdfKey: resumeId });
+    expect(await badPdf.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(false);
+  });
+
+  it("rejects profile references outside the candidate or back to itself", async () => {
+    const otherCandidate = fixture(async () => ({}), { profile: profile({ candidateId: leadId }) });
+    expect(await otherCandidate.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(false);
+    const self = fixture(async () => ({}), { profile: profile({ resumeId: artifactId }) });
+    expect(await self.port.profileArtifactsAvailable(candidateId, artifactId)).toBe(false);
   });
 
   it("accepts an exact committed retry but rejects a reused run ID", async () => {

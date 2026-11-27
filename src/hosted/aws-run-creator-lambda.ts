@@ -1,7 +1,10 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { S3Client } from "@aws-sdk/client-s3";
+import { KMSClient } from "@aws-sdk/client-kms";
 import { DynamoTrustedRunCreator } from "../cloud/aws-run-creator-ports.js";
+import { CandidateVault } from "../cloud/candidate-vault.js";
+import { KmsDataKeys, S3ArtifactStore } from "../cloud/aws-artifact-store.js";
 import { DynamoBillingStore } from "./stripe-billing-store.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleApplicationRunHttp } from "./application-run-http.js";
@@ -28,13 +31,17 @@ function runtime() {
     audience: required("COGNITO_CLIENT_ID"), jwksUrl: required("COGNITO_JWKS_URL") });
   const billing = new DynamoBillingStore(db, required("BILLING_TABLE_NAME"),
     required("ENTITLEMENT_TABLE_NAME"));
-  const runCreator = new DynamoTrustedRunCreator(db, s3,
-    required("RUN_LEDGER_TABLE_NAME"), required("PRIVATE_ARTIFACT_BUCKET"));
+  const bucket = required("PRIVATE_ARTIFACT_BUCKET");
+  const vault = new CandidateVault(new KmsDataKeys(new KMSClient({}),
+    required("CANDIDATE_KMS_KEY_ARN")), new S3ArtifactStore(s3, bucket));
+  const runCreator = new DynamoTrustedRunCreator(db, s3, vault,
+    required("RUN_LEDGER_TABLE_NAME"), bucket);
   return { handleRequest: (request: Request) => handleApplicationRunHttp(request, {
     appOrigin, issuer, verifySubject, ports: { billing,
       loadLead: (id: string) => runCreator.loadLead(id),
       loadProfile: (candidate: string, artifact: string) => runCreator.loadProfile(candidate, artifact),
-      profileObjectExists: (candidate: string, artifact: string) => runCreator.profileObjectExists(candidate, artifact),
+      profileArtifactsAvailable: (candidate: string, artifact: string) =>
+        runCreator.profileArtifactsAvailable(candidate, artifact),
       createOrGet: (record: Parameters<typeof runCreator.createOrGet>[0],
         lead: Parameters<typeof runCreator.createOrGet>[1], now: number) => runCreator.createOrGet(record, lead, now),
     },

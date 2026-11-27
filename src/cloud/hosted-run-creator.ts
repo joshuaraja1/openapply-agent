@@ -62,7 +62,7 @@ export async function createTrustedApplicationRun(
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
     loadLead(leadId: string): Promise<VerifiedOfficialLead | undefined>;
     loadProfile(candidateId: string, artifactId: string): Promise<VerifiedCandidateProfile | undefined>;
-    profileObjectExists(candidateId: string, artifactId: string): Promise<boolean>;
+    profileArtifactsAvailable(candidateId: string, artifactId: string): Promise<boolean>;
     createOrGet(record: TrustedRunRecord, lead: VerifiedOfficialLead,
       nowEpoch: number): Promise<"created" | "existing">;
   },
@@ -71,13 +71,13 @@ export async function createTrustedApplicationRun(
   const input = runCreationInputSchema.parse(inputValue);
   const candidateId = candidateIdForSubject(issuer, subjectId);
   requireHostedAccess(subjectId, await ports.billing.loadEntitlements(subjectId), now);
-  const [lead, profile, objectExists] = await Promise.all([
+  const [lead, profile, artifactsAvailable] = await Promise.all([
     ports.loadLead(input.leadId),
     ports.loadProfile(candidateId, input.profileArtifactId),
-    ports.profileObjectExists(candidateId, input.profileArtifactId),
+    ports.profileArtifactsAvailable(candidateId, input.profileArtifactId),
   ]);
   const nowEpoch = Math.floor(now.getTime() / 1000);
-  if (!Number.isSafeInteger(nowEpoch) || !lead || !profile || !objectExists
+  if (!Number.isSafeInteger(nowEpoch) || !lead || !profile || !artifactsAvailable
     || lead.leadId !== input.leadId || lead.expiresAt <= nowEpoch
     || lead.jobKey !== officialJobKey(lead.job)
     || profile.candidateId !== candidateId
