@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LambdaClient } from "@aws-sdk/client-lambda";
+import { InvokeCommand, type LambdaClient } from "@aws-sdk/client-lambda";
 import { createAwsQueuedRunRuntime } from "../src/cloud/aws-queued-run-runtime.js";
 
 const candidateId = "00000000-0000-4000-8000-000000000001";
@@ -10,13 +10,14 @@ const config = { artifactBucket: "openapply-private-test",
 
 describe("scoped AWS queued runtime", () => {
   it("fails closed when the trusted broker cannot load exact dispatch", async () => {
-    const send = vi.fn(async () => ({ StatusCode: 200, Payload: Buffer.from("null") }));
+    const send = vi.fn(async (_command: InvokeCommand) =>
+      ({ StatusCode: 200, Payload: Buffer.from("null") }));
     const runtime = createAwsQueuedRunRuntime({ lambda: { send } as unknown as LambdaClient },
       config, { candidateId, runId, capability: "capability" },
       { prepare: vi.fn() }, { verify: vi.fn() });
     await expect(runtime.runExact()).rejects.toThrow();
     expect(send).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(Buffer.from(send.mock.calls[0]![0].input.Payload).toString());
+    const payload = JSON.parse(Buffer.from(send.mock.calls[0]![0].input.Payload as Uint8Array).toString());
     expect(payload).toEqual({ kind: "run-state", capability: "capability",
       request: { operation: "readDispatch" } });
   });

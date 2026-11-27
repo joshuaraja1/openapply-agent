@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { GetCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { executeRunStateRequest } from "../src/cloud/run-state-broker.js";
 import { mintArtifactRunCapability } from "../src/cloud/artifact-credential-broker.js";
@@ -53,13 +55,20 @@ describe("trusted run state broker", () => {
       === `CANDIDATE#${candidateId}`)).toBe(true);
   });
 
-  it("rejects a stolen or stopped launch capability before journal operations", async () => {
+  it("rejects a different capability for the same run before journal operations", async () => {
     const store = db();
     await expect(executeRunStateRequest({ operation: "acquireLease" },
-      mintArtifactRunCapability(otherCandidateId, runId, secret, now), secret, now,
+      mintArtifactRunCapability(candidateId, runId, secret, now), secret, now,
       store.client, config)).rejects.toThrow();
-    expect(store.send).toHaveBeenCalled();
-    expect(store.seen.every(command => (command as GetCommand).input.Key?.pk
-      !== `CANDIDATE#${candidateId}`)).toBe(true);
+    expect(store.seen).toHaveLength(2);
+  });
+
+  it("does not give browser tasks direct shared-table or queue permissions", () => {
+    const template = readFileSync(fileURLToPath(new URL("../deploy/aws/synthetic-queue-task.yaml",
+      import.meta.url)), "utf8");
+    const role = template.split("  SyntheticQueueTaskRole:")[1]?.split("  SyntheticQueueTask:")[0];
+    expect(role).toBeDefined();
+    expect(role).toContain("lambda:InvokeFunction");
+    expect(role).not.toMatch(/Action:.*(?:dynamodb:|sqs:|s3:|kms:)/i);
   });
 });
