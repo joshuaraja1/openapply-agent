@@ -19,6 +19,7 @@ export interface CloudPreviewPorts {
   billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
   journal: {
     acquireLease(candidateId: string, runId: string): Promise<string | null>;
+    renewLease(candidateId: string, leaseToken: string): Promise<boolean>;
     releaseLease(candidateId: string, leaseToken: string): Promise<void>;
     readSubmission(candidateId: string, job: OfficialJobIdentity): Promise<{ status: string }>;
   };
@@ -55,6 +56,18 @@ export async function runCloudPreSubmitPreview(scope: {
   }
   const lease = await ports.journal.acquireLease(scope.candidateId, scope.runId);
   if (!lease) throw new Error("Preview lease is busy");
+  let leaseFailure: Error | undefined;
+  let renewal = Promise.resolve();
+  const timer = setInterval(() => {
+    renewal = renewal.then(async () => {
+      if (!await ports.journal.renewLease(scope.candidateId, lease)) {
+        throw new Error("Preview lease expired");
+      }
+    }).catch(error => {
+      leaseFailure = error instanceof Error ? error : new Error("Preview lease renewal failed");
+    });
+  }, 30_000);
+  timer.unref();
   try {
     // The broker revalidates the official posting, profile marker, consent,
     // entitlement, lease, and absence of a submit intent on this call.
@@ -78,6 +91,8 @@ export async function runCloudPreSubmitPreview(scope: {
         if (officialJobKey(outcome.job) !== officialJobKey(run.job)) {
           throw new Error("Preview outcome belongs to another job");
         }
+        await renewal;
+        if (leaseFailure) throw leaseFailure;
         await ports.preview.recordOutcome(lease, run.job, {
           status: outcome.status, blockerCount: outcome.blockers.length,
           resumeSha256: outcome.resumeSha256, uploaded: outcome.uploaded,
@@ -85,5 +100,9 @@ export async function runCloudPreSubmitPreview(scope: {
         return outcome;
       } finally { bytes.fill(0); }
     } finally { await restored.cleanup(); }
-  } finally { await ports.journal.releaseLease(scope.candidateId, lease); }
+  } finally {
+    clearInterval(timer);
+    await renewal;
+    await ports.journal.releaseLease(scope.candidateId, lease);
+  }
 }
