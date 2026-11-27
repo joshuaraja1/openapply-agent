@@ -4,7 +4,7 @@
   "main": "./worker.mjs",
   "compatibility_date": "2026-11-26",
   "workers_dev": true,
-  "observability": { "enabled": true, "traces": { "enabled": true } },
+  "observability": { "enabled": false, "traces": { "enabled": false } },
   "assets": {
     "directory": "../staging-login-dist",
     "binding": "ASSETS",
