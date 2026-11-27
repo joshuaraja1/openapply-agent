@@ -13,13 +13,6 @@ Parameters:
   ExecutionRoleArn:
     Type: String
     Default: ''
-  RunLedgerTableName:
-    Type: String
-    Default: openapply-staging-run-ledger
-    AllowedValues: [openapply-staging-run-ledger]
-  EntitlementTableName:
-    Type: String
-    Default: openapply-staging-entitlements
   ArtifactBucketName:
     Type: String
     Default: ''
