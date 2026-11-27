@@ -12,7 +12,7 @@ export function candidatePurgeSessionPolicy(candidateId: string, bucket: string)
     { Effect: "Allow", Action: "s3:ListBucketVersions",
       Resource: `arn:aws:s3:::${bucket}`,
       Condition: { StringLike: { "s3:prefix": `${prefix}*` } } },
-    { Effect: "Allow", Action: "s3:DeleteObjectVersion",
+    { Effect: "Allow", Action: ["s3:DeleteObject", "s3:DeleteObjectVersion"],
       Resource: `arn:aws:s3:::${bucket}/${prefix}*` },
   ] } as const;
 }
