@@ -13,7 +13,9 @@ const requestKey = (requestId: string) => `REQUEST#${requestId}`;
 const checkoutKey = (plan: HostedPlan) => `CHECKOUT#${plan}`;
 
 function validSubject(subjectId: string): void {
-  if (!/^[A-Za-z0-9_:\-|.]{1,160}$/.test(subjectId)) throw new Error("Invalid authenticated subject");
+  if (!subjectId || subjectId.length > 160 || /[\u0000-\u001f\u007f]/.test(subjectId)) {
+    throw new Error("Invalid authenticated subject");
+  }
 }
 
 function isConditionFailure(error: unknown): boolean {

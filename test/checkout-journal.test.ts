@@ -131,6 +131,12 @@ describe("durable checkout journal", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("accepts an opaque OIDC subject with a provider separator", async () => {
+    const { journal } = fixture();
+    expect((await journal().reserve("google-oauth2|123", "monthly")).subjectId)
+      .toBe("google-oauth2|123");
+  });
+
   it("does not close a completed or unrecorded checkout", async () => {
     const { journal, retrieve } = fixture();
     const first = await journal().reserve("candidate-1", "monthly");
