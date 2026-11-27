@@ -22,12 +22,13 @@ Stripe test price IDs, Cognito issuer/JWKS/client ID, and the billing table's
 scoped policy ARN. Never pass key values as CloudFormation parameters.
 
 The staging site must control its `/auth/callback` route before Cognito is
-activated. Its same-origin `/api/billing/checkout` path should proxy to the
-HTTP API while preserving `Origin` and `Authorization`. Stripe can deliver its
+activated. The Checkout HTTP API permits only that exact configured staging
+origin through a bounded `OPTIONS` preflight; it does not use cookies or a
+wildcard CORS grant. The site may call the API directly with its Bearer token
+or use a same-origin proxy. Stripe can deliver its
 webhook directly to the HTTP API's HTTPS webhook route; configure the exact
 endpoint in the separate OpenApply Stripe **test** account and store its
-`whsec_` secret in Secrets Manager. This API has no CORS grant for direct
-cross-origin browser calls.
+`whsec_` secret in Secrets Manager.
 
 Release proof still required: real Cognito ID-token verification, a paid
 test Checkout followed by signed delivery and scheduled entitlement grant,

@@ -37,6 +37,26 @@ describe("AWS hosted billing adapter", () => {
     expect(result.statusCode).toBe(200);
     expect(Buffer.from(result.body, "base64").toString()).toBe('{"ok":true}');
     expect(result.headers["cache-control"]).toBe("no-store");
+    expect(result.headers["access-control-allow-origin"]).toBe(appOrigin);
+  });
+
+  it("answers only an exact-origin Checkout preflight", async () => {
+    const runtime = { handleRequest: vi.fn(), processReady: vi.fn() };
+    const preflight = { ...event(""), rawPath: "/api/billing/checkout",
+      requestContext: { http: { method: "OPTIONS" } },
+      headers: { origin: appOrigin, "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization, content-type" } };
+    const allowed = await handleHttpApiEvent(preflight, runtime, appOrigin);
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers["access-control-allow-origin"]).toBe(appOrigin);
+    expect(allowed.headers["access-control-allow-headers"]).toBe("authorization, content-type");
+    expect((await handleHttpApiEvent({ ...preflight,
+      headers: { ...preflight.headers, origin: "https://evil.example" } }, runtime,
+    appOrigin)).statusCode).toBe(403);
+    expect((await handleHttpApiEvent({ ...preflight,
+      headers: { ...preflight.headers, "access-control-request-headers": "x-secret" } }, runtime,
+    appOrigin)).statusCode).toBe(403);
+    expect(runtime.handleRequest).not.toHaveBeenCalled();
   });
 
   it("runs scheduled reconciliation without an HTTP route", async () => {

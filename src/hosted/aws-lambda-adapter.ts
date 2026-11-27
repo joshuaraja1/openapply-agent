@@ -36,14 +36,37 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   if (origin.protocol !== "https:" || origin.pathname !== "/" || origin.search || origin.hash) {
     throw new Error("Invalid app origin");
   }
+  const header = (name: string) => Object.entries(event.headers ?? {})
+    .find(([key]) => key.toLowerCase() === name)?.[1];
+  if (event.rawPath === "/api/billing/checkout" && method === "OPTIONS") {
+    const requestedHeaders = (header("access-control-request-headers") ?? "")
+      .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
+    const allowed = header("origin") === origin.origin
+      && header("access-control-request-method") === "POST"
+      && requestedHeaders.every(value => value === "authorization" || value === "content-type");
+    return { statusCode: allowed ? 204 : 403,
+      headers: allowed ? {
+        "access-control-allow-origin": origin.origin,
+        "access-control-allow-methods": "POST",
+        "access-control-allow-headers": "authorization, content-type",
+        "access-control-max-age": "300",
+        vary: "Origin",
+      } : { "cache-control": "no-store" },
+      body: "", isBase64Encoded: true };
+  }
   const request = new Request(`${origin.origin}${event.rawPath}${event.rawQueryString ? `?${event.rawQueryString}` : ""}`, {
     method, headers: event.headers as HeadersInit,
     ...(raw && method !== "GET" && method !== "HEAD" ? { body: raw } : {}),
   });
   const response = await runtime.handleRequest(request);
   const bytes = Buffer.from(await response.arrayBuffer());
+  const headers = Object.fromEntries(response.headers.entries());
+  if (event.rawPath === "/api/billing/checkout" && header("origin") === origin.origin) {
+    headers["access-control-allow-origin"] = origin.origin;
+    headers.vary = "Origin";
+  }
   return { statusCode: response.status,
-    headers: Object.fromEntries(response.headers.entries()),
+    headers,
     body: bytes.toString("base64"), isBase64Encoded: true };
 }
 

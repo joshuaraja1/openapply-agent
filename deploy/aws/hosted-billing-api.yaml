@@ -124,6 +124,13 @@ Resources:
       RouteKey: 'POST /api/billing/checkout'
       Target: !Sub 'integrations/${BillingHttpIntegration}'
 
+  CheckoutPreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/billing/checkout'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
   WebhookRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -148,6 +155,14 @@ Resources:
       FunctionName: !Ref BillingApiFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/billing/*'
+
+  BillingHttpPreflightPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/billing/checkout'
 
   BillingReplaySchedule:
     Type: AWS::Events::Rule
