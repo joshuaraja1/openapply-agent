@@ -65,7 +65,6 @@ Resources:
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
       MemorySize: 512
       Timeout: 30
-      ReservedConcurrentExecutions: 4
       Environment:
         Variables:
           STRIPE_MODE: test
@@ -89,7 +88,6 @@ Resources:
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
       MemorySize: 512
       Timeout: 120
-      ReservedConcurrentExecutions: 1
       Environment:
         Variables:
           STRIPE_MODE: test
