@@ -35,10 +35,14 @@ establish the four-month paid-through date for semester purchases. That access
 must be checked at queue admission, worker start, and before
 final job submission. A successful browser redirect is informational only.
 
-The OpenApply account and test Prices exist. No Stripe key, webhook endpoint,
-hosted account API, durable reservation store, or payment has been connected.
-Store Stripe secret keys and webhook signing secrets in a cloud secret
-manager; never commit them or put them in a client bundle.
+The OpenApply account and test Prices exist. A restricted sandbox key is stored
+in AWS Secrets Manager as `openapply/staging/stripe-test-secret`; it has 5 read
+and 2 write permission groups. `scripts/stripe-sandbox-smoke.mjs` used that key
+to create, retrieve, retry, and expire one test Checkout Session for each plan.
+It deleted the disposable test Customer. The script rejects live and unrestricted
+keys. No webhook endpoint, hosted account API, durable reservation store, or
+payment has been connected. Keep Stripe keys and webhook signing secrets in a
+cloud secret manager; never commit them or put them in a client bundle.
 
 References: [Stripe Checkout Session creation](https://docs.stripe.com/api/checkout/sessions/create),
 [subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks).
