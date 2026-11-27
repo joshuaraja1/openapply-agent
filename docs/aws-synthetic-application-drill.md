@@ -34,6 +34,11 @@ deleted after the test. That result does not exercise application state.
 
 ## Preparation and containment
 
+The existing AWS run ledger started with neither required GSI. CloudFormation
+can add only one DynamoDB GSI per update: add `gsi1` alone, wait until DynamoDB
+reports it `ACTIVE`, then add `DeletionDueIndex` in a second update and wait
+until it is `ACTIVE`. The preflight blocks the drill until both are active.
+
 1. Use the reviewed heads of the exact-routing, tenant-broker, and private
    egress PRs. Build and push one immutable browser image digest from that
    combined tree. Record the digest, task definition revision, and Git SHA.
