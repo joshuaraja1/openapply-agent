@@ -10,9 +10,6 @@ Parameters:
     Type: String
     Default: ''
     AllowedPattern: '^$|^.+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[a-f0-9]{64}$'
-  ExecutionRoleArn:
-    Type: String
-    Default: ''
   ArtifactBucketName:
     Type: String
     Default: ''
@@ -37,8 +34,6 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref BrowserImageUri, '']]
         AssertDescription: An immutable browser image digest is required.
-      - Assert: !Not [!Equals [!Ref ExecutionRoleArn, '']]
-        AssertDescription: The browser image pull role is required.
       - Assert: !Not [!Equals [!Ref ArtifactBucketName, '']]
         AssertDescription: Private artifact bucket is required.
       - Assert: !Not [!Equals [!Ref ArtifactKmsKeyArn, '']]
@@ -53,6 +48,39 @@ Resources:
     Properties:
       LogGroupName: /openapply/staging/synthetic-queue
       RetentionInDays: 14
+
+  SyntheticQueueExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: TaskEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullSyntheticImageAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: PullStagingImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/openapply-staging-browser'
+              - Sid: WriteSyntheticLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/openapply/staging/synthetic-queue:*'
 
   SyntheticQueueTaskRole:
     Type: AWS::IAM::Role
@@ -87,7 +115,7 @@ Resources:
         CpuArchitecture: X86_64
       Cpu: '1024'
       Memory: '4096'
-      ExecutionRoleArn: !Ref ExecutionRoleArn
+      ExecutionRoleArn: !GetAtt SyntheticQueueExecutionRole.Arn
       TaskRoleArn: !GetAtt SyntheticQueueTaskRole.Arn
       ContainerDefinitions:
         - Name: browser-worker
@@ -124,3 +152,6 @@ Outputs:
   TaskRoleArn:
     Condition: TaskEnabled
     Value: !GetAtt SyntheticQueueTaskRole.Arn
+  ExecutionRoleArn:
+    Condition: TaskEnabled
+    Value: !GetAtt SyntheticQueueExecutionRole.Arn

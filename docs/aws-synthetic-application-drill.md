@@ -55,6 +55,9 @@ until it is `ACTIVE`. The preflight blocks the drill until both are active.
    broker. The preflight cannot establish this policy boundary. Verify its task definition has
    `OPENAPPLY_CLOUD_SYNTHETIC_ONLY=1` and
    `OPENAPPLY_SUBMISSION_MODE=disabled`.
+   The synthetic task uses a dedicated execution role for its image pull and
+   `/openapply/staging/synthetic-queue` logs. The browser smoke execution role
+   is scoped to a different log group and cannot initialize this task.
    This staging AWS account has a Lambda concurrency quota of 10, and AWS
    requires at least 10 unreserved executions. Leave the broker and launcher
    reserved-concurrency parameters at their default `0` (property omitted),
