@@ -51,12 +51,35 @@ try {
       status.textContent = 'Signed in for this tab. Staging setup is in progress.';
       signOut.hidden = false;
       checkoutActions.hidden = config.checkoutEnabled !== true;
+      const token = auth.getIdToken();
+      if (token) {
+        try {
+          const response = await fetch('/api/billing/status', {
+            cache: 'no-store', headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) throw new Error('Status unavailable');
+          const access = await response.json();
+          if (access.active === true && typeof access.accessUntil === 'string') {
+            status.textContent = `Signed in. Paid access is active through ${new Date(access.accessUntil).toLocaleDateString()}.`;
+          } else if (access.active === false) {
+            status.textContent = 'Signed in. No active paid access is recorded yet. A recent test payment may take a minute to process.';
+          }
+        } catch { status.textContent = 'Signed in. Billing status is temporarily unavailable.'; }
+      }
     } catch {
       status.textContent = 'Sign-in failed or expired. Please try again.';
       signIn.hidden = false;
     }
   } else {
-    status.textContent = 'Sign in to test your OpenApply candidate account.';
+    if (location.pathname === '/billing/success') {
+      history.replaceState(null, '', '/billing/success');
+      status.textContent = 'Stripe returned from test checkout. Sign in to check your verified paid-access status.';
+    } else if (location.pathname === '/billing/cancel') {
+      history.replaceState(null, '', '/billing/cancel');
+      status.textContent = 'Test checkout was canceled. Sign in to check your current paid-access status.';
+    } else {
+      status.textContent = 'Sign in to test your OpenApply candidate account.';
+    }
     signIn.hidden = false;
   }
 } catch {
