@@ -76,7 +76,6 @@ Resources:
               - dynamodb:UpdateItem
               - dynamodb:DeleteItem
               - dynamodb:Query
-              - dynamodb:TransactWriteItems
               - dynamodb:ConditionCheckItem
             Resource: !GetAtt HostedBillingTable.Arn
           - Sid: PendingEventIndex
