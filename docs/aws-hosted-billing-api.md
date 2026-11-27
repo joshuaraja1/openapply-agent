@@ -15,7 +15,8 @@ the replay function fetches current Stripe state and updates entitlements.
 
 Build the self-contained Node 22 Lambda bundle with
 `npm run build:hosted-lambda`, zip `dist-hosted/aws-billing-lambda.mjs` at the root of a
-ZIP archive, upload it to a private OpenApply staging S3 bucket, and pass that
+ZIP archive, upload it to the private S3 bucket created by
+`deploy/aws/staging-code-bucket.yaml`, and pass that
 bucket and object key to the CloudFormation template. Provide the **ARNs** of
 the separate test key and webhook signing secret, the staging site origin,
 Stripe test price IDs, Cognito issuer/JWKS/client ID, and the billing table's
