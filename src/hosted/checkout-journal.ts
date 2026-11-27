@@ -139,14 +139,36 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
     const customerId = await this.ensureCustomer(subjectId);
     const pk = subjectKey(subjectId);
     const sk = checkoutKey;
-    const existing = await this.get(pk, sk);
+    let existing = await this.get(pk, sk);
     if (existing) {
       const open = reservation(existing);
       if (open) {
-        if (open.customerId !== customerId || open.plan !== plan || open.subjectId !== subjectId) {
+        if (open.customerId !== customerId || open.subjectId !== subjectId) {
           throw new Error("Checkout reservation binding changed");
         }
-        return open;
+        if (open.plan === plan) return open;
+        // A candidate may change plans before paying. Expire only the exact
+        // recorded Stripe session; an unrecorded or completed attempt must
+        // remain locked for reconciliation instead of creating a second one.
+        if (!open.session) throw new Error("Recorded checkout session required before changing plans");
+        const remote = await this.trustedSession(open);
+        if (remote.status === "open") {
+          if (remote.payment_status !== "unpaid") {
+            throw new Error("Checkout payment state requires billing reconciliation before changing plans");
+          }
+          const expired = await this.stripe.checkout.sessions.expire(open.session.sessionId);
+          this.assertSessionIdentity(open, expired);
+          if (expired.status !== "expired" || expired.payment_status !== "unpaid") {
+            throw new Error("Stripe has not confirmed this checkout expired");
+          }
+        } else if (remote.status !== "expired" || remote.payment_status !== "unpaid") {
+          throw new Error("Completed checkout requires billing reconciliation before changing plans");
+        }
+        await this.closeReservation(subjectId, open.plan, open.requestId);
+        existing = await this.get(pk, sk);
+        if (existing?.status !== "closed" || existing.requestId !== open.requestId) {
+          throw new Error("Checkout reservation changed during plan switch");
+        }
       }
       if (existing.status !== "closed") throw new Error("Checkout journal record is invalid");
     }
@@ -212,15 +234,33 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
 
   /** Reopen only after Stripe says the exact previous session expired.
    * A lost Stripe response or a completed payment is not terminal evidence. */
+  private assertSessionIdentity(current: CheckoutReservation, remote: Stripe.Checkout.Session): void {
+    if (!current.session || remote.id !== current.session.sessionId
+      || remote.customer !== current.customerId
+      || remote.client_reference_id !== current.subjectId
+      || remote.metadata?.requestId !== current.requestId
+      || remote.metadata?.subjectId !== current.subjectId
+      || remote.metadata?.plan !== current.plan
+      || remote.mode !== (current.plan === "monthly" ? "subscription" : "payment")) {
+      throw new Error("Stripe checkout identity does not match the reservation");
+    }
+  }
+
+  private async trustedSession(current: CheckoutReservation): Promise<Stripe.Checkout.Session> {
+    if (!current.session) throw new Error("Recorded checkout session required for reconciliation");
+    const remote = await this.stripe.checkout.sessions.retrieve(current.session.sessionId);
+    this.assertSessionIdentity(current, remote);
+    return remote;
+  }
+
   async closeReservation(subjectId: string, plan: HostedPlan, requestId: string): Promise<void> {
     validSubject(subjectId);
     const current = reservation(await this.get(subjectKey(subjectId), checkoutKey));
     if (!current || current.plan !== plan || current.requestId !== requestId || !current.session) {
       throw new Error("Recorded checkout session required for reconciliation");
     }
-    const remote = await this.stripe.checkout.sessions.retrieve(current.session.sessionId);
-    if (remote.id !== current.session.sessionId || remote.customer !== current.customerId
-      || remote.metadata?.requestId !== requestId || remote.status !== "expired") {
+    const remote = await this.trustedSession(current);
+    if (remote.status !== "expired" || remote.payment_status !== "unpaid") {
       throw new Error("Stripe has not confirmed this checkout expired");
     }
     await this.db.send(new UpdateCommand({ TableName: this.tableName,

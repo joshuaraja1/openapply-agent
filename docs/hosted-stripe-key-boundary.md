@@ -2,13 +2,21 @@
 
 The hosted API and scheduled reconciler have different AWS IAM roles and now
 accept different Secrets Manager ARNs. Set `StripeApiSecretArn` to a restricted
-**test-mode** key for customer creation, price reads, Checkout Session creation
-and retrieval, and the provider reads needed to resolve customerless refund
+**test-mode** key for customer creation, price reads, Checkout Session creation,
+retrieval, and expiration, and the provider reads needed to resolve customerless refund
 events. Set `StripeReplaySecretArn` to a separate **test-mode** key that can
 read the current subscriptions, invoices, invoice payments, PaymentIntents,
 charges, Checkout Sessions, and line items. Both Lambdas still need the
 test-mode webhook signing secret because the composition root validates it at
 startup. Neither function accepts a live-mode key.
+
+When a candidate changes the plan on an unpaid Checkout, the API retrieves
+the exact recorded session, verifies its customer, candidate, plan, request ID,
+and unpaid state, then expires it through Stripe before conditionally closing
+the durable reservation. Completed or unrecorded sessions stay locked for
+reconciliation. The API key therefore needs Checkout Session expiration only
+for this transition; test that permission on the restricted key before
+enabling plan changes in a deployed environment.
 
 Use two distinct restricted Stripe keys in the separate OpenApply account.
 Store each key only in its corresponding AWS Secrets Manager secret, and pass

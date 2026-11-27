@@ -84,14 +84,22 @@ const session: CheckoutSessionRecord = { sessionId: "cs_test_123", priceId: "pri
 function fixture() {
   const { db, rows } = fakeDynamo();
   const create = vi.fn(async (_params: unknown, _options: unknown) => ({ id: "cus_123" }));
-  const retrieve = vi.fn(async () => ({ id: "cs_test_123", customer: "cus_123",
-    metadata: { requestId: "" }, status: "expired" }));
-  const stripe = { customers: { create }, checkout: { sessions: { retrieve } } } as unknown as
+  const retrieve = vi.fn(async () => stripeSession("", "monthly", "expired"));
+  const expire = vi.fn(async () => stripeSession("", "monthly", "expired"));
+  const stripe = { customers: { create }, checkout: { sessions: { retrieve, expire } } } as unknown as
     Pick<Stripe, "customers" | "checkout">;
   const paidCheck = vi.fn(async () => {});
   const journal = () => new DynamoCheckoutJournal(db, "hosted-state", stripe, paidCheck,
     () => new Date("2026-11-26T10:00:00Z"));
-  return { journal, create, retrieve, rows, paidCheck };
+  return { journal, create, retrieve, expire, rows, paidCheck };
+}
+
+function stripeSession(requestId: string, plan: "monthly" | "semester",
+  status: "open" | "expired" | "complete") {
+  return { id: session.sessionId, customer: "cus_123", client_reference_id: "candidate-1",
+    metadata: { requestId, subjectId: "candidate-1", plan },
+    mode: plan === "monthly" ? "subscription" : "payment",
+    payment_status: status === "complete" ? "paid" : "unpaid", status };
 }
 
 describe("durable checkout journal", () => {
@@ -117,8 +125,7 @@ describe("durable checkout journal", () => {
     await journal().recordSession(first.requestId, session);
     await expect(journal().recordSession(first.requestId, { ...session, sessionId: "cs_test_other" }))
       .rejects.toThrow();
-    retrieve.mockResolvedValueOnce({ id: session.sessionId, customer: first.customerId,
-      metadata: { requestId: first.requestId }, status: "expired" });
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "semester", "expired"));
     await journal().closeReservation("candidate-1", "semester", first.requestId);
     const next = await journal().reserve("candidate-1", "semester");
     expect(next.requestId).not.toBe(first.requestId);
@@ -161,7 +168,7 @@ describe("durable checkout journal", () => {
     const { journal } = fixture();
     const monthly = await journal().reserve("candidate-1", "monthly");
     await expect(journal().reserve("candidate-1", "semester"))
-      .rejects.toThrow("binding changed");
+      .rejects.toThrow("Recorded checkout session required");
     expect((await journal().reserve("candidate-1", "monthly")).requestId)
       .toBe(monthly.requestId);
     const racing = fixture();
@@ -173,14 +180,70 @@ describe("durable checkout journal", () => {
     expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
   });
 
+  it("expires the exact unpaid session before switching plans", async () => {
+    const { journal, retrieve, expire, rows } = fixture();
+    const first = await journal().reserve("candidate-1", "monthly");
+    await journal().recordSession(first.requestId, session);
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "open"));
+    expire.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "expired"));
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "expired"));
+
+    const next = await journal().reserve("candidate-1", "semester");
+    expect(expire).toHaveBeenCalledWith(session.sessionId);
+    expect(next.plan).toBe("semester");
+    expect(next.customerId).toBe(first.customerId);
+    expect(next.requestId).not.toBe(first.requestId);
+    expect(rows.get(`SUBJECT#candidate-1\0CHECKOUT`)?.session).toBeUndefined();
+    await expect(journal().recordSession(first.requestId, session)).rejects.toThrow();
+  });
+
+  it("recovers a plan switch after Stripe expired the session but the response was lost", async () => {
+    const { journal, retrieve, expire } = fixture();
+    const first = await journal().reserve("candidate-1", "monthly");
+    await journal().recordSession(first.requestId, session);
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "expired"));
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "expired"));
+    const next = await journal().reserve("candidate-1", "semester");
+    expect(expire).not.toHaveBeenCalled();
+    expect(next.requestId).not.toBe(first.requestId);
+  });
+
+  it("keeps a completed or uncertain session locked during a plan switch", async () => {
+    const { journal, retrieve, expire } = fixture();
+    const first = await journal().reserve("candidate-1", "monthly");
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("Recorded checkout session required");
+    await journal().recordSession(first.requestId, session);
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "complete"));
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("Completed checkout requires billing reconciliation");
+    retrieve.mockResolvedValueOnce({ ...stripeSession(first.requestId, "monthly", "expired"),
+      payment_status: "no_payment_required" });
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("Completed checkout requires billing reconciliation");
+    retrieve.mockResolvedValueOnce({ ...stripeSession(first.requestId, "monthly", "open"),
+      payment_status: "paid" });
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("payment state requires billing reconciliation");
+    retrieve.mockResolvedValueOnce({ ...stripeSession(first.requestId, "monthly", "open"),
+      metadata: { requestId: "another", subjectId: "candidate-1", plan: "monthly" } });
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("identity does not match");
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "open"));
+    expire.mockRejectedValueOnce(new Error("Stripe timed out"));
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("Stripe timed out");
+    expect((await journal().reserve("candidate-1", "monthly")).requestId)
+      .toBe(first.requestId);
+  });
+
   it("does not close a completed or unrecorded checkout", async () => {
     const { journal, retrieve } = fixture();
     const first = await journal().reserve("candidate-1", "monthly");
     await expect(journal().closeReservation("candidate-1", "monthly", first.requestId))
       .rejects.toThrow("Recorded checkout session required");
     await journal().recordSession(first.requestId, session);
-    retrieve.mockResolvedValueOnce({ id: session.sessionId, customer: first.customerId,
-      metadata: { requestId: first.requestId }, status: "complete" });
+    retrieve.mockResolvedValueOnce(stripeSession(first.requestId, "monthly", "complete"));
     await expect(journal().closeReservation("candidate-1", "monthly", first.requestId))
       .rejects.toThrow("has not confirmed");
   });
