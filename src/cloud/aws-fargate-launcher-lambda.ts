@@ -131,13 +131,14 @@ export async function reconcileStoppedDispatch(candidateId: string, runId: strin
   dispatch: Pick<DynamoApplicationDispatchStore, "read" | "markCompleted" | "markNeedsReconciliation">;
   admission: Pick<DynamoHostedRunAdmission, "loadIdentity">;
   journal: Pick<DurableApplicationJournal, "readSubmission">;
-}): Promise<"absent" | "completed" | "retryable" | "needs_reconciliation"> {
+}): Promise<"absent" | "completed" | "preview_complete" | "retryable" | "needs_reconciliation"> {
   if (!Number.isSafeInteger(generation) || generation < 0 || generation > 2) {
     throw new Error("Invalid stopped launch generation");
   }
   const row = await ports.dispatch.read(candidateId, runId);
   if (!row) return "absent";
   if (row.state === "completed") return "completed";
+  if (row.state === "preview_complete") return "preview_complete";
   if (row.state === "needs_reconciliation" || row.state === "blocked") return "needs_reconciliation";
   const record = await ports.admission.loadIdentity(candidateId, runId);
   const submission = await ports.journal.readSubmission(candidateId, record.job);

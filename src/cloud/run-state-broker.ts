@@ -47,6 +47,10 @@ const request = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("loadIdentity") }),
   z.strictObject({ operation: z.literal("loadProfileArtifactId") }),
   z.strictObject({ operation: z.literal("loadPreviewBinding"), leaseToken: uuid }),
+  z.strictObject({ operation: z.literal("recordPreviewOutcome"), leaseToken: uuid, job,
+    outcome: z.strictObject({ status: z.enum(["ready-for-review", "needs-human"]),
+      blockerCount: z.number().int().min(0).max(100),
+      resumeSha256: z.string().regex(/^[a-f0-9]{64}$/), uploaded: z.boolean() }) }),
   z.strictObject({ operation: z.literal("loadEntitlements"), subjectId: z.string().trim().min(1).max(128) }),
   z.strictObject({ operation: z.literal("acquireLease") }),
   z.strictObject({ operation: z.literal("renewLease"), leaseToken: uuid }),
@@ -145,6 +149,16 @@ export async function executeRunStateRequest(input: unknown, capability: string,
       requireHostedAccess(binding.subjectId,
         await billing.loadEntitlements(binding.subjectId), new Date(finalEpoch * 1000));
       return { lead: current, profileArtifactId: binding.profileArtifactId };
+    }
+    case "recordPreviewOutcome": {
+      if (!await admission.hasArtifactGrantEligibility(scope.candidateId, scope.runId,
+        command.leaseToken, nowEpoch)
+        || (await journal.readSubmission(scope.candidateId, run.job)).status !== "not_started") {
+        throw new Error("Preview outcome lease unavailable");
+      }
+      requireHostedAccess(run.subjectId, await billing.loadEntitlements(run.subjectId));
+      await dispatch.markPreviewComplete(scope.candidateId, scope.runId, command.outcome);
+      return null;
     }
     case "loadEntitlements":
       if (command.subjectId !== run.subjectId) throw new Error("Billing subject scope mismatch");

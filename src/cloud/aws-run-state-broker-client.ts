@@ -33,7 +33,11 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
   capability: string, scope: { candidateId: string; runId: string }):
   Pick<CloudRunPorts, "billing" | "authorization" | "runRecords" | "journal"> & {
     dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void> };
-    preview: { loadBinding(leaseToken: string): Promise<z.infer<typeof previewBinding>> };
+    preview: { loadBinding(leaseToken: string): Promise<z.infer<typeof previewBinding>>;
+      recordOutcome(leaseToken: string, target: z.infer<typeof job>, outcome: {
+        status: "ready-for-review" | "needs-human"; blockerCount: number;
+        resumeSha256: string; uploaded: boolean;
+      }): Promise<void> };
     syntheticAudit: {
       recordFinalClick(candidate: string, token: string, target: z.infer<typeof syntheticJob>): Promise<boolean>;
       readClickAttempts(candidate: string, target: z.infer<typeof syntheticJob>): Promise<number>;
@@ -101,6 +105,9 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
     preview: { async loadBinding(leaseToken) {
       return previewBinding.parse(await call({ operation: "loadPreviewBinding",
         leaseToken: uuid.parse(leaseToken) }));
+    }, async recordOutcome(leaseToken, target, outcome) {
+      await call({ operation: "recordPreviewOutcome", leaseToken: uuid.parse(leaseToken),
+        job: job.parse(target), outcome });
     } },
     syntheticAudit: {
       async recordFinalClick(candidate, token, target) { exact(candidate);
