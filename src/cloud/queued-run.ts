@@ -78,6 +78,15 @@ export type CloudRunOutcome = "confirmed" | "already_confirmed" | "lease_busy" |
 
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 
+async function hasHostedAccess(subjectId: string, billing: CloudRunPorts["billing"]): Promise<boolean> {
+  const records = await billing.loadEntitlements(subjectId);
+  try { requireHostedAccess(subjectId, records); return true; }
+  catch (error) {
+    if (error instanceof Error && error.message === "Hosted access unavailable") return false;
+    throw error; // Malformed durable state is an infrastructure failure, not a paywall.
+  }
+}
+
 /**
  * Fail-closed bridge between a received SQS message and durable application state.
  * No production browser adapter or queue poller is included in this staging slice.
@@ -105,9 +114,8 @@ export async function handleQueuedApplication(
     if (status === "needs_reconciliation") return "needs_reconciliation";
     if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
     if (!record.subjectId.trim()) throw new Error("Run has no bound billing subject");
-    try {
-      requireHostedAccess(record.subjectId, await ports.billing.loadEntitlements(record.subjectId));
-    } catch { return "payment_required"; }
+    try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
+    catch { return "retry"; }
     if (!Number.isSafeInteger(record.consentVersion) || record.consentVersion < 1) {
       throw new Error("Run has no valid durable consent version");
     }
@@ -119,9 +127,8 @@ export async function handleQueuedApplication(
       const prepared = await ports.application.prepare(profile.path, record.job);
       if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
       if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
-      try {
-        requireHostedAccess(record.subjectId, await ports.billing.loadEntitlements(record.subjectId));
-      } catch { return "payment_required"; }
+      try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
+      catch { return "retry"; }
       const artifactId = await ports.journal.beginSubmission(
         run.candidateId, token, run.runId, record.consentVersion, record.job);
       if (!artifactId) {
@@ -142,8 +149,7 @@ export async function handleQueuedApplication(
       try {
         stillAuthorized = await ports.authorization.hasCurrentConsent(run.candidateId, run.runId);
         if (stillAuthorized) {
-          requireHostedAccess(record.subjectId,
-            await ports.billing.loadEntitlements(record.subjectId));
+          stillAuthorized = await hasHostedAccess(record.subjectId, ports.billing);
         }
       } catch { stillAuthorized = false; }
       if (!stillAuthorized) {

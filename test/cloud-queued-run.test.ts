@@ -31,6 +31,9 @@ function harness() {
   let owned = true;
   let currentConsent = true;
   let entitlement: unknown[] = [paid];
+  let billingReadFails = false;
+  let billingReadFailAt = 0;
+  let billingReadCount = 0;
   let revokePaymentDuringPrepare = false;
   let revokePaymentAtIntent = false;
   let revokeDuringPrepare = false;
@@ -42,7 +45,14 @@ function harness() {
   let ackThrows = false;
   let cleanupThrows = false;
   const ports: CloudRunPorts = {
-    billing: { async loadEntitlements() { events.push("billing"); return entitlement; } },
+    billing: { async loadEntitlements() {
+      events.push("billing");
+      billingReadCount++;
+      if (billingReadFails || billingReadCount === billingReadFailAt) {
+        throw new Error("DynamoDB unavailable");
+      }
+      return entitlement;
+    } },
     authorization: {
       async ownsRun() { events.push("owns-run"); return owned; },
       async hasCurrentConsent() { events.push("has-consent"); return currentConsent; },
@@ -115,6 +125,8 @@ function harness() {
     setOwned(value: boolean) { owned = value; },
     setCurrentConsent(value: boolean) { currentConsent = value; },
     setEntitlement(value: unknown[]) { entitlement = value; },
+    setBillingReadFails(value: boolean) { billingReadFails = value; },
+    setBillingReadFailAt(value: number) { billingReadFailAt = value; },
     setRevokePaymentDuringPrepare(value: boolean) { revokePaymentDuringPrepare = value; },
     setRevokePaymentAtIntent(value: boolean) { revokePaymentAtIntent = value; },
     setRevokeDuringPrepare(value: boolean) { revokeDuringPrepare = value; },
@@ -140,6 +152,17 @@ describe("cloud queued application bridge", () => {
     expect(h.events).not.toContain("ack");
   });
 
+  it("retries billing outages and corrupt records rather than showing a paywall", async () => {
+    const h = harness();
+    h.setBillingReadFails(true);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
+    expect(h.events).not.toContain("restore");
+    h.setBillingReadFails(false);
+    h.setEntitlement([{ invalid: true }]);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("retry");
+    expect(h.events).not.toContain("click");
+  });
+
   it("rechecks access after preparation and before durable submit intent", async () => {
     const h = harness();
     h.setRevokePaymentDuringPrepare(true);
@@ -155,6 +178,15 @@ describe("cloud queued application bridge", () => {
     h.setRevokePaymentAtIntent(true);
     expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
     expect(h.events).toContain("intent");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
+  });
+
+  it("leaves an intent uncertain when the final billing read fails", async () => {
+    const h = harness();
+    h.setBillingReadFailAt(3);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
     expect(h.events).toContain("uncertain");
     expect(h.events).not.toContain("click");
     expect(h.events).not.toContain("ack");
