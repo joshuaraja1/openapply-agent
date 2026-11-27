@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
 import {
-  artifactObjectKey, CandidateVault, type ArtifactStorePort, type DataKeyPort,
+  artifactObjectKey, receiptObjectKey, CandidateVault, type ArtifactStorePort, type DataKeyPort,
 } from "../src/cloud/candidate-vault.js";
 import { S3ArtifactStore } from "../src/cloud/aws-artifact-store.js";
 
@@ -57,6 +57,15 @@ class FakeObjects implements ArtifactStorePort {
 }
 
 describe("cloud candidate vault", () => {
+  it("stores worker receipts outside immutable reviewed input objects", async () => {
+    const objects = new FakeObjects();
+    const vault = new CandidateVault(new FakeKeys(), objects);
+    await vault.put(alice, resume, Buffer.from("approved resume"));
+    await vault.putReceipt(alice, bob, profile, Buffer.from("confirmation"));
+    expect(objects.versions.has(artifactObjectKey(alice, resume))).toBe(true);
+    expect(objects.versions.has(receiptObjectKey(alice, bob, profile))).toBe(true);
+    expect(objects.versions.has(artifactObjectKey(alice, profile))).toBe(false);
+  });
   it("encrypts artifacts with an authenticated tenant and artifact identity", async () => {
     const keys = new FakeKeys();
     const objects = new FakeObjects();

@@ -6,16 +6,21 @@ import type { SQSClient } from "@aws-sdk/client-sqs";
 import { DynamoHostedRunAdmission, SqsApplicationQueueSender }
   from "../src/cloud/aws-enqueue-ports.js";
 import { encodeCloudRunEnvelope } from "../src/cloud/run-envelope.js";
+import { officialJobKey } from "../src/cloud/durable-journal.js";
 
 const candidateId = "ec5a592a-a5ea-409f-b21b-0064558c72bb";
 const runId = "e4590bf1-91c4-4a63-9203-a8715a68d8d4";
 const pk = `CANDIDATE#${candidateId}`;
-const run = { pk, sk: `RUN#${runId}`, subjectId: "subject-a",
+const run = { pk, sk: `RUN#${runId}`, candidateId, runId, subjectId: "subject-a",
   consentVersion: 2, profileArtifactId: "d1718848-6798-4464-b237-28aa7bd71ef9",
   job: { provider: "Greenhouse", employerId: "acme",
     requisitionId: "42" } };
 const consentKey = `CONSENT#${runId}`;
 const consent = { pk, sk: consentKey, runId, version: 2, state: "granted" };
+const leaseToken = "03d5915b-b52d-41d1-8b99-b70c977e172e";
+const nowEpoch = 1795737600;
+const lease = { pk, sk: "LEASE", ownerToken: leaseToken, runId, expiresAt: nowEpoch + 120 };
+const submissionKey = officialJobKey(run.job);
 
 function admission(rows: Record<string, unknown> = { [run.sk]: run,
   [consentKey]: consent }) {
@@ -54,6 +59,35 @@ describe("durable hosted run admission", () => {
       DELETED: { pk, sk: "DELETED" } }).port.hasCurrentConsent(candidateId, runId)).toBe(false);
     await expect(admission({ [run.sk]: { ...run, subjectId: "" },
       [consentKey]: consent }).port.ownsRun(candidateId, runId)).rejects.toThrow();
+  });
+
+  it("requires stored run identity to match both lookup keys", async () => {
+    for (const row of [{ ...run, candidateId: "00000000-0000-4000-8000-000000000099" },
+      { ...run, runId: "00000000-0000-4000-8000-000000000099" }]) {
+      await expect(admission({ [run.sk]: row }).port.ownsRun(candidateId, runId))
+        .rejects.toThrow("Run key mismatch");
+    }
+  });
+
+  it("fences artifact grants to an active lease and nonterminal submission", async () => {
+    const rows = { [run.sk]: run, [consentKey]: consent, LEASE: lease };
+    expect(await admission(rows).port.hasArtifactGrantEligibility(candidateId, runId,
+      leaseToken, nowEpoch)).toBe(true);
+    const intent = { pk, sk: submissionKey, state: "submit_intent", ownerToken: leaseToken, runId };
+    expect(await admission({ ...rows, [submissionKey]: intent }).port
+      .hasArtifactGrantEligibility(candidateId, runId, leaseToken, nowEpoch)).toBe(true);
+    for (const changed of [
+      { ...rows, LEASE: { ...lease, expiresAt: nowEpoch } },
+      { ...rows, LEASE: { ...lease, ownerToken: "00000000-0000-4000-8000-000000000099" } },
+      { ...rows, LEASE: undefined },
+      { ...rows, [submissionKey]: { ...intent, state: "confirmed" } },
+      { ...rows, [submissionKey]: { ...intent, state: "uncertain" } },
+      { ...rows, [submissionKey]: { ...intent, ownerToken: "00000000-0000-4000-8000-000000000099" } },
+      { ...rows, DELETED: { pk, sk: "DELETED" } },
+    ]) {
+      expect(await admission(changed).port.hasArtifactGrantEligibility(candidateId, runId,
+        leaseToken, nowEpoch)).toBe(false);
+    }
   });
 });
 

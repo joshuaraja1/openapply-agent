@@ -94,7 +94,8 @@ function harness() {
           if (cleanupThrows) throw new Error("private profile cleanup failed");
         } };
       },
-      async put(_candidateId, artifactId) { storedArtifactId = artifactId; events.push("receipt-stored"); },
+      async put(_candidateId, _runId, _leaseToken, artifactId) {
+        storedArtifactId = artifactId; events.push("receipt-stored"); },
     },
     application: {
       async prepare() {
