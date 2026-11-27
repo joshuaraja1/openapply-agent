@@ -41,6 +41,33 @@ Parameters:
     Type: String
     AllowedValues: [ENABLED, DISABLED]
     Default: DISABLED
+  EnableApplicationEnqueue:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  RunLedgerTableName:
+    Type: String
+    Default: ''
+  ApplicationQueueUrl:
+    Type: String
+    Default: ''
+  ApplicationQueueArn:
+    Type: String
+    Default: ''
+
+Conditions:
+  HostedEnqueueEnabled: !Equals [!Ref EnableApplicationEnqueue, 'true']
+
+Rules:
+  HostedEnqueueConfiguration:
+    RuleCondition: !Equals [!Ref EnableApplicationEnqueue, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
+        AssertDescription: Enqueue requires a durable run ledger table.
+      - Assert: !Not [!Equals [!Ref ApplicationQueueUrl, '']]
+        AssertDescription: Enqueue requires a FIFO application queue URL.
+      - Assert: !Not [!Equals [!Ref ApplicationQueueArn, '']]
+        AssertDescription: Enqueue requires the matching queue ARN.
 
 Resources:
   BillingApiRole:
@@ -77,6 +104,19 @@ Resources:
               - Effect: Allow
                 Action: dynamodb:Query
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+        - !If
+          - HostedEnqueueEnabled
+          - PolicyName: OpenApplyHostedEnqueue
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: dynamodb:GetItem
+                  Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+                - Effect: Allow
+                  Action: sqs:SendMessage
+                  Resource: !Ref ApplicationQueueArn
+          - !Ref AWS::NoValue
 
   BillingReplayRole:
     Type: AWS::IAM::Role
@@ -146,6 +186,9 @@ Resources:
           COGNITO_ISSUER: !Ref CognitoIssuer
           COGNITO_CLIENT_ID: !Ref CognitoClientId
           COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          ENQUEUE_ENABLED: !Ref EnableApplicationEnqueue
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          APPLICATION_QUEUE_URL: !Ref ApplicationQueueUrl
 
   BillingReplayFunction:
     Type: AWS::Lambda::Function
@@ -207,6 +250,22 @@ Resources:
       RouteKey: 'POST /api/billing/stripe-webhook'
       Target: !Sub 'integrations/${BillingHttpIntegration}'
 
+  ApplicationEnqueueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedEnqueueEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/applications/enqueue'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  ApplicationEnqueuePreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedEnqueueEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/applications/enqueue'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
   BillingHttpStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
@@ -232,6 +291,24 @@ Resources:
       FunctionName: !Ref BillingApiFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/billing/checkout'
+
+  ApplicationEnqueuePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedEnqueueEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/applications/enqueue'
+
+  ApplicationEnqueuePreflightPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedEnqueueEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/applications/enqueue'
 
   BillingReplaySchedule:
     Type: AWS::Events::Rule

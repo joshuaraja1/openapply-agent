@@ -38,7 +38,9 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   }
   const header = (name: string) => Object.entries(event.headers ?? {})
     .find(([key]) => key.toLowerCase() === name)?.[1];
-  if (event.rawPath === "/api/billing/checkout" && method === "OPTIONS") {
+  const browserRoute = event.rawPath === "/api/billing/checkout"
+    || event.rawPath === "/api/applications/enqueue";
+  if (browserRoute && method === "OPTIONS") {
     const requestedHeaders = (header("access-control-request-headers") ?? "")
       .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
     const allowed = header("origin") === origin.origin
@@ -61,7 +63,7 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   const response = await runtime.handleRequest(request);
   const bytes = Buffer.from(await response.arrayBuffer());
   const headers = Object.fromEntries(response.headers.entries());
-  if (event.rawPath === "/api/billing/checkout" && header("origin") === origin.origin) {
+  if (browserRoute && header("origin") === origin.origin) {
     headers["access-control-allow-origin"] = origin.origin;
     headers.vary = "Origin";
   }
