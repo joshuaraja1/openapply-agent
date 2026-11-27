@@ -65,6 +65,15 @@ describe("trusted hosted application run", () => {
     await expect(createTrustedApplicationRun(issuer, subjectId, body, expired, now)).rejects.toThrow();
   });
 
+  it("rejects a malformed trusted lead URL before writing a run", async () => {
+    const ports = fixture();
+    ports.loadLead.mockResolvedValueOnce({ leadId, job, jobKey: officialJobKey(job),
+      canonicalUrl: "not-a-url", expiresAt: 1795737600 });
+    await expect(createTrustedApplicationRun(issuer, subjectId, body, ports, now))
+      .rejects.toThrow("Verified application inputs unavailable");
+    expect(ports.createOrGet).not.toHaveBeenCalled();
+  });
+
   it("authenticates before loading inputs and requires explicit consent", async () => {
     const ports = fixture();
     const request = new Request("https://app.example.com/api/applications/runs", { method: "POST",
