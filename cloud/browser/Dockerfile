@@ -11,8 +11,10 @@ RUN npm ci --include=dev \
 COPY tsconfig.json vitest.config.ts ./
 COPY src ./src
 COPY test ./test
+COPY templates/resume/main.tex ./templates/resume/main.tex
 
 RUN npm run build \
+    && OPENAPPLY_RUN_BROWSER_E2E=1 npx vitest run test/hosted-pre-submit-preview.e2e.test.ts \
     && npm prune --omit=dev \
     && rm -rf src test dist/test \
     && groupadd --system --gid 10001 openapply \
