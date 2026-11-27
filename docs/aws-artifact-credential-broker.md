@@ -7,7 +7,9 @@ remain disabled.
 ## Boundary
 
 The Fargate task role receives permission to invoke only the artifact broker
-Lambda. It must not have direct S3 or KMS permissions. A trusted task launcher
+Lambda. It must not have direct DynamoDB, SQS, S3, KMS, or STS permissions;
+durable run operations use the broker's explicit method allowlist described in
+`docs/aws-run-state-broker-staging.md`. A trusted task launcher
 checks the durable run, retrieves a 256-bit signing key from Secrets Manager,
 and mints a random, HMAC-authenticated capability for one candidate and run.
 It passes that capability privately in the ECS task override; SQS carries only
