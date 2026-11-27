@@ -1,4 +1,5 @@
 import { createCognitoBrowserAuth } from '/cognito-browser-auth.js';
+import { stripeTestCheckoutUrl } from '/checkout-url.mjs';
 
 const status = document.querySelector('#status');
 const signIn = document.querySelector('#sign-in');
@@ -34,11 +35,7 @@ try {
         });
         if (!result.ok) throw new Error('Checkout unavailable');
         const payload = await result.json();
-        const checkout = new URL(payload.checkoutUrl);
-        if (checkout.protocol !== 'https:' || checkout.hostname !== 'checkout.stripe.com') {
-          throw new Error('Invalid checkout URL');
-        }
-        location.assign(checkout.href);
+        location.assign(stripeTestCheckoutUrl(payload.checkoutUrl));
       } catch {
         status.textContent = 'Test checkout is unavailable. Please try later.';
         button.disabled = false;

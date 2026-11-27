@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 const source = resolve('cloud/staging-login');
 const target = resolve('cloud/staging-login-dist');
 await mkdir(resolve(target, 'auth/callback'), { recursive: true });
-for (const file of ['index.html', 'style.css', 'login.js', '_headers', '_redirects']) {
+for (const file of ['index.html', 'style.css', 'login.js', 'checkout-url.mjs', '_headers', '_redirects']) {
   await copyFile(resolve(source, file), resolve(target, file));
 }
 await copyFile(resolve(source, 'index.html'), resolve(target, 'auth/callback/index.html'));

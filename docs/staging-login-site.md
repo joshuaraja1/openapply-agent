@@ -44,7 +44,8 @@ verify the token signature and current entitlement.
 The two Stripe **test-mode** checkout buttons appear only if
 `OPENAPPLY_STAGING_CHECKOUT_ENABLED=true` is set during the build. They call
 same-origin `/api/billing/checkout` with the in-memory ID token, then navigate
-to the verified Stripe Checkout URL. This page has no card fields and persists
+only to a `checkout.stripe.com` URL containing a `cs_test_` session ID; a live
+session URL is rejected. This page has no card fields and persists
 no payment credentials. Enable the buttons only after the hosted AWS API and
 Worker proxy are tested.
 
