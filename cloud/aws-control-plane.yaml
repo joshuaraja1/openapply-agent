@@ -46,6 +46,10 @@ Resources:
           AttributeType: S
         - AttributeName: gsi1sk
           AttributeType: S
+        - AttributeName: deletionIndexPk
+          AttributeType: S
+        - AttributeName: deletionDue
+          AttributeType: N
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
@@ -60,6 +64,15 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: DeletionDueIndex
+          KeySchema:
+            - AttributeName: deletionIndexPk
+              KeyType: HASH
+            - AttributeName: deletionDue
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes: [candidateId, subjectId, state]
       SSESpecification:
         SSEEnabled: true
       PointInTimeRecoverySpecification:

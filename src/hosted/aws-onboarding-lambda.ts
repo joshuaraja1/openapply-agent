@@ -2,12 +2,17 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
+import { STSClient } from "@aws-sdk/client-sts";
 import { candidateIdForSubject } from "../cloud/hosted-run-creator.js";
 import { CandidateVault } from "../cloud/candidate-vault.js";
 import { KmsDataKeys, S3ArtifactStore } from "../cloud/aws-artifact-store.js";
 import { DynamoOnboardingMarkers } from "./aws-onboarding-store.js";
+import { DynamoCandidateDeletionStore } from "./aws-candidate-deletion-store.js";
+import { AssumeRoleCandidatePurger } from "./aws-candidate-purger.js";
 import { DynamoCandidatePlanStatus } from "./aws-plan-status.js";
 import { handleCandidateOnboardingHttp } from "./candidate-onboarding-http.js";
+import { handleCandidateDeletionHttp } from "./candidate-deletion-http.js";
+import { retryCandidateDeletions } from "./candidate-deletion.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 
@@ -31,12 +36,37 @@ function runtime() {
   const vault = new CandidateVault(new KmsDataKeys(new KMSClient({}), required("CANDIDATE_KMS_KEY_ARN")),
     new S3ArtifactStore(new S3Client({}), required("PRIVATE_ARTIFACT_BUCKET")));
   const markers = new DynamoOnboardingMarkers(db, required("RUN_LEDGER_TABLE_NAME"));
+  const deletion = new DynamoCandidateDeletionStore(db, required("RUN_LEDGER_TABLE_NAME"));
   const plans = new DynamoCandidatePlanStatus(db, required("ENTITLEMENT_TABLE_NAME"));
-  return { handleRequest: (request: Request) => handleCandidateOnboardingHttp(request, {
+  const candidateId = (subject: string) => candidateIdForSubject(issuer, subject);
+  const deletionVault = process.env.CANDIDATE_DELETION_ENABLED === "true"
+    ? new AssumeRoleCandidatePurger(new STSClient({}), required("CANDIDATE_PURGE_ROLE_ARN"),
+      required("PRIVATE_ARTIFACT_BUCKET")) : vault;
+  const deletionDeps = { appOrigin, verifySubject, store: deletion, vault: deletionVault,
+    candidateIdForSubject: candidateId };
+  return { handleRequest: async (request: Request) => ["/api/candidates/delete",
+    "/api/candidates/deletion-status"].includes(new URL(request.url).pathname)
+    ? process.env.CANDIDATE_DELETION_ENABLED === "true"
+      ? handleCandidateDeletionHttp(request, deletionDeps)
+      : new Response("", { status: 404, headers: { "cache-control": "no-store" } })
+    : handleCandidateOnboardingHttp(request, {
     appOrigin, verifySubject, vault, markers,
     loadEntitlements: (subject: string) => plans.loadEntitlements(subject),
-    candidateIdForSubject: (subject: string) => candidateIdForSubject(issuer, subject),
-  }), processReady: async () => ({ processed: 0, deferred: 0 }) };
+    candidateIdForSubject: candidateId,
+  }), processReady: async () => ({ processed: 0, deferred: 0 }),
+    retryDeletions: () => retryCandidateDeletions(deletionDeps) };
+}
+
+/** Only the dedicated EventBridge rule can invoke this entry point. */
+export async function retryHandler(event: { source?: string; "detail-type"?: string }) {
+  if (process.env.CANDIDATE_DELETION_ENABLED !== "true"
+    || event.source !== "aws.events" || event["detail-type"] !== "Scheduled Event") {
+    throw new Error("Deletion retry is disabled or event is invalid");
+  }
+  cached ??= runtime();
+  const result = await cached.retryDeletions();
+  if (result.malformed) console.error(`Deletion retry deferred ${result.malformed} invalid index rows`);
+  return result;
 }
 
 let cached: ReturnType<typeof runtime> | undefined;
@@ -49,4 +79,14 @@ export async function handler(event: HttpApiEvent) {
     return { statusCode: 503, headers: { "cache-control": "no-store" },
       body: "", isBase64Encoded: true as const };
   }
+}
+
+/** Dedicated API integration; cannot serve onboarding or plan requests. */
+export async function deletionHandler(event: HttpApiEvent) {
+  if (process.env.CANDIDATE_DELETION_ENABLED !== "true"
+    || !["/api/candidates/delete", "/api/candidates/deletion-status"].includes(event.rawPath)) {
+    return { statusCode: 404, headers: { "cache-control": "no-store" },
+      body: "", isBase64Encoded: true as const };
+  }
+  return handler(event);
 }

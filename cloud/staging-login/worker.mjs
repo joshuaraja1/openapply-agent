@@ -11,10 +11,15 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       const onboarding = url.pathname === '/api/candidates/onboarding';
       const plan = url.pathname === '/api/candidates/plan';
-      if ((!onboarding && !plan && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
+      const deletion = url.pathname === '/api/candidates/delete'
+        || url.pathname === '/api/candidates/deletion-status';
+      if (deletion && env.CANDIDATE_DELETION_ENABLED !== 'true') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      const apiOrigin = onboarding || plan ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
+      if ((!onboarding && !plan && !deletion && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
+        return new Response('Not found', { status: 404, headers: securityHeaders });
+      }
+      const apiOrigin = onboarding || plan || deletion ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
       if (!apiOrigin) {
         return new Response('API not configured', { status: 503, headers: securityHeaders });
       }
@@ -51,7 +56,8 @@ export default {
       upstream.pathname = url.pathname;
       try {
         const response = await fetch(upstream, {
-          method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(onboarding ? 60_000 : 10_000),
+          method: 'POST', body, redirect: 'manual',
+          signal: AbortSignal.timeout(onboarding ? 60_000 : deletion ? 65_000 : 10_000),
           headers: {
             'authorization': request.headers.get('authorization'),
             'content-type': request.headers.get('content-type'),

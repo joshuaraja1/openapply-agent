@@ -187,17 +187,20 @@ describe("S3 version purge", () => {
   it("walks all version and delete-marker pages but deletes only the exact key", async () => {
     const key = artifactObjectKey(alice, resume);
     const deleted: { Key?: string | undefined; VersionId?: string | undefined }[] = [];
+    const remaining = new Set(["v2", "v1", "deleted"]);
     const send = vi.fn(async (command: unknown) => {
       if (command instanceof ListObjectVersionsCommand) {
-        if (!command.input.KeyMarker) return {
+        if (remaining.has("v2")) return {
           Versions: [{ Key: key, VersionId: "v2" }, { Key: key + "-other", VersionId: "wrong" }],
           IsTruncated: true, NextKeyMarker: key, NextVersionIdMarker: "v2",
         };
-        return { Versions: [{ Key: key, VersionId: "v1" }],
-          DeleteMarkers: [{ Key: key, VersionId: "deleted" }], IsTruncated: false };
+        return { Versions: remaining.has("v1") ? [{ Key: key, VersionId: "v1" }] : [],
+          DeleteMarkers: remaining.has("deleted") ? [{ Key: key, VersionId: "deleted" }] : [],
+          IsTruncated: false };
       }
       if (command instanceof DeleteObjectsCommand) {
         deleted.push(...(command.input.Delete?.Objects ?? []));
+        for (const item of command.input.Delete?.Objects ?? []) remaining.delete(item.VersionId ?? "");
         return {};
       }
       throw new Error("Unexpected AWS command");
@@ -230,17 +233,19 @@ describe("S3 version purge", () => {
     const prefix = `candidates/${alice}/`;
     const other = artifactObjectKey(bob, resume);
     const deleted: string[] = [];
+    const remaining = new Set(["v1", "v2"]);
     const send = vi.fn(async (command: unknown) => {
       if (command instanceof ListObjectVersionsCommand) return {
         Versions: [
-          { Key: artifactObjectKey(alice, resume), VersionId: "v1" },
-          { Key: artifactObjectKey(alice, profile), VersionId: "v2" },
+          ...(remaining.has("v1") ? [{ Key: artifactObjectKey(alice, resume), VersionId: "v1" }] : []),
+          ...(remaining.has("v2") ? [{ Key: artifactObjectKey(alice, profile), VersionId: "v2" }] : []),
           { Key: other, VersionId: "foreign" },
         ],
         IsTruncated: false,
       };
       if (command instanceof DeleteObjectsCommand) {
         deleted.push(...(command.input.Delete?.Objects ?? []).map((item) => item.Key ?? ""));
+        for (const item of command.input.Delete?.Objects ?? []) remaining.delete(item.VersionId ?? "");
         return {};
       }
       throw new Error("Unexpected AWS command");
@@ -248,5 +253,55 @@ describe("S3 version purge", () => {
     const store = new S3ArtifactStore({ send } as unknown as S3Client, "private-bucket");
     await store.purgeVersions(prefix, false);
     expect(deleted.sort()).toEqual([artifactObjectKey(alice, resume), artifactObjectKey(alice, profile)].sort());
+  });
+
+  it("deletes a bounded version page and relists so later pages cannot be skipped", async () => {
+    const prefix = `candidates/${alice}/`;
+    const key = artifactObjectKey(alice, resume);
+    let remaining = 1500;
+    let maxDelete = 0;
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof ListObjectVersionsCommand) {
+        expect(command.input.KeyMarker).toBeUndefined();
+        const pageSize = Math.min(1000, remaining);
+        return { Versions: Array.from({ length: pageSize }, (_, index) => ({
+          Key: key, VersionId: `v${remaining - index}` })), IsTruncated: remaining > pageSize };
+      }
+      if (command instanceof DeleteObjectsCommand) {
+        const count = command.input.Delete?.Objects?.length ?? 0;
+        maxDelete = Math.max(maxDelete, count);
+        remaining -= count;
+        return {};
+      }
+      throw new Error("Unexpected AWS command");
+    });
+    const store = new S3ArtifactStore({ send } as unknown as S3Client, "private-bucket");
+    await store.purgeVersions(prefix, false);
+    expect(remaining).toBe(0);
+    expect(maxDelete).toBe(1000);
+    expect(send.mock.calls.filter(([command]) => command instanceof DeleteObjectsCommand)).toHaveLength(2);
+  });
+
+  it("advances past nonmatching exact-key pages without deleting them", async () => {
+    const key = artifactObjectKey(alice, resume);
+    let exactPresent = true;
+    const deleted: string[] = [];
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof ListObjectVersionsCommand) {
+        if (!command.input.KeyMarker) return { Versions: [{ Key: `${key}-other`, VersionId: "other" }],
+          IsTruncated: exactPresent, NextKeyMarker: "next", NextVersionIdMarker: "other" };
+        return { Versions: exactPresent ? [{ Key: key, VersionId: "exact" }] : [],
+          IsTruncated: false };
+      }
+      if (command instanceof DeleteObjectsCommand) {
+        deleted.push(...(command.input.Delete?.Objects ?? []).map(item => item.VersionId ?? ""));
+        exactPresent = false;
+        return {};
+      }
+      throw new Error("Unexpected AWS command");
+    });
+    const store = new S3ArtifactStore({ send } as unknown as S3Client, "private-bucket");
+    await store.purgeVersions(key, true);
+    expect(deleted).toEqual(["exact"]);
   });
 });

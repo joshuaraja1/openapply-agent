@@ -21,6 +21,8 @@ function deps() {
     vault: { put, read: vi.fn(async () => Buffer.alloc(0)) },
     markers: {
       isDeleted: vi.fn(async () => false),
+      beginUpload: vi.fn(async () => "test-upload-lease"),
+      endUpload: vi.fn(async () => {}),
       get: vi.fn(async (_candidate: string, id: string) => markers.get(id) ?? null),
       createPending: vi.fn(async (_candidate: string, id: string, subject: string, digest: string) => {
         markers.set(id, { status: "pending", subjectId: subject, digest });
