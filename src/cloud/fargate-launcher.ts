@@ -10,6 +10,7 @@ const launchRow = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid, capability: z.string().min(1).optional(),
   clientToken: z.string().length(64), configHash: z.string().length(64),
   reservedAt: z.number().int().positive(), taskArn: arn.optional(),
+  generation: z.number().int().nonnegative().max(2).default(0),
   state: z.enum(["reserved", "started", "stopped"]) });
 type LaunchRow = z.infer<typeof launchRow>;
 
@@ -110,6 +111,37 @@ export class DynamoFargateLaunchStore {
 
   async reserve(row: LaunchRow): Promise<"created" | "existing" | "busy"> {
     const existing = await this.read(row.candidateId, row.runId);
+    if (existing?.state === "stopped") {
+      if (existing.generation >= 2) return "existing";
+      const generation = existing.generation + 1;
+      const clientToken = createHash("sha256")
+        .update(`${row.candidateId}:${row.runId}:${generation}`).digest("hex");
+      const retry = { ...row, generation, clientToken };
+      try {
+        await this.db.send(new TransactWriteCommand({ TransactItems: [
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk: row.pk, sk: "DELETED" },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+          { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
+            UpdateExpression: "SET #state=:reserved, capability=:capability, clientToken=:newToken, reservedAt=:time, generation=:generation REMOVE taskArn",
+            ConditionExpression: "#state=:stopped AND clientToken=:oldToken AND configHash=:hash",
+            ExpressionAttributeNames: { "#state": "state" },
+            ExpressionAttributeValues: { ":reserved": "reserved", ":stopped": "stopped",
+              ":capability": row.capability, ":newToken": clientToken,
+              ":oldToken": existing.clientToken, ":time": row.reservedAt,
+              ":generation": generation, ":hash": row.configHash } } },
+          { Put: { TableName: this.table, Item: { ...slotKey,
+            candidateId: row.candidateId, runId: row.runId,
+            clientToken, reservedAt: row.reservedAt },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+        ] }));
+        return "created";
+      } catch (error) {
+        const name = (error as { name?: string }).name;
+        if (name !== "TransactionCanceledException" && name !== "ConditionalCheckFailedException") throw error;
+        return await this.read(row.candidateId, row.runId) ? "existing" : "busy";
+      }
+    }
     if (existing) return "existing";
     try {
       await this.db.send(new TransactWriteCommand({ TransactItems: [
@@ -199,7 +231,7 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
     clientToken, configHash, reservedAt: nowEpoch, state: "reserved" });
   const result = await ports.store.reserve(fresh);
   if (result === "busy") return "capacity_busy";
-  const row = result === "existing" ? await ports.store.read(candidateId, runId) : fresh;
+  const row = await ports.store.read(candidateId, runId);
   if (!row || row.configHash !== configHash || row.clientToken !== clientToken) {
     throw new Error("Existing launch configuration differs");
   }

@@ -114,6 +114,20 @@ export class DynamoApplicationDispatchStore {
         ":launched": "launched" } }));
   }
 
+  async markRetryable(candidateId: string, runId: string): Promise<void> {
+    const row = await this.read(candidateId, runId);
+    if (!row || (row.state !== "launched" && row.state !== "queued")) {
+      throw new Error("Dispatch cannot be retried");
+    }
+    await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
+      UpdateExpression: "SET #state=:queued, gsi1pk=:index, gsi1sk=:order",
+      ConditionExpression: "#state IN (:launched, :queued)",
+      ExpressionAttributeNames: { "#state": "state" },
+      ExpressionAttributeValues: { ":queued": "queued", ":launched": "launched",
+        ":index": "APPLICATION_DISPATCH",
+        ":order": `${row.createdAt}#${candidateId}#${runId}` } }));
+  }
+
   async markBlocked(candidateId: string, runId: string): Promise<void> {
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:blocked REMOVE gsi1pk, gsi1sk",
@@ -126,9 +140,9 @@ export class DynamoApplicationDispatchStore {
   async markNeedsReconciliation(candidateId: string, runId: string): Promise<void> {
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:review REMOVE gsi1pk, gsi1sk",
-      ConditionExpression: "#state IN (:queued, :launched)",
+      ConditionExpression: "#state IN (:pending, :queued, :launched)",
       ExpressionAttributeNames: { "#state": "state" },
-      ExpressionAttributeValues: { ":review": "needs_reconciliation", ":queued": "queued",
+      ExpressionAttributeValues: { ":review": "needs_reconciliation", ":pending": "pending_queue", ":queued": "queued",
         ":launched": "launched" } }));
   }
 

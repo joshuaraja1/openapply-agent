@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DescribeTasksCommand, ListTasksCommand, RunTaskCommand, StopTaskCommand, type ECSClient } from "@aws-sdk/client-ecs";
+import { GetCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { DynamoFargateLaunchStore, launchQueuedFargateRun, stopCandidateFargateTask,
   stopFargateRun, sweepFargateSlot,
   type FargateLaunchConfig } from "../src/cloud/fargate-launcher.js";
@@ -71,6 +72,41 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("reserves a fresh ECS token only after an observed stopped task", async () => {
+    const oldToken = "a".repeat(64);
+    let row: Record<string, unknown> = {
+      pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "stopped", generation: 0,
+      clientToken: oldToken, configHash: "b".repeat(64), reservedAt: 1_800_000_000,
+    };
+    const sent: unknown[] = [];
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      sent.push(command);
+      if (command instanceof GetCommand) return { Item: row };
+      if (command instanceof TransactWriteCommand) {
+        const entries = command.input.TransactItems ?? [];
+        expect(entries[0]?.ConditionCheck?.Key).toEqual({ pk: row.pk, sk: "DELETED" });
+        expect(entries[1]?.Update?.ConditionExpression).toContain("#state=:stopped");
+        const values = entries[1]?.Update?.ExpressionAttributeValues as Record<string, unknown>;
+        expect(values[":oldToken"]).toBe(oldToken);
+        expect(values[":newToken"]).not.toBe(oldToken);
+        row = { ...row, state: "reserved", capability: "new-capability",
+          clientToken: values[":newToken"], generation: values[":generation"],
+          reservedAt: values[":time"] };
+        return {};
+      }
+      throw new Error("Unexpected Dynamo command");
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    const result = await store.reserve({ ...row, state: "reserved", capability: "new-capability",
+      reservedAt: 1_800_000_030 } as Parameters<DynamoFargateLaunchStore["reserve"]>[0]);
+    expect(result).toBe("created");
+    expect(row.generation).toBe(1);
+    expect(row.clientToken).not.toBe(oldToken);
+    expect(sent.some(command => command instanceof TransactWriteCommand)).toBe(true);
+  });
   it("is disabled by default before touching any port", async () => {
     const h = harness();
     await expect(launchQueuedFargateRun(candidateId, runId,

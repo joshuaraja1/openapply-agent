@@ -42,6 +42,31 @@ function harness() {
 }
 
 describe("durable application outbox dispatch", () => {
+  it("reindexes only the exact stopped run for a pre-intent retry", async () => {
+    const launched: DurableDispatchRecord = {
+      pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}`,
+      candidateId, runId, state: "launched", body: encoded.body,
+      groupId: encoded.groupId, deduplicationId: encoded.deduplicationId,
+      createdAt: "2026-11-26T20:00:00.000Z",
+    };
+    const send = vi.fn(async (command: GetCommand | UpdateCommand) => {
+      if (command instanceof GetCommand) {
+        expect(command.input.Key).toEqual({ pk: launched.pk, sk: launched.sk });
+        return { Item: launched };
+      }
+      expect(command).toBeInstanceOf(UpdateCommand);
+      expect(command.input.Key).toEqual({ pk: launched.pk, sk: launched.sk });
+      expect(command.input.ConditionExpression).toBe("#state IN (:launched, :queued)");
+      expect(command.input.ExpressionAttributeValues?.[":order"])
+        .toBe(`${launched.createdAt}#${candidateId}#${runId}`);
+      return {};
+    });
+    const store = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markRetryable(candidateId, runId);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
   it("retries entitlement read failures without blocking a queued run", async () => {
     const h = harness();
     h.authorize.mockImplementationOnce(() => confirmedHostedAccess("sub-a", async () => {

@@ -7,6 +7,7 @@ import { HostedAccessDeniedError, requireHostedAccess } from "../hosted/entitlem
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { DynamoApplicationDispatchStore, dispatchOnePendingApplication } from "./aws-durable-dispatch.js";
+import { DurableApplicationJournal } from "./durable-journal.js";
 import { DynamoFargateLaunchStore, launchQueuedFargateRun, sweepFargateSlot,
   type FargateLaunchConfig } from "./fargate-launcher.js";
 
@@ -98,7 +99,16 @@ async function sweepHandler(config: FargateLaunchConfig) {
   const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   const store = new DynamoFargateLaunchStore(db, config.ledgerTable);
   const ecs = new ECSClient({});
+  const priorSlot = await store.readActiveSlot();
   const sweep = await sweepFargateSlot(config, { store, ecs });
+  if (sweep === "stopped" && priorSlot) {
+    await reconcileStoppedDispatch(priorSlot.candidateId, priorSlot.runId, {
+      dispatch: new DynamoApplicationDispatchStore(db, config.ledgerTable),
+      admission: new DynamoHostedRunAdmission(db, config.ledgerTable),
+      journal: new DurableApplicationJournal(db, config.ledgerTable),
+      launch: store,
+    });
+  }
   if (sweep === "waiting" || sweep === "stopping") return { status: sweep };
   const secret = await readSigningKey();
   try {
@@ -112,4 +122,32 @@ async function sweepHandler(config: FargateLaunchConfig) {
     });
     return { status: sweep, dispatch };
   } finally { secret.fill(0); }
+}
+
+/** A stopped browser task cannot be relaunched with its old capability.
+ * Repair a confirmed run; hold every other outcome for explicit review. */
+export async function reconcileStoppedDispatch(candidateId: string, runId: string, ports: {
+  dispatch: Pick<DynamoApplicationDispatchStore, "read" | "markCompleted" | "markNeedsReconciliation" | "markRetryable">;
+  admission: Pick<DynamoHostedRunAdmission, "loadIdentity">;
+  journal: Pick<DurableApplicationJournal, "readSubmission">;
+  launch: Pick<DynamoFargateLaunchStore, "read">;
+}): Promise<"absent" | "completed" | "retryable" | "needs_reconciliation"> {
+  const row = await ports.dispatch.read(candidateId, runId);
+  if (!row) return "absent";
+  if (row.state === "completed") return "completed";
+  if (row.state === "needs_reconciliation" || row.state === "blocked") return "needs_reconciliation";
+  const record = await ports.admission.loadIdentity(candidateId, runId);
+  const submission = await ports.journal.readSubmission(candidateId, record.job);
+  if (submission.status === "confirmed") {
+    await ports.dispatch.markCompleted(candidateId, runId);
+    return "completed";
+  }
+  const launched = await ports.launch.read(candidateId, runId);
+  if (submission.status === "not_started" && launched?.state === "stopped"
+    && launched.generation < 2) {
+    await ports.dispatch.markRetryable(candidateId, runId);
+    return "retryable";
+  }
+  await ports.dispatch.markNeedsReconciliation(candidateId, runId);
+  return "needs_reconciliation";
 }

@@ -29,10 +29,6 @@ Parameters:
   ArtifactBrokerArn:
     Type: String
     Default: ''
-  ApplicationQueueName:
-    Type: String
-    Default: openapply-staging-application.fifo
-    AllowedValues: [openapply-staging-application.fifo]
 
 Conditions:
   TaskEnabled: !Equals [!Ref EnableSyntheticQueueTask, 'true']
