@@ -14,7 +14,7 @@ const grant = { kind: "free-grant", subjectId: "candidate-a", grantId: "grant-a"
 
 function storeWith(send: (command: unknown) => Promise<unknown>) {
   return new DynamoBillingStore({ send } as unknown as Pick<DynamoDBDocumentClient, "send">,
-    "test-billing", now);
+    "test-billing", "test-entitlements", now);
 }
 
 describe("DynamoDB billing state", () => {
@@ -113,6 +113,18 @@ describe("DynamoDB billing state", () => {
     await expect(broken.hasPaidAccess("candidate-a")).rejects.toThrow("key does not match");
   });
 
+  it("uses a separate entitlement table and refuses a shared-table deployment", async () => {
+    const send = vi.fn(async (command: unknown) => {
+      if (!(command instanceof QueryCommand)) throw new Error("expected Query");
+      expect(command.input.TableName).toBe("test-entitlements");
+      expect(command.input.ConsistentRead).toBe(true);
+      return { Items: [] };
+    });
+    await storeWith(send).loadEntitlements("candidate-a");
+    expect(() => new DynamoBillingStore({ send } as unknown as Pick<DynamoDBDocumentClient,
+      "send">, "same", "same", now)).toThrow("Separate");
+  });
+
   it("replaces paid rows under a customer lock without touching free grants", async () => {
     let transaction: TransactWriteCommand | undefined;
     const store = storeWith(async command => {
@@ -129,6 +141,8 @@ describe("DynamoDB billing state", () => {
     expect(ops).toHaveLength(2);
     expect(ops[0]?.ConditionCheck?.Key).toEqual({ pk: "CUSTOMER#cus_1",
       sk: "RECONCILE_LOCK" });
+    expect(ops[0]?.ConditionCheck?.TableName).toBe("test-billing");
+    expect(ops[1]?.Put?.TableName).toBe("test-entitlements");
     expect(ops[1]?.Put?.Item?.sk).toBe("ENTITLEMENT#semester#cs_test_1");
     expect(ops.some(op => op.Delete?.Key?.sk === "ENTITLEMENT#free-grant#grant-a"))
       .toBe(false);

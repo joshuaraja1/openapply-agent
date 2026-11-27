@@ -17,7 +17,7 @@ function signedEvent(type: string, id: string, customer: unknown = "cus_test_1",
 }
 
 const binding = { subjectId: "candidate-a", customerId: "cus_test_1" };
-const current = { customerId: "cus_test_1", subscriptionId: "sub_test_1",
+const current = { customerId: "cus_test_1", subjectId: "candidate-a", subscriptionId: "sub_test_1",
   status: "active" as const, startsAt: "2026-11-01T00:00:00Z",
   endsAt: "2026-12-01T00:00:00Z", settledInvoiceId: "in_test_1",
   paidThrough: "2026-12-01T00:00:00Z", paymentReversed: false };
@@ -99,6 +99,10 @@ describe("Stripe billing event boundary", () => {
     expect(projectPaidStripeAccess(binding, { ...current, paymentReversed: true }))
       .toBeUndefined();
     expect(() => projectPaidStripeAccess({ ...binding, customerId: "cus_other" }, current))
+      .toThrow("not bound");
+    expect(() => projectPaidStripeAccess(binding, { ...current, subjectId: "candidate-other" }))
+      .toThrow("not bound");
+    expect(() => projectPaidStripeAccess(binding, { ...current, subjectId: "" }))
       .toThrow("not bound");
   });
 

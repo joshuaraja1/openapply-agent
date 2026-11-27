@@ -7,6 +7,7 @@ const stripe = new Stripe("sk_test_local");
 const webhookSecret = "whsec_localonly";
 const config = {
   tableName: "openapply-staging-billing",
+  entitlementTableName: "openapply-staging-entitlements",
   checkout: {
     prices: { monthly: { id: "price_monthly", amountCents: 3900 },
       semester: { id: "price_semester", amountCents: 12900 } },

@@ -9,8 +9,9 @@ Parameters:
   BillingTableName:
     Type: String
     Default: openapply-staging-billing
-  BillingAccessPolicyArn:
+  EntitlementTableName:
     Type: String
+    Default: openapply-staging-entitlements
   StripeTestSecretArn:
     Type: String
   StripeWebhookSecretArn:
@@ -30,9 +31,13 @@ Parameters:
     Type: String
   CognitoJwksUrl:
     Type: String
+  ReplayScheduleState:
+    Type: String
+    AllowedValues: [ENABLED, DISABLED]
+    Default: DISABLED
 
 Resources:
-  BillingLambdaRole:
+  BillingApiRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -43,7 +48,6 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - !Ref BillingAccessPolicyArn
       Policies:
         - PolicyName: OpenApplyBillingSecrets
           PolicyDocument:
@@ -54,6 +58,63 @@ Resources:
                 Resource:
                   - !Ref StripeTestSecretArn
                   - !Ref StripeWebhookSecretArn
+        - PolicyName: OpenApplyApiJournalWrites
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+
+  BillingReplayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyBillingSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripeTestSecretArn
+                  - !Ref StripeWebhookSecretArn
+        - PolicyName: OpenApplyReconciliationState
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}/index/gsi1'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
 
   BillingApiFunction:
     Type: AWS::Lambda::Function
@@ -61,7 +122,7 @@ Resources:
       FunctionName: openapply-staging-billing-api
       Runtime: nodejs22.x
       Handler: aws-billing-lambda.handler
-      Role: !GetAtt BillingLambdaRole.Arn
+      Role: !GetAtt BillingApiRole.Arn
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
       MemorySize: 512
       Timeout: 30
@@ -71,6 +132,7 @@ Resources:
           STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
           BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           APP_ORIGIN: !Ref AppOrigin
           MONTHLY_PRICE_ID: !Ref MonthlyPriceId
           SEMESTER_PRICE_ID: !Ref SemesterPriceId
@@ -84,7 +146,7 @@ Resources:
       FunctionName: openapply-staging-billing-replay
       Runtime: nodejs22.x
       Handler: aws-billing-lambda.scheduledHandler
-      Role: !GetAtt BillingLambdaRole.Arn
+      Role: !GetAtt BillingReplayRole.Arn
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
       MemorySize: 512
       Timeout: 120
@@ -94,6 +156,7 @@ Resources:
           STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
           STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
           BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           APP_ORIGIN: !Ref AppOrigin
           MONTHLY_PRICE_ID: !Ref MonthlyPriceId
           SEMESTER_PRICE_ID: !Ref SemesterPriceId
@@ -167,7 +230,7 @@ Resources:
     Properties:
       Name: openapply-staging-billing-replay
       ScheduleExpression: rate(1 minute)
-      State: ENABLED
+      State: !Ref ReplayScheduleState
       Targets:
         - Arn: !GetAtt BillingReplayFunction.Arn
           Id: BillingReplay

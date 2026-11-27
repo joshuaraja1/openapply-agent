@@ -39,6 +39,28 @@ Resources:
         - { Key: app, Value: openapply }
         - { Key: environment, Value: staging }
 
+  HostedEntitlementTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: openapply-staging-entitlements
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - { Key: app, Value: openapply }
+        - { Key: environment, Value: staging }
+        - { Key: data, Value: paid-entitlements }
+
   HostedBillingAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -55,6 +77,7 @@ Resources:
               - dynamodb:DeleteItem
               - dynamodb:Query
               - dynamodb:TransactWriteItems
+              - dynamodb:ConditionCheckItem
             Resource: !GetAtt HostedBillingTable.Arn
           - Sid: PendingEventIndex
             Effect: Allow
@@ -66,5 +89,9 @@ Outputs:
     Value: !Ref HostedBillingTable
   BillingTableArn:
     Value: !GetAtt HostedBillingTable.Arn
+  EntitlementTableName:
+    Value: !Ref HostedEntitlementTable
+  EntitlementTableArn:
+    Value: !GetAtt HostedEntitlementTable.Arn
   BillingAccessPolicyArn:
     Value: !Ref HostedBillingAccessPolicy

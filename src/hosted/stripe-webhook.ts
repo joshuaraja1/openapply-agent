@@ -85,6 +85,8 @@ export async function acceptBillingWebhook(
 
 export interface TrustedStripeBillingSnapshot {
   customerId: string;
+  /** Subject metadata set when Checkout creates the subscription and read fresh from Stripe. */
+  subjectId: string;
   subscriptionId: string;
   status: "active" | "trialing" | "past_due" | "unpaid" | "paused" | "canceled" | "incomplete";
   startsAt: string;
@@ -99,7 +101,8 @@ export function projectPaidStripeAccess(
   binding: { subjectId: string; customerId: string },
   current: TrustedStripeBillingSnapshot,
 ): HostedEntitlement | undefined {
-  if (!binding.subjectId || !binding.customerId || binding.customerId !== current.customerId) {
+  if (!binding.subjectId || !binding.customerId || binding.customerId !== current.customerId
+    || binding.subjectId !== current.subjectId) {
     throw new Error("Stripe customer is not bound to the candidate");
   }
   if (current.status !== "active" || current.paymentReversed

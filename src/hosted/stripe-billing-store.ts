@@ -31,8 +31,11 @@ function conditionFailed(error: unknown): boolean {
 /** Shared hosted table: pk/sk strings, gsi1 on gsi1pk/gsi1sk strings. */
 export class DynamoBillingStore {
   constructor(private readonly db: Database, private readonly tableName: string,
+    private readonly entitlementTableName: string,
     private readonly now: () => Date = () => new Date()) {
-    if (!tableName) throw new Error("Hosted billing table is required");
+    if (!tableName || !entitlementTableName || tableName === entitlementTableName) {
+      throw new Error("Separate hosted billing and entitlement tables are required");
+    }
   }
 
   private async get(pk: string, sk: string): Promise<Row | undefined> {
@@ -222,7 +225,7 @@ export class DynamoBillingStore {
     const records: HostedEntitlement[] = [];
     let cursor: Record<string, unknown> | undefined;
     do {
-      const page = await this.db.send(new QueryCommand({ TableName: this.tableName,
+      const page = await this.db.send(new QueryCommand({ TableName: this.entitlementTableName,
         KeyConditionExpression: "pk=:pk AND begins_with(sk,:prefix)",
         ExpressionAttributeValues: { ":pk": subjectKey(subjectId),
           ":prefix": ENTITLEMENT_PREFIX }, ConsistentRead: true,
@@ -267,9 +270,9 @@ export class DynamoBillingStore {
       throw new Error("Entitlement replacement exceeds atomic limit or contains duplicates");
     }
     const ops = [
-      ...current.filter(r => !unique.has(entitlementKey(r))).map(r => ({ Delete: { TableName: this.tableName,
+      ...current.filter(r => !unique.has(entitlementKey(r))).map(r => ({ Delete: { TableName: this.entitlementTableName,
         Key: { pk: subjectKey(subjectId), sk: entitlementKey(r) } } })),
-      ...checked.map(r => ({ Put: { TableName: this.tableName,
+      ...checked.map(r => ({ Put: { TableName: this.entitlementTableName,
         Item: { pk: subjectKey(subjectId), sk: entitlementKey(r), record: r } } })),
     ];
     // The lock check and replacement are one transaction; an expired worker
@@ -314,9 +317,9 @@ export class DynamoBillingStore {
     }
     const ops = [
       ...current.filter(r => !unique.has(entitlementKey(r))).map(r => ({ Delete: {
-        TableName: this.tableName,
+        TableName: this.entitlementTableName,
         Key: { pk: subjectKey(subjectId), sk: entitlementKey(r) } } })),
-      ...checked.map(r => ({ Put: { TableName: this.tableName,
+      ...checked.map(r => ({ Put: { TableName: this.entitlementTableName,
         Item: { pk: subjectKey(subjectId), sk: entitlementKey(r), record: r } } })),
     ];
     await this.db.send(new TransactWriteCommand({ TransactItems: [

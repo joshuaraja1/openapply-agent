@@ -12,6 +12,7 @@ import type { enqueueHostedApplication } from "../cloud/paid-enqueue.js";
 
 export interface HostedBillingRuntimeConfig {
   tableName: string;
+  entitlementTableName: string;
   checkout: CheckoutConfig;
   oidc: OidcConfig;
   stripeWebhookSecret: string;
@@ -26,11 +27,13 @@ export function createHostedBillingRuntime(
   stripe: Stripe,
   applicationQueue?: Omit<Parameters<typeof enqueueHostedApplication>[3], "billing">,
 ) {
-  if (!config.tableName || !config.stripeWebhookSecret
+  if (!config.tableName || !config.entitlementTableName
+    || config.tableName === config.entitlementTableName || !config.stripeWebhookSecret
     || !/^whsec_[A-Za-z0-9]+$/.test(config.stripeWebhookSecret)) {
     throw new Error("Hosted billing table and webhook secret are required");
   }
-  const billing = new DynamoBillingStore(db, config.tableName);
+  const billing = new DynamoBillingStore(db, config.tableName,
+    config.entitlementTableName);
   const journal = new DynamoCheckoutJournal(db, config.tableName, stripe,
     assertNoPaidAccessFromBilling(billing));
   const semester = { ...config.checkout.prices.semester,

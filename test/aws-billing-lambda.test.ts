@@ -79,6 +79,7 @@ describe("AWS hosted billing adapter", () => {
   it("loads separate Stripe test secrets and rejects live credentials", async () => {
     const env = { STRIPE_MODE: "test", STRIPE_TEST_SECRET_ARN: "key-arn",
       STRIPE_WEBHOOK_SECRET_ARN: "webhook-arn", BILLING_TABLE_NAME: "billing",
+      ENTITLEMENT_TABLE_NAME: "entitlements",
       APP_ORIGIN: appOrigin, MONTHLY_PRICE_ID: "price_monthly",
       SEMESTER_PRICE_ID: "price_semester", COGNITO_ISSUER: "https://issuer.example/pool",
       COGNITO_CLIENT_ID: "client", COGNITO_JWKS_URL: "https://issuer.example/jwks" };
@@ -86,6 +87,7 @@ describe("AWS hosted billing adapter", () => {
       ? "rk_test_localkey" : "whsec_localhook");
     const result = await loadStagingBillingConfig(env, read);
     expect(result.runtime.checkout.livemode).toBe(false);
+    expect(result.runtime.entitlementTableName).toBe("entitlements");
     expect(read).toHaveBeenCalledTimes(2);
     await expect(loadStagingBillingConfig({ ...env, STRIPE_MODE: "live" }, read)).rejects.toThrow();
     await expect(loadStagingBillingConfig(env, async (name) => name === "key-arn"
