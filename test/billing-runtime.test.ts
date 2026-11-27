@@ -44,10 +44,13 @@ describe("hosted billing composition", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("exposes only the two billing paths and requires a configured signing secret", async () => {
+  it("keeps application enqueue disabled and requires a configured signing secret", async () => {
     const runtime = createHostedBillingRuntime(config, { send: vi.fn() } as never, stripe);
     expect((await runtime.handleRequest(new Request("https://openapply.example/other"))).status)
       .toBe(404);
+    expect((await runtime.handleRequest(new Request(
+      "https://openapply.example/api/applications/enqueue", { method: "POST" }))).status)
+      .toBe(503);
     expect(() => createHostedBillingRuntime({ ...config, stripeWebhookSecret: "" },
       { send: vi.fn() } as never, stripe)).toThrow();
   });

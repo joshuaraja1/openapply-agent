@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleBillingSchedule, handleHttpApiEvent, type HttpApiEvent }
   from "../src/hosted/aws-lambda-adapter.js";
-import { loadStagingBillingConfig } from "../src/hosted/aws-billing-lambda.js";
+import { createStagingApplicationQueuePorts, loadStagingBillingConfig }
+  from "../src/hosted/aws-billing-lambda.js";
 
 const appOrigin = "https://staging.openapplyagent.xyz";
 const event = (body: string, isBase64Encoded = false): HttpApiEvent => ({
@@ -59,6 +60,18 @@ describe("AWS hosted billing adapter", () => {
     expect(runtime.handleRequest).not.toHaveBeenCalled();
   });
 
+  it("answers an exact-origin application enqueue preflight", async () => {
+    const runtime = { handleRequest: vi.fn(), processReady: vi.fn() };
+    const input = { ...event(""), rawPath: "/api/applications/enqueue",
+      requestContext: { http: { method: "OPTIONS" } },
+      headers: { origin: appOrigin, "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization, content-type" } };
+    const result = await handleHttpApiEvent(input, runtime, appOrigin);
+    expect(result.statusCode).toBe(204);
+    expect(result.headers["access-control-allow-origin"]).toBe(appOrigin);
+    expect(runtime.handleRequest).not.toHaveBeenCalled();
+  });
+
   it("runs scheduled reconciliation without an HTTP route", async () => {
     const runtime = { handleRequest: vi.fn(), processReady: vi.fn(async () =>
       ({ processed: 2, deferred: 1 })) };
@@ -92,5 +105,19 @@ describe("AWS hosted billing adapter", () => {
     await expect(loadStagingBillingConfig({ ...env, STRIPE_MODE: "live" }, read)).rejects.toThrow();
     await expect(loadStagingBillingConfig(env, async (name) => name === "key-arn"
       ? "sk_live_wrong" : "whsec_localhook")).rejects.toThrow();
+  });
+
+  it("keeps application enqueue disabled unless the staged resources are complete", () => {
+    const db = { send: vi.fn() } as never;
+    const sqs = { send: vi.fn() } as never;
+    expect(createStagingApplicationQueuePorts({}, db, sqs)).toBeUndefined();
+    expect(() => createStagingApplicationQueuePorts({ ENQUEUE_ENABLED: "true" }, db, sqs))
+      .toThrow("RUN_LEDGER_TABLE_NAME");
+    expect(() => createStagingApplicationQueuePorts({ ENQUEUE_ENABLED: "true",
+      RUN_LEDGER_TABLE_NAME: "ledger" }, db, sqs)).toThrow("APPLICATION_QUEUE_URL");
+    expect(createStagingApplicationQueuePorts({ ENQUEUE_ENABLED: "true",
+      RUN_LEDGER_TABLE_NAME: "ledger", APPLICATION_QUEUE_URL:
+        "https://sqs.us-east-1.amazonaws.com/205064803661/openapply-staging-application.fifo",
+    }, db, sqs)).toBeDefined();
   });
 });

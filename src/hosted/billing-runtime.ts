@@ -44,7 +44,7 @@ export function createHostedBillingRuntime(
   const verifySubject = createOidcSubjectVerifier(config.oidc);
 
   return {
-    /** Only these two exact paths are exposed. Redirects never grant access. */
+    /** Exact billing paths plus opt-in application enqueue. Redirects never grant access. */
     handleRequest(request: Request): Promise<Response> {
       const path = new URL(request.url).pathname;
       if (path === "/api/billing/checkout") return handleCheckoutHttp(request, {

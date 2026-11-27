@@ -2,8 +2,18 @@
   "name": "openapply-agent",
   "version": "0.1.0",
   "description": "A privacy-first, human-in-the-loop job discovery and application workflow.",
-  "bin": { "openapply": "dist/src/product-cli.js" },
-  "files": ["dist/src", "templates", "examples", "docs", "README.md", "LICENSE", "runtime-package-lock.json"],
+  "bin": {
+    "openapply": "dist/src/product-cli.js"
+  },
+  "files": [
+    "dist/src",
+    "templates",
+    "examples",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "runtime-package-lock.json"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -62,6 +72,7 @@
     "@aws-sdk/client-kms": "^3.1178.0",
     "@aws-sdk/client-s3": "^3.1178.0",
     "@aws-sdk/client-secrets-manager": "^3.1178.0",
+    "@aws-sdk/client-sqs": "^3.1178.0",
     "@aws-sdk/lib-dynamodb": "^3.1178.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@napi-rs/canvas": "^1.2.0",

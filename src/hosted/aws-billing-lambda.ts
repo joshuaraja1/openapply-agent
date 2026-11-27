@@ -1,9 +1,11 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { SQSClient } from "@aws-sdk/client-sqs";
 import Stripe from "stripe";
 import { handleBillingSchedule, handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 import { createHostedBillingRuntime } from "./billing-runtime.js";
+import { DynamoHostedRunAdmission, SqsApplicationQueueSender } from "../cloud/aws-enqueue-ports.js";
 
 type Environment = Record<string, string | undefined>;
 type SecretReader = (arn: string) => Promise<string>;
@@ -49,6 +51,20 @@ export async function loadStagingBillingConfig(env: Environment, readSecret: Sec
 
 const secrets = new SecretsManagerClient({});
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const sqs = new SQSClient({});
+
+/** A staging host must opt in with both resource names and explicit IAM.
+ * The default deployment exposes no application enqueue route. */
+export function createStagingApplicationQueuePorts(env: Environment,
+  runDb: Pick<DynamoDBDocumentClient, "send">,
+  queueClient: Pick<SQSClient, "send">) {
+  if (env.ENQUEUE_ENABLED !== "true") return undefined;
+  const ledger = required(env, "RUN_LEDGER_TABLE_NAME");
+  const queueUrl = required(env, "APPLICATION_QUEUE_URL");
+  const admission = new DynamoHostedRunAdmission(runDb, ledger);
+  return { runRecords: admission, authorization: admission,
+    queue: new SqsApplicationQueueSender(queueClient, queueUrl) };
+}
 async function readSecret(arn: string): Promise<string> {
   const result = await secrets.send(new GetSecretValueCommand({ SecretId: arn }));
   if (!result.SecretString) throw new Error("Hosted billing secret is unavailable");
@@ -59,7 +75,8 @@ let runtimePromise: Promise<ReturnType<typeof createHostedBillingRuntime>> | und
 function runtime() {
   runtimePromise ??= (async () => {
     const config = await loadStagingBillingConfig(process.env, readSecret);
-    return createHostedBillingRuntime(config.runtime, db, new Stripe(config.stripeKey));
+    return createHostedBillingRuntime(config.runtime, db, new Stripe(config.stripeKey),
+      createStagingApplicationQueuePorts(process.env, db, sqs));
   })().catch(error => { runtimePromise = undefined; throw error; });
   return runtimePromise;
 }
