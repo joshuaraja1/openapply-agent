@@ -77,4 +77,64 @@ describe("durable official posting claims", () => {
       .toEqual(["processed"]);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+
+  it("releases a newly created claim when another reservation fills the cap", async () => {
+    const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
+    const quota = new DailyQuota(new MemoryApplicationStateStore());
+    const retries = new RetryLedger(new MemoryApplicationStateStore());
+    const job = { id: "board-a", applicationUrl: url } as DiscoveredJob;
+    const execute = vi.fn(async () => {});
+    vi.spyOn(quota, "reserve").mockResolvedValueOnce("full");
+    const claim = async (queued: DiscoveredJob) => {
+      const receipt = await claims.claimWithReceipt(queued.id, queued.applicationUrl);
+      return { claimed: receipt.status === "claimed",
+        releaseBeforeBrowser: async () => await claims.releaseNewClaim(queued.id,
+          queued.applicationUrl, receipt.createdVersion!) };
+    };
+
+    expect(await runApplicationQueue([job], quota, retries, () => "2026-11-24", 1,
+      execute, claim)).toEqual([{ jobId: job.id, status: "cap-reached" }]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(await claims.claim("board-b", job.applicationUrl)).toBe("claimed");
+  });
+
+  it("retains the canonical claim when another runner reserved the same job", async () => {
+    const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
+    const quota = new DailyQuota(new MemoryApplicationStateStore());
+    const retries = new RetryLedger(new MemoryApplicationStateStore());
+    const job = { id: "board-a", applicationUrl: url } as DiscoveredJob;
+    const execute = vi.fn(async () => {});
+    vi.spyOn(quota, "reserve").mockResolvedValueOnce("duplicate");
+    const claim = async (queued: DiscoveredJob) => {
+      const receipt = await claims.claimWithReceipt(queued.id, queued.applicationUrl);
+      return { claimed: receipt.status === "claimed",
+        releaseBeforeBrowser: async () => await claims.releaseNewClaim(queued.id,
+          queued.applicationUrl, receipt.createdVersion!) };
+    };
+
+    expect(await runApplicationQueue([job], quota, retries, () => "2026-11-24", 1,
+      execute, claim)).toEqual([{ jobId: job.id, status: "duplicate" }]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(await claims.claim("board-b", job.applicationUrl)).toBe("duplicate");
+  });
+
+  it("releases the claim and fails closed when quota storage fails before browser work", async () => {
+    const claims = new PostingClaimLedger(new MemoryApplicationStateStore<PostingClaim>());
+    const quota = new DailyQuota(new MemoryApplicationStateStore());
+    const retries = new RetryLedger(new MemoryApplicationStateStore());
+    const job = { id: "board-a", applicationUrl: url } as DiscoveredJob;
+    const execute = vi.fn(async () => {});
+    vi.spyOn(quota, "reserve").mockRejectedValueOnce(new Error("quota storage unavailable"));
+    const claim = async (queued: DiscoveredJob) => {
+      const receipt = await claims.claimWithReceipt(queued.id, queued.applicationUrl);
+      return { claimed: receipt.status === "claimed",
+        releaseBeforeBrowser: async () => await claims.releaseNewClaim(queued.id,
+          queued.applicationUrl, receipt.createdVersion!) };
+    };
+
+    await expect(runApplicationQueue([job], quota, retries, () => "2026-11-24", 1,
+      execute, claim)).rejects.toThrow("quota storage unavailable");
+    expect(execute).not.toHaveBeenCalled();
+    expect(await claims.claim("board-b", job.applicationUrl)).toBe("claimed");
+  });
 });
