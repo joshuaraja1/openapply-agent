@@ -66,7 +66,6 @@ Resources:
   BrowserOutboundRoute:
     Type: AWS::EC2::Route
     Condition: EgressEnabled
-    DependsOn: BrowserNatGateway
     Properties:
       RouteTableId: !Ref BrowserPrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
