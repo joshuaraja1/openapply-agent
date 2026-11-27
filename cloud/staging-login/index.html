@@ -22,7 +22,7 @@
     </div>
     <section id="candidate-setup" hidden aria-labelledby="setup-heading">
       <h2 id="setup-heading">Your candidate profile</h2>
-      <p class="note">Your answers are used as facts. The uploaded PDF is kept private; we do not turn its text into claims without your review.</p>
+      <p class="note">Enter the facts the application agent may use. Your PDFs stay private; their text is not turned into claims without your review.</p>
       <form id="setup-form">
         <label>Where are you now?
           <select name="careerStage" required>
@@ -34,12 +34,56 @@
         <label>Locations you accept, one per line<textarea name="locations" required maxlength="1000"></textarea></label>
         <label>School or recent employer<input name="schoolOrEmployer" required maxlength="300"></label>
         <label>Graduation date or experience summary<input name="graduationOrExperience" required maxlength="300"></label>
-        <label>Countries where you are authorized to work<input name="workAuthorization" required maxlength="300"></label>
-        <label class="check"><input type="checkbox" name="sponsorship"> I need work sponsorship now or later</label>
+        <fieldset>
+          <legend>Contact and work authorization</legend>
+          <label>Full legal name<input name="fullName" autocomplete="name" required maxlength="300"></label>
+          <label>Email for applications<input name="applicationEmail" type="email" autocomplete="email" required></label>
+          <label>Phone for applications<input name="phone" type="tel" autocomplete="tel" required maxlength="300"></label>
+          <label>Current location<input name="currentLocation" autocomplete="address-level2" required maxlength="300"></label>
+          <label>Countries where you are authorized to work, one per line<textarea name="authorizedCountries" required maxlength="1200"></textarea></label>
+          <label>Will you need work sponsorship now or later?
+            <select name="sponsorship" required><option value="">Choose Yes or No</option>
+              <option value="yes">Yes</option><option value="no">No</option></select>
+          </label>
+          <label>Portfolio URL (optional)<input name="portfolio" type="url" inputmode="url"></label>
+          <label>GitHub URL (optional)<input name="github" type="url" inputmode="url"></label>
+          <label>LinkedIn URL (optional)<input name="linkedin" type="url" inputmode="url"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Facts you approve for applications</legend>
+          <p class="note">Write exact facts you can stand behind. For each fact, add the skills it actually used after a |, separated by commas. Example: Built a dashboard | TypeScript, SQL. Review each fact and its tags before saving. Do not add demographic answers here; those require a separate choice on each employer form.</p>
+          <label>Skills, one per line<textarea name="skills" maxlength="4000"></textarea></label>
+          <label>Education facts with skill tags, one per line<textarea name="educationFacts" maxlength="4000" placeholder="BS in Computer Science, Example University, expected May 2027 | Python"></textarea></label>
+          <div id="experience-list"></div>
+          <button id="add-experience" type="button" class="secondary">Add work experience</button>
+          <div id="project-list"></div>
+          <button id="add-project" type="button" class="secondary">Add project</button>
+        </fieldset>
         <label>Master résumé (PDF, up to 5 MB)<input type="file" name="masterResume" accept="application/pdf,.pdf" required></label>
         <label>Transcript (optional PDF, up to 5 MB)<input type="file" name="transcript" accept="application/pdf,.pdf"></label>
         <button type="submit">Review my answers</button>
       </form>
+      <template id="experience-template">
+        <fieldset class="experience-entry">
+          <legend>Work experience</legend>
+          <label>Employer<input name="employer" required maxlength="300"></label>
+          <label>Job title<input name="title" required maxlength="300"></label>
+          <label>Employment type<input name="employmentType" required maxlength="300" placeholder="Full-time, internship, contract, or other"></label>
+          <label>Start date<input name="start" required maxlength="300"></label>
+          <label>End date or Present<input name="end" required maxlength="300"></label>
+          <label>Achievements with skill tags, one factual statement per line<textarea name="claims" required maxlength="4000" placeholder="Built a dashboard for 3 teams | TypeScript, SQL"></textarea></label>
+          <button type="button" class="secondary remove-entry">Remove experience</button>
+        </fieldset>
+      </template>
+      <template id="project-template">
+        <fieldset class="project-entry">
+          <legend>Project</legend>
+          <label>Project name<input name="name" required maxlength="300"></label>
+          <label>Project URL (optional)<input name="url" type="url" inputmode="url"></label>
+          <label>What you built or measured with skill tags, one factual statement per line<textarea name="claims" required maxlength="4000" placeholder="Built a search tool | Python, SQL"></textarea></label>
+          <button type="button" class="secondary remove-entry">Remove project</button>
+        </fieldset>
+      </template>
       <div id="setup-review" hidden>
         <h3>Review before saving</h3>
         <pre id="setup-summary"></pre>

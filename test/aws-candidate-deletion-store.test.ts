@@ -25,6 +25,19 @@ describe("candidate deletion Dynamo boundary", () => {
     expect(release.input.ConditionExpression).toContain("leaseId");
   });
 
+  it("sets the application-ready marker only with the verified profile transaction", async () => {
+    const send = vi.fn(async (_command: unknown) => ({}));
+    const markers = new DynamoOnboardingMarkers({ send } as unknown as
+      Pick<DynamoDBDocumentClient, "send">, "ledger");
+    await markers.markVerified(candidateId, artifactId, "sub-1", true);
+    const transaction = send.mock.calls[0]![0] as TransactWriteCommand;
+    expect(transaction.input.TransactItems?.[0]?.ConditionCheck?.Key).toEqual({ pk, sk: "DELETED" });
+    const update = transaction.input.TransactItems?.[1]?.Update;
+    expect(update?.UpdateExpression).toContain("applicationProfileReady = :ready");
+    expect(update?.ExpressionAttributeValues?.[":ready"]).toBe(true);
+    expect(update?.ConditionExpression).toContain("subjectId = :subjectId");
+  });
+
   it("keeps one owner-bound tombstone and purges other ledger rows", async () => {
     const commands: unknown[] = [];
     let hasRows = true;

@@ -67,17 +67,19 @@ export class DynamoOnboardingMarkers implements OnboardingMarkerStore {
     ] }));
   }
 
-  async markVerified(candidateId: string, artifactId: string, subjectId: string): Promise<void> {
+  async markVerified(candidateId: string, artifactId: string, subjectId: string,
+    applicationProfileReady: boolean): Promise<void> {
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { ConditionCheck: { TableName: this.tableName,
         Key: { pk: `CANDIDATE#${candidateId}`, sk: "DELETED" },
         ConditionExpression: "attribute_not_exists(pk)" } },
       { Update: { TableName: this.tableName,
         Key: { pk: `CANDIDATE#${candidateId}`, sk: `PROFILE#${artifactId}` },
-        UpdateExpression: "SET #status = :verified",
+        UpdateExpression: "SET #status = :verified, applicationProfileReady = :ready",
         ConditionExpression: "#status = :pending AND subjectId = :subjectId AND candidateId = :candidateId AND artifactId = :artifactId",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: { ":verified": "verified", ":pending": "pending",
+          ":ready": applicationProfileReady,
           ":subjectId": subjectId, ":candidateId": candidateId, ":artifactId": artifactId } } },
     ] }));
   }
