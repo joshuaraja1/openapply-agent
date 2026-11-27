@@ -4,7 +4,8 @@ import {
   type DynamoDBDocumentClient,
 } from "@aws-sdk/lib-dynamodb";
 import type Stripe from "stripe";
-import { DynamoCheckoutJournal } from "../src/hosted/checkout-journal.js";
+import { assertNoPaidAccessFromBilling, DynamoCheckoutJournal }
+  from "../src/hosted/checkout-journal.js";
 import type { CheckoutSessionRecord } from "../src/hosted/stripe-checkout.js";
 
 function conditionalError(): Error {
@@ -129,6 +130,23 @@ describe("durable checkout journal", () => {
     paidCheck.mockRejectedValueOnce(new Error("already paid"));
     await expect(journal().reserve("candidate-1", "monthly")).rejects.toThrow("already paid");
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("wires active paid coverage to checkout denial while a free grant may upgrade", async () => {
+    const { db } = fakeDynamo();
+    const stripe = { customers: { create: vi.fn(async () => ({ id: "cus_123" })) } } as unknown as
+      Pick<Stripe, "customers" | "checkout">;
+    const hasPaidAccess = vi.fn(async () => true);
+    const guard = assertNoPaidAccessFromBilling({ hasPaidAccess });
+    const journal = new DynamoCheckoutJournal(db, "hosted-state", stripe, guard);
+    await expect(journal.reserve("candidate-1", "monthly"))
+      .rejects.toThrow("Active paid access");
+    expect(stripe.customers.create).not.toHaveBeenCalled();
+    hasPaidAccess.mockResolvedValue(false); // Billing store excludes free grants.
+    expect((await journal.reserve("candidate-1", "monthly")).customerId).toBe("cus_123");
+    hasPaidAccess.mockRejectedValue(new Error("billing read failed"));
+    await expect(journal.reserve("candidate-1", "semester"))
+      .rejects.toThrow("billing read failed");
   });
 
   it("accepts an opaque OIDC subject with a provider separator", async () => {

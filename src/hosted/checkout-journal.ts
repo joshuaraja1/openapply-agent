@@ -35,6 +35,18 @@ function reservation(row: Row | undefined): CheckoutReservation | undefined {
     ...(row.session ? { session: row.session as CheckoutSessionRecord } : {}) };
 }
 
+/** Compose Checkout with the authoritative billing projection. A free grant
+ * may upgrade; a settled active subscription or semester cannot buy twice. */
+export function assertNoPaidAccessFromBilling(
+  billing: { hasPaidAccess(subjectId: string): Promise<boolean> },
+): (subjectId: string) => Promise<void> {
+  return async (subjectId) => {
+    if (await billing.hasPaidAccess(subjectId)) {
+      throw new Error("Active paid access already exists");
+    }
+  };
+}
+
 /** DynamoDB table must use String partition `pk` and sort `sk` keys.
  * Caller provides a verified subject. Never take a Customer ID from HTTP input. */
 export class DynamoCheckoutJournal implements CheckoutPorts {
