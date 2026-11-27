@@ -31,6 +31,10 @@ Parameters:
     Type: String
   CognitoJwksUrl:
     Type: String
+  ReplayScheduleState:
+    Type: String
+    AllowedValues: [ENABLED, DISABLED]
+    Default: DISABLED
 
 Resources:
   BillingApiRole:
@@ -226,7 +230,7 @@ Resources:
     Properties:
       Name: openapply-staging-billing-replay
       ScheduleExpression: rate(1 minute)
-      State: ENABLED
+      State: !Ref ReplayScheduleState
       Targets:
         - Arn: !GetAtt BillingReplayFunction.Arn
           Id: BillingReplay

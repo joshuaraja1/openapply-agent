@@ -47,7 +47,20 @@ Rollback after new entitlements have been written therefore requires stopping
 intake and replay, exporting and reconciling the new rows back to the old
 schema, and rechecking subject parity before switching configuration. Do not
 silently fall back to the old table or perform a rollback while both writers
-are active. This PR does not execute the cutover or change staging resources.
+are active.
+
+The OpenApply staging cutover was executed in `us-east-1` on November 26,
+2026. The old billing table scan found zero entitlement rows and zero total
+rows, so no copy was necessary. CloudFormation added only the retained
+`openapply-staging-entitlements` table. Replay was disabled during the API
+role/code update, then an isolated replay invocation returned
+`processed: 0, deferred: 0, quarantined: 0`; the schedule was re-enabled.
+The live HTTP API returned 401 for anonymous Checkout with the approved
+origin, 204 for its approved CORS preflight, and 400 for an invalid Stripe
+signature. IAM simulation returned `implicitDeny` for API-role `PutItem` on
+the entitlement table and `allowed` for replay-role `PutItem`. The new table
+was empty after the smoke. This establishes the staging permission boundary;
+paid Checkout and real Stripe webhook delivery still need a test candidate.
 
 ## Remaining public-release boundary
 
