@@ -54,8 +54,19 @@ row. After the five-minute binding grace period, both unbound fixtures were
 quarantined and no entitlement was created. These fixtures do not prove a
 paid candidate flow.
 
-Release proof still required: real Cognito ID-token verification, a paid
-test Checkout followed by signed delivery and scheduled entitlement grant,
-duplicate delivery, cancellation and refund revocation, and a candidate run
-that remains blocked when access or consent is missing. No live charges or
-applications are enabled by this PR.
+The later staging test signed in with a Cognito test identity, completed a
+monthly $39 and a four-month $129 Checkout in Stripe **test mode**, and
+processed their candidate-bound signed events into the separate entitlement
+table. Resending the paid monthly event returned HTTP 204 without adding a
+second journal row or entitlement. Immediate cancellation and full sandbox
+refund of that monthly subscription produced signed events; the replay Lambda
+removed its entitlement. The semester test grant remains isolated to its
+candidate. The test identities were administratively confirmed because the
+normal email-code flow has not yet been tested end to end. No live charge or
+job application was made.
+
+The API and scheduled replay Lambda were subsequently updated to use distinct
+Stripe test-key Secrets Manager ARNs. IAM simulation reports `implicitDeny`
+when the API role requests the replay secret and when the replay role requests
+the API secret. The API-key split smoke, authenticated billing status page,
+trusted queue admission, and candidate run remain separate release checks.
