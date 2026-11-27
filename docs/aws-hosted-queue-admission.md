@@ -8,7 +8,8 @@ identifier-only message to the SQS FIFO application queue. A candidate cannot
 provide their billing subject, job details, or consent in the HTTP body.
 
 The default CloudFormation setting is `EnableApplicationEnqueue=false`.
-Enabling it requires the deployed run ledger name, FIFO queue URL and ARN.
+Enabling it requires the deployed run ledger and FIFO queue name. CloudFormation
+derives the queue URL and IAM ARN from that one name, account, and region.
 The API role then receives only `GetItem` on that run ledger and `SendMessage`
 on that queue. There is no application browser task or public run-creation
 route in this stack. With no trusted run record, every request fails closed.

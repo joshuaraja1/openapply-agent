@@ -48,12 +48,10 @@ Parameters:
   RunLedgerTableName:
     Type: String
     Default: ''
-  ApplicationQueueUrl:
+  ApplicationQueueName:
     Type: String
-    Default: ''
-  ApplicationQueueArn:
-    Type: String
-    Default: ''
+    Default: openapply-staging-application.fifo
+    AllowedPattern: '^openapply-[a-z0-9-]+-application\.fifo$'
 
 Conditions:
   HostedEnqueueEnabled: !Equals [!Ref EnableApplicationEnqueue, 'true']
@@ -64,10 +62,6 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
         AssertDescription: Enqueue requires a durable run ledger table.
-      - Assert: !Not [!Equals [!Ref ApplicationQueueUrl, '']]
-        AssertDescription: Enqueue requires a FIFO application queue URL.
-      - Assert: !Not [!Equals [!Ref ApplicationQueueArn, '']]
-        AssertDescription: Enqueue requires the matching queue ARN.
 
 Resources:
   BillingApiRole:
@@ -115,7 +109,7 @@ Resources:
                   Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
                 - Effect: Allow
                   Action: sqs:SendMessage
-                  Resource: !Ref ApplicationQueueArn
+                  Resource: !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ApplicationQueueName}'
           - !Ref AWS::NoValue
 
   BillingReplayRole:
@@ -188,7 +182,7 @@ Resources:
           COGNITO_JWKS_URL: !Ref CognitoJwksUrl
           ENQUEUE_ENABLED: !Ref EnableApplicationEnqueue
           RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
-          APPLICATION_QUEUE_URL: !Ref ApplicationQueueUrl
+          APPLICATION_QUEUE_URL: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${ApplicationQueueName}'
 
   BillingReplayFunction:
     Type: AWS::Lambda::Function
