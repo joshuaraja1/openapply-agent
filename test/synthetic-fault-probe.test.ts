@@ -21,13 +21,16 @@ describe("synthetic Fargate crash checkpoints", () => {
   it("exits at only the selected fixture stage and rejects real jobs", () => {
     const exits: number[] = [];
     const exit = (code: number): never => { exits.push(code); throw new Error("task exited"); };
-    syntheticCheckpoint("after_intent", fixture, "after_click", exit);
+    const env = { ...guarded, OPENAPPLY_SYNTHETIC_CRASH_AT: "after_click" };
+    syntheticCheckpoint("after_intent", fixture, env, exit);
     expect(exits).toEqual([]);
-    expect(() => syntheticCheckpoint("after_click", fixture, "after_click", exit))
+    expect(() => syntheticCheckpoint("after_click", fixture, env, exit))
       .toThrow("task exited");
     expect(exits).toEqual([86]);
     expect(() => syntheticCheckpoint("after_click", { ...fixture, provider: "greenhouse" },
-      "after_click", exit)).toThrow();
+      env, exit)).toThrow();
+    expect(() => syntheticCheckpoint("after_click", fixture,
+      { ...env, OPENAPPLY_SUBMISSION_MODE: "enabled" }, exit)).toThrow("unavailable");
     expect(exits).toEqual([86]);
   });
 });

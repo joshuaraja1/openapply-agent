@@ -35,7 +35,7 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
     || process.env.OPENAPPLY_SUBMISSION_MODE !== "disabled") {
     throw new Error("Cloud browser task mode is disabled");
   }
-  const crashAt = syntheticCrashStage();
+  syntheticCrashStage(); // Validate the one-off task definition before any AWS call.
   const config = configuration();
   const region = required("AWS_REGION");
   const scope = { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
@@ -50,9 +50,9 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
           if (runId !== scope.runId) throw new Error("Synthetic audit run scope mismatch");
           return audit.recordFinalClick(candidateId, leaseToken, job);
         },
-        afterFinalClick(job) { syntheticCheckpoint("after_click", job, crashAt); },
+        afterFinalClick(job) { syntheticCheckpoint("after_click", job); },
       }), new SyntheticReceiptVerifier(),
-      { checkpoint(stage, job) { syntheticCheckpoint(stage, job, crashAt); } });
+      { checkpoint(stage, job) { syntheticCheckpoint(stage, job); } });
     const outcome = await runtime.runExact();
     process.stdout.write(`Cloud synthetic queue task outcome: ${outcome}\n`);
     return outcome;

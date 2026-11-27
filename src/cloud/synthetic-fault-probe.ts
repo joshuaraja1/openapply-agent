@@ -21,7 +21,8 @@ export function syntheticCrashStage(env: NodeJS.ProcessEnv = process.env): Synth
 /** Task termination intentionally skips JS cleanup to reproduce an ECS crash.
  * Every caller must pass the exact broker-verified fixture job. */
 export function syntheticCheckpoint(stage: SyntheticCrashStage, job: OfficialJobIdentity,
-  configured: SyntheticCrashStage | undefined, exit: (code: number) => never = process.exit): void {
+  env: NodeJS.ProcessEnv = process.env, exit: (code: number) => never = process.exit): void {
+  const configured = syntheticCrashStage(env);
   fixtureJob.parse(job);
   if (configured === stage) exit(86);
 }
