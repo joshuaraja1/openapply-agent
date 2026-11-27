@@ -37,4 +37,33 @@ describe("signed-in staging deletion UI", () => {
     expect(elements.get("#deletion-status")?.textContent).toContain("Final account deletion requires");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("restores setup only after a fresh none status confirms a failed request wrote no tombstone", async () => {
+    const elements = new Map([
+      ["#candidate-deletion", node()], ["#deletion-status", node()],
+      ["#deletion-confirm", node()], ["#deletion-request", node()],
+      ["#deletion-refresh", node()], ["#candidate-setup", node()],
+    ]);
+    vi.stubGlobal("document", { querySelector: (selector: string) => elements.get(selector) });
+    const fetch = vi.fn(async (path: string) => path.endsWith("/delete")
+      ? new Response('{"state":"pending"}', { status: 503 })
+      : new Response('{"state":"none"}', { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    attachCandidateDeletion({ getIdToken: () => "a.b.c" });
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    const setup = elements.get("#candidate-setup")!;
+    const confirm = elements.get("#deletion-confirm")!;
+    const button = elements.get("#deletion-request")!;
+    confirm.value = "DELETE";
+    confirm.emit("input");
+    button.emit("click");
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(setup.hidden).toBe(true);
+    expect(elements.get("#deletion-status")?.textContent).toContain("unavailable");
+    elements.get("#deletion-refresh")!.emit("click");
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+    expect(setup.hidden).toBe(false);
+    expect(elements.get("#deletion-status")?.textContent).toBe("No deletion request is pending.");
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
 });

@@ -10,13 +10,20 @@ export function attachCandidateDeletion(auth) {
   let current = 'unavailable';
   let busy = false;
   let timer;
+  let setupVisibleBeforeRequest = null;
 
   const render = state => {
     current = state;
     if (state === 'pending' || state === 'complete') {
       setup.hidden = true;
+      setupVisibleBeforeRequest = null;
       confirm.value = '';
       confirm.disabled = true;
+    } else if (state === 'none' && setupVisibleBeforeRequest !== null) {
+      // A failed POST may never have written a tombstone. Only a fresh,
+      // authenticated "none" response can restore the prior setup state.
+      setup.hidden = !setupVisibleBeforeRequest;
+      setupVisibleBeforeRequest = null;
     }
     status.textContent = state === 'none' ? 'No deletion request is pending.'
       : state === 'pending' ? 'Deletion is pending. Application work is blocked while cleanup continues.'
@@ -50,6 +57,7 @@ export function attachCandidateDeletion(auth) {
     if (busy || current !== 'none' || confirm.value !== 'DELETE') return;
     busy = true;
     request.disabled = true;
+    setupVisibleBeforeRequest = !setup.hidden;
     setup.hidden = true;
     status.textContent = 'Recording your deletion request…';
     try { render(await call('/api/candidates/delete')); }
