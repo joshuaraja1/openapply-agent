@@ -38,7 +38,7 @@
     "resume:render": "tsx src/resume/cli.ts",
     "resume:review": "tsx src/resume/review-cli.ts",
     "build": "tsc -p tsconfig.json",
-    "build:hosted-lambda": "esbuild src/hosted/aws-billing-lambda.ts --bundle --platform=node --target=node22 --format=esm --packages=bundle --outfile=dist-hosted/aws-billing-lambda.mjs",
+    "build:hosted-lambda": "esbuild src/hosted/aws-billing-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-billing-lambda.cjs",
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
     "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
     "distribution:release-gate-smoke": "node --test scripts/verify-release-bundle.test.mjs",
