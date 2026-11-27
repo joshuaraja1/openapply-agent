@@ -19,3 +19,5 @@ Example operator configuration (replace the board identifiers with actual review
 ```
 
 This path is staged infrastructure, not evidence of live application completion. The full product still needs an authenticated lead listing and candidate preferences/ranking, a complete approved profile, production browser adapter, provider-specific live validation, and measured beta results.
+
+The Lambda currently writes aggregate accepted, closed, and failed counts to CloudWatch logs. It does not yet publish dedicated failure/staleness metrics or alert an operator. [Issue #271](https://github.com/joshuaraja1/openapply-agent/issues/271) tracks those monitoring gates before the schedule is enabled for a sustained beta.

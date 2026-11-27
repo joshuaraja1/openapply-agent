@@ -98,7 +98,10 @@ describe("official lead reconciliation", () => {
       async upsert(row) { rows.set(row.leadId, row); members.set(row.leadId,
         { pk: row.sourceKey, sk: `LEAD#${row.leadId}`, leadId: row.leadId,
           jobKey: row.jobKey, verifiedAtEpoch: row.verifiedAtEpoch }); },
-      async members() { return [...members.values()]; },
+      async members(_source, max) {
+        if (members.size > max) throw new Error("Official source membership exceeded bound");
+        return [...members.values()];
+      },
       async closeMissing(member) { rows.delete(member.leadId); members.delete(member.leadId); },
     };
     return { rows, members, api };
@@ -114,6 +117,22 @@ describe("official lead reconciliation", () => {
       fetchJobs: async () => [] });
     expect(second).toEqual([{ provider: "greenhouse", accepted: 0, closed: 1, failed: false }]);
     expect(saved.rows.size).toBe(0);
+  });
+  it("replaces a posting when the source is already at full capacity", async () => {
+    const saved = store();
+    const second = { ...gh(), id: "greenhouse:acme:5678",
+      applicationUrl: "https://job-boards.greenhouse.io/acme/jobs/5678" };
+    const replacement = { ...gh(), id: "greenhouse:acme:91011",
+      applicationUrl: "https://job-boards.greenhouse.io/acme/jobs/91011" };
+    await syncOfficialLeads(config, saved.api, { now, fetchJobs: async () => [gh(), second] });
+    expect(saved.rows.size).toBe(2);
+    const result = await syncOfficialLeads(config, saved.api, {
+      now: new Date(now.getTime() + 1000), fetchJobs: async () => [gh(), replacement],
+    });
+    expect(result).toEqual([{ provider: "greenhouse", accepted: 2, closed: 1, failed: false }]);
+    expect(saved.rows.size).toBe(2);
+    expect(saved.rows.has(verifiedOfficialLead(greenhouse, second, now).leadId)).toBe(false);
+    expect(saved.rows.has(verifiedOfficialLead(greenhouse, replacement, now).leadId)).toBe(true);
   });
   it("parses a provider API response through the guarded request path", async () => {
     const saved = store();

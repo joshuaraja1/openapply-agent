@@ -209,8 +209,10 @@ export async function syncOfficialLeads(configValue: unknown, store: OfficialLea
         if (current.has(row.leadId)) throw new Error("Official source repeated a requisition");
         current.add(row.leadId);
       }
-      for (const row of rows) { await store.upsert(row); accepted++; }
+      // Snapshot the previous membership before writes: at capacity, replacing
+      // one posting temporarily creates max + 1 members until closure.
       const previous = await store.members(source, config.maxJobsPerSource);
+      for (const row of rows) { await store.upsert(row); accepted++; }
       for (const member of previous) {
         if (!current.has(member.leadId)) {
           await store.closeMissing(member, now.getTime(), Math.floor(now.getTime() / 1000));
@@ -249,19 +251,22 @@ export class DynamoOfficialLeadStore implements OfficialLeadStore {
 
   async members(source: OfficialLeadSource, max: number): Promise<LeadMember[]> {
     const key = sourceKey(source);
+    // A terminated refresh may leave its new rows beside the old set. Allow
+    // one prior maximum-size set so the next complete refresh can reconcile it.
+    const maxPrevious = max + 500;
     const found: LeadMember[] = [];
     let cursor: Record<string, unknown> | undefined;
     do {
       const result = await this.db.send(new QueryCommand({ TableName: this.table,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :lead)",
         ExpressionAttributeValues: { ":pk": key, ":lead": "LEAD#" },
-        ConsistentRead: true, Limit: max + 1,
+        ConsistentRead: true, Limit: maxPrevious + 1,
         ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
       for (const item of result.Items ?? []) {
         const row = memberSchema.parse(item);
         if (row.pk !== key || row.sk !== `LEAD#${row.leadId}`) throw new Error("Invalid source member");
         found.push(row);
-        if (found.length > max) throw new Error("Official source membership exceeded bound");
+        if (found.length > maxPrevious) throw new Error("Official source membership exceeded bound");
       }
       cursor = result.LastEvaluatedKey;
     } while (cursor);
