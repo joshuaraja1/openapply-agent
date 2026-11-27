@@ -62,6 +62,28 @@ possibly submitted application. Do not rely on a live browser tab surviving a
 task crash. SQS can redeliver messages, so queue receipt alone is never proof
 that a job application was submitted exactly once.
 
+## Demand scaling contract
+
+Cloudflare Workers handle authenticated HTTP requests and can schedule or
+admit a run. Creating a separate Worker deployment for every job seeker would
+not create browser capacity. The browser pool is bounded by durable DynamoDB
+slot reservations: each queued job seeker's run claims one free slot and one
+per-job-seeker active-task lock before ECS starts a Fargate task. A scheduler
+tick fills free slots from the durable dispatch index; completed tasks release
+slots only after ECS reports `STOPPED`. With no queued runs, no browser task
+is launched. Current staging defaults to one task and permits at most 32 after
+capacity and cost validation. This is a hard ceiling, not an automatic target
+that expands indefinitely.
+
+For a paid product, capacity changes should be driven by queue age, active
+users, job-seeker daily caps, task startup latency, cost per confirmed
+application, provider limits, and the rate of unresolved handoffs. Define
+minimum and maximum capacity and alert before queue age or spend exceeds
+budget. The staging launcher currently uses a configured maximum and an
+EventBridge sweep; a measured controller that adjusts that maximum is still
+required for production. Increasing the ceiling alone does not make real
+application submission safe or autonomous.
+
 ## Release gates
 
 - No shared provider accounts or browser profiles between candidates. Test

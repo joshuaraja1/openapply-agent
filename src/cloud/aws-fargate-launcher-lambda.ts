@@ -20,7 +20,9 @@ function required(name: string): string {
 
 function configFromEnv(): FargateLaunchConfig {
   if (required("FARGATE_LAUNCH_ENABLED") !== "true") throw new Error("Fargate launch disabled");
-  return { enabled: true, environment: "staging", clusterArn: required("ECS_CLUSTER_ARN"),
+  return { enabled: true, environment: "staging",
+    maxConcurrentTasks: Number(required("FARGATE_MAX_CONCURRENT_TASKS")),
+    clusterArn: required("ECS_CLUSTER_ARN"),
     taskDefinitionArn: required("ECS_TASK_DEFINITION_ARN"),
     taskRoleArn: required("ECS_TASK_ROLE_ARN"),
     subnets: required("PRIVATE_SUBNET_IDS").split(","),
@@ -93,13 +95,14 @@ export async function handler(event: unknown) {
   } finally { secret.fill(0); }
 }
 
-/** EventBridge retries failures. Missing ECS state leaves the global slot
+/** EventBridge retries failures. Missing ECS state leaves its durable slot
  * fenced; it never clears the reservation on a guess. */
 async function sweepHandler(config: FargateLaunchConfig) {
   const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   const store = new DynamoFargateLaunchStore(db, config.ledgerTable);
   const ecs = new ECSClient({});
-  const sweep = await sweepFargateSlot(config, { store, ecs,
+  const activeSlots = await store.readActiveSlots(32);
+  const sweep = await Promise.all(activeSlots.map(slot => sweepFargateSlot(config, { store, ecs,
     async onStopped(candidateId, runId, generation) {
       const outcome = await reconcileStoppedDispatch(candidateId, runId, generation, {
         dispatch: new DynamoApplicationDispatchStore(db, config.ledgerTable),
@@ -108,18 +111,22 @@ async function sweepHandler(config: FargateLaunchConfig) {
       });
       return outcome === "retryable";
     },
-  });
-  if (sweep === "waiting" || sweep === "stopping") return { status: sweep };
+  }, undefined, slot.index)));
   const secret = await readSigningKey();
   try {
     const eligible = authorization(db, config.ledgerTable);
     const authorizeLaunch = queuedAuthorization(db, config.ledgerTable, eligible);
-    const dispatch = await dispatchOnePendingApplication({
-      store: new DynamoApplicationDispatchStore(db, config.ledgerTable),
-      authorize: eligible,
-      launch: (candidateId, runId) => launchQueuedFargateRun(candidateId, runId,
-        config, { store, ecs, signingKey: secret, authorize: authorizeLaunch }),
-    });
+    const dispatch: string[] = [];
+    for (let index = 0; index < (config.maxConcurrentTasks ?? 1); index++) {
+      const outcome = await dispatchOnePendingApplication({
+        store: new DynamoApplicationDispatchStore(db, config.ledgerTable),
+        authorize: eligible,
+        launch: (candidateId, runId) => launchQueuedFargateRun(candidateId, runId,
+          config, { store, ecs, signingKey: secret, authorize: authorizeLaunch }),
+      });
+      dispatch.push(outcome);
+      if (outcome === "empty" || outcome === "capacity_busy") break;
+    }
     return { status: sweep, dispatch };
   } finally { secret.fill(0); }
 }

@@ -11,6 +11,7 @@ const launchRow = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid, capability: z.string().min(1).optional(),
   clientToken: z.string().length(64), configHash: z.string().length(64),
   reservedAt: z.number().int().positive(), taskArn: arn.optional(),
+  slotIndex: z.number().int().min(0).max(31).default(0),
   generation: z.number().int().nonnegative().max(2).default(0),
   state: z.enum(["reserved", "started", "stopped"]) });
 type LaunchRow = z.infer<typeof launchRow>;
@@ -25,7 +26,8 @@ export interface FargateLaunchConfig {
   containerName: string;
   queueUrl: string;
   ledgerTable: string;
-  /** Staging's initial hard ceiling is one browser task. */
+  /** Durable browser-task ceiling. Increase only after task and cost validation. */
+  maxConcurrentTasks?: number;
   environment: "staging";
 }
 
@@ -51,7 +53,10 @@ function validated(config: FargateLaunchConfig): FargateLaunchConfig {
     || config.subnets.some(value => !/^subnet-[a-f0-9]+$/.test(value))
     || !/^[A-Za-z0-9_-]{1,128}$/.test(config.containerName)
     || !/^https:\/\/sqs\.[a-z0-9-]+\.amazonaws\.com\/\d{12}\/openapply-staging-application\.fifo$/.test(config.queueUrl)
-    || !/^openapply-staging-run-ledger$/.test(config.ledgerTable)) {
+    || !/^openapply-staging-run-ledger$/.test(config.ledgerTable)
+    || !Number.isInteger(config.maxConcurrentTasks ?? 1)
+    || (config.maxConcurrentTasks ?? 1) < 1
+    || (config.maxConcurrentTasks ?? 1) > 32) {
     throw new Error("Invalid Fargate launcher configuration");
   }
   return config;
@@ -60,9 +65,15 @@ function validated(config: FargateLaunchConfig): FargateLaunchConfig {
 function runKey(candidateId: string, runId: string) {
   return { pk: `CANDIDATE#${uuid.parse(candidateId)}`, sk: `TASK#${uuid.parse(runId)}` };
 }
-const slotKey = { pk: "LAUNCHER#staging", sk: "SLOT#0" };
+function candidateActiveKey(candidateId: string) {
+  return { pk: `CANDIDATE#${uuid.parse(candidateId)}`, sk: "ACTIVE_TASK" };
+}
+function slotKey(index: number) {
+  if (!Number.isInteger(index) || index < 0 || index > 31) throw new Error("Invalid Fargate slot");
+  return { pk: "LAUNCHER#staging", sk: `SLOT#${index}` };
+}
 
-/** One non-expiring slot bounds Fargate spend even after Lambda crashes. A
+/** Non-expiring slots bound Fargate spend even after Lambda crashes. A
  * stopped task must be reconciled before another task can start. */
 export class DynamoFargateLaunchStore {
   constructor(private readonly db: Pick<DynamoDBDocumentClient, "send">,
@@ -80,13 +91,25 @@ export class DynamoFargateLaunchStore {
     return row;
   }
 
-  async readActiveSlot(): Promise<{ candidateId: string; runId: string;
+  async readActiveSlot(index = 0): Promise<{ candidateId: string; runId: string;
     clientToken: string; reservedAt: number } | undefined> {
     const item = (await this.db.send(new GetCommand({ TableName: this.table,
-      Key: slotKey, ConsistentRead: true }))).Item;
+      Key: slotKey(index), ConsistentRead: true }))).Item;
     if (!item) return undefined;
     return z.object({ candidateId: uuid, runId: uuid,
       clientToken: z.string().length(64), reservedAt: z.number().int().positive() }).parse(item);
+  }
+
+  async readActiveSlots(maxConcurrentTasks: number): Promise<Array<{ index: number;
+    candidateId: string; runId: string; clientToken: string; reservedAt: number }>> {
+    if (!Number.isInteger(maxConcurrentTasks) || maxConcurrentTasks < 1 || maxConcurrentTasks > 32) {
+      throw new Error("Invalid Fargate capacity");
+    }
+    const slots = await Promise.all(Array.from({ length: maxConcurrentTasks }, async (_, index) => {
+      const slot = await this.readActiveSlot(index);
+      return slot ? { index, ...slot } : undefined;
+    }));
+    return slots.filter((slot): slot is NonNullable<typeof slot> => slot !== undefined);
   }
 
   async listCandidateTasks(candidateId: string): Promise<LaunchRow[]> {
@@ -110,30 +133,36 @@ export class DynamoFargateLaunchStore {
     return rows;
   }
 
-  async reserve(row: LaunchRow): Promise<"created" | "existing" | "busy"> {
+  async reserve(row: LaunchRow, maxConcurrentTasks = 1): Promise<"created" | "existing" | "busy"> {
+    if (!Number.isInteger(maxConcurrentTasks) || maxConcurrentTasks < 1 || maxConcurrentTasks > 32) {
+      throw new Error("Invalid Fargate capacity");
+    }
     const existing = await this.read(row.candidateId, row.runId);
     if (existing?.state === "stopped") {
       if (existing.generation >= 2) return "existing";
       const generation = existing.generation + 1;
       const clientToken = createHash("sha256")
         .update(`${row.candidateId}:${row.runId}:${generation}`).digest("hex");
-      const retry = { ...row, generation, clientToken };
+      for (let index = 0; index < maxConcurrentTasks; index++) {
       try {
         await this.db.send(new TransactWriteCommand({ TransactItems: [
           { ConditionCheck: { TableName: this.table,
             Key: { pk: row.pk, sk: "DELETED" },
             ConditionExpression: "attribute_not_exists(pk)" } },
           { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
-            UpdateExpression: "SET #state=:reserved, capability=:capability, clientToken=:newToken, reservedAt=:time, generation=:generation REMOVE taskArn",
+            UpdateExpression: "SET #state=:reserved, capability=:capability, clientToken=:newToken, reservedAt=:time, generation=:generation, slotIndex=:slotIndex REMOVE taskArn",
             ConditionExpression: "#state=:stopped AND clientToken=:oldToken AND configHash=:hash",
             ExpressionAttributeNames: { "#state": "state" },
             ExpressionAttributeValues: { ":reserved": "reserved", ":stopped": "stopped",
               ":capability": row.capability, ":newToken": clientToken,
               ":oldToken": existing.clientToken, ":time": row.reservedAt,
-              ":generation": generation, ":hash": row.configHash } } },
-          { Put: { TableName: this.table, Item: { ...slotKey,
+              ":generation": generation, ":slotIndex": index, ":hash": row.configHash } } },
+          { Put: { TableName: this.table, Item: { ...slotKey(index),
             candidateId: row.candidateId, runId: row.runId,
             clientToken, reservedAt: row.reservedAt },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+          { Put: { TableName: this.table, Item: { ...candidateActiveKey(row.candidateId),
+            runId: row.runId, clientToken },
             ConditionExpression: "attribute_not_exists(pk)" } },
         ] }));
         return "created";
@@ -141,28 +170,37 @@ export class DynamoFargateLaunchStore {
         const name = (error as { name?: string }).name;
         if (name !== "TransactionCanceledException" && name !== "ConditionalCheckFailedException") throw error;
         const current = await this.read(row.candidateId, row.runId);
-        return current?.state === "stopped" ? "busy" : current ? "existing" : "busy";
+        if (current?.state !== "stopped") return current ? "existing" : "busy";
       }
+      }
+      return "busy";
     }
     if (existing) return "existing";
+    for (let index = 0; index < maxConcurrentTasks; index++) {
     try {
       await this.db.send(new TransactWriteCommand({ TransactItems: [
         { ConditionCheck: { TableName: this.table,
           Key: { pk: row.pk, sk: "DELETED" },
           ConditionExpression: "attribute_not_exists(pk)" } },
-        { Put: { TableName: this.table, Item: row,
+        { Put: { TableName: this.table, Item: { ...row, slotIndex: index },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { Put: { TableName: this.table,
-          Item: { ...slotKey, candidateId: row.candidateId, runId: row.runId,
+          Item: { ...slotKey(index), candidateId: row.candidateId, runId: row.runId,
             clientToken: row.clientToken, reservedAt: row.reservedAt },
+          ConditionExpression: "attribute_not_exists(pk)" } },
+        { Put: { TableName: this.table,
+          Item: { ...candidateActiveKey(row.candidateId),
+            runId: row.runId, clientToken: row.clientToken },
           ConditionExpression: "attribute_not_exists(pk)" } },
       ] }));
       return "created";
     } catch (error) {
       const name = (error as { name?: string }).name;
       if (name !== "TransactionCanceledException" && name !== "ConditionalCheckFailedException") throw error;
-      return await this.read(row.candidateId, row.runId) ? "existing" : "busy";
+      if (await this.read(row.candidateId, row.runId)) return "existing";
     }
+    }
+    return "busy";
   }
 
   async markStarted(row: LaunchRow, taskArn: string): Promise<void> {
@@ -200,10 +238,13 @@ export class DynamoFargateLaunchStore {
         ExpressionAttributeNames: { "#state": "state" },
         ExpressionAttributeValues: { ":stopped": "stopped", ":started": "started",
           ":token": row.clientToken, ":task": row.taskArn } } },
-      { Delete: { TableName: this.table, Key: slotKey,
+      { Delete: { TableName: this.table, Key: slotKey(row.slotIndex),
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      { Delete: { TableName: this.table, Key: candidateActiveKey(row.candidateId),
+        ConditionExpression: "attribute_not_exists(pk) OR (clientToken=:token AND runId=:run)",
+        ExpressionAttributeValues: { ":token": row.clientToken, ":run": row.runId } } },
       ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
@@ -217,10 +258,13 @@ export class DynamoFargateLaunchStore {
         ExpressionAttributeNames: { "#state": "state" },
         ExpressionAttributeValues: { ":stopped": "stopped", ":reserved": "reserved",
           ":token": row.clientToken } } },
-      { Delete: { TableName: this.table, Key: slotKey,
+      { Delete: { TableName: this.table, Key: slotKey(row.slotIndex),
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      { Delete: { TableName: this.table, Key: candidateActiveKey(row.candidateId),
+        ConditionExpression: "attribute_not_exists(pk) OR (clientToken=:token AND runId=:run)",
+        ExpressionAttributeValues: { ":token": row.clientToken, ":run": row.runId } } },
       ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
@@ -251,7 +295,7 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
   const fresh = launchRow.parse({ ...key, candidateId, runId,
     capability: mintArtifactRunCapability(candidateId, runId, ports.signingKey, nowEpoch),
     clientToken, configHash, reservedAt: nowEpoch, state: "reserved" });
-  const result = await ports.store.reserve(fresh);
+  const result = await ports.store.reserve(fresh, config.maxConcurrentTasks ?? 1);
   if (result === "busy") return "capacity_busy";
   const row = await ports.store.read(candidateId, runId);
   const expectedToken = row?.generation
@@ -321,12 +365,15 @@ export async function stopFargateRun(candidateId: string, runId: string,
 export async function sweepFargateSlot(config: FargateLaunchConfig,
   ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send">;
     onStopped?(candidateId: string, runId: string, generation: number): Promise<boolean> },
-  nowEpoch = Math.floor(Date.now() / 1000)): Promise<"idle" | "waiting" | "stopping" | "stopped"> {
+  nowEpoch = Math.floor(Date.now() / 1000), slotIndex = 0): Promise<"idle" | "waiting" | "stopping" | "stopped"> {
   validated(config);
-  const slot = await ports.store.readActiveSlot();
+  // Inspect all historical slots even after a capacity reduction. Existing
+  // tasks must be stopped and reclaimed before those slots can be forgotten.
+  slotKey(slotIndex);
+  const slot = await ports.store.readActiveSlot(slotIndex);
   if (!slot) return "idle";
   const row = await ports.store.read(slot.candidateId, slot.runId);
-  if (!row || row.clientToken !== slot.clientToken || row.state === "stopped") {
+  if (!row || row.slotIndex !== slotIndex || row.clientToken !== slot.clientToken || row.state === "stopped") {
     throw new Error("Launch slot and run need operator reconciliation");
   }
   if (!row.taskArn) {
@@ -378,7 +425,7 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
   return "waiting";
 }
 
-/** Deletion gate for the one-slot staging deployment. Call this before data
+/** Deletion gate for every staging slot. Call this before data
  * erasure and repeat until STOPPED. A missing ECS state cannot authorize erase. */
 export async function stopCandidateFargateTask(candidateId: string,
   config: FargateStopConfig,
@@ -393,8 +440,8 @@ export async function stopCandidateFargateTask(candidateId: string,
     if (outcome !== "stopped") stopping = true;
   }
   // An active slot with no task row is a damaged registry, never proof of stop.
-  const slot = await ports.store.readActiveSlot();
-  if (slot?.candidateId === candidateId) {
+  const slots = await ports.store.readActiveSlots(32);
+  for (const slot of slots.filter(item => item.candidateId === candidateId)) {
     if (!rows.some(row => row.runId === slot.runId) || !stopping) {
       throw new Error("Candidate task registry needs reconciliation");
     }
