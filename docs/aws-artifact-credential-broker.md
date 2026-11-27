@@ -31,8 +31,9 @@ candidate/run before reading AWS state and requests credentials only after
 lease acquisition. A receipt write obtains a fresh broker grant; a confirmed,
 uncertain, expired, or released lease cannot obtain another grant.
 
-Before STS, the broker transactionally checks that no deletion tombstone exists
-and writes an immutable `GRANT#<uuid>` ledger row under the candidate partition,
+Before STS, the broker transactionally checks that no deletion tombstone exists,
+that the same run owns an unexpired lease, and writes an immutable `GRANT#<uuid>`
+ledger row under the candidate partition,
 with `expiresAt` set 960 seconds after reservation. The 60-second margin covers
 the Lambda/STS interval and clock skew beyond the 900-second STS lifetime.
 Deletion must inspect these rows with strongly consistent reads and stay pending

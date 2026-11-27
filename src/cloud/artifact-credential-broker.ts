@@ -115,7 +115,8 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
       loadIdentity(candidateId: string, runId: string): Promise<{ subjectId: string }>;
     };
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
-    grantFence: { reserve(candidateId: string, nowEpoch: number): Promise<void> };
+    grantFence: { reserve(candidateId: string, runId: string,
+      leaseToken: string, nowEpoch: number): Promise<void> };
     clock: () => number;
     sts: Pick<STSClient, "send">;
   }): Promise<ScopedArtifactCredentials> {
@@ -139,7 +140,7 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
   }
   // Deletion observes this row before it can purge. A failed reservation must
   // never result in an STS credential, even if all prior checks succeeded.
-  await ports.grantFence.reserve(claims.candidateId, finalEpoch);
+  await ports.grantFence.reserve(claims.candidateId, claims.runId, leaseToken, finalEpoch);
   const result = await ports.sts.send(new AssumeRoleCommand({
     RoleArn: config.dataRoleArn,
     RoleSessionName: `oa-${claims.runId.slice(0, 8)}`,

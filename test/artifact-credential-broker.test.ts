@@ -50,7 +50,8 @@ describe("candidate-scoped artifact credentials", () => {
     expect(grant).toMatchObject({ candidateId, runId, leaseToken, accessKeyId: "ASIATEST" });
     expect(ports.admission.hasArtifactGrantEligibility).toHaveBeenCalledWith(candidateId, runId, leaseToken, nowEpoch);
     expect(ports.billing.loadEntitlements).toHaveBeenCalledWith(subjectId);
-    expect(ports.grantFence.reserve).toHaveBeenCalledWith(candidateId, nowEpoch);
+    expect(ports.grantFence.reserve).toHaveBeenCalledWith(candidateId, runId,
+      leaseToken, nowEpoch);
     const command = ports.send.mock.calls[0]?.[0] as AssumeRoleCommand;
     expect(command.input.DurationSeconds).toBe(900);
     const policy = JSON.parse(command.input.Policy!);
