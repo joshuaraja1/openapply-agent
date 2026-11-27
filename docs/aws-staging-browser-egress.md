@@ -22,3 +22,14 @@ immutable ECR image pull, CloudWatch log delivery, AWS service calls, and a
 controlled outbound HTTPS request from a disposable synthetic task before
 enabling the application launcher. This network stack does not grant any
 candidate-data permissions or enable a browser task by itself.
+
+## November 27 staging drill
+
+The template was deployed temporarily in the staging VPC with
+`PrivateSubnetCidr=172.31.96.0/24`. The existing no-candidate-data smoke task
+ran with `AssignPublicIp=DISABLED` in that private subnet. ECS reported exit
+code 0 and CloudWatch logged `Cloud browser smoke passed`. The temporary stack
+was deleted afterward; AWS reported its NAT gateway deleted and the private
+subnet absent. This verifies private image pull, logging, and Chromium startup.
+It does not verify an application task, the tenant broker, external employer
+sites, or production network capacity.
