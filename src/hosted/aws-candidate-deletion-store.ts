@@ -21,6 +21,7 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
     try {
       await this.db.send(new PutCommand({ TableName: this.tableName,
         Item: { ...marker, candidateId, subjectId, state: "pending", notBeforeEpoch,
+          deletionIndexPk: "PENDING", deletionDue: notBeforeEpoch,
           requestedAt: new Date().toISOString() },
         ConditionExpression: "attribute_not_exists(pk)" }));
       return { state: "pending", subjectId, notBeforeEpoch };
@@ -37,11 +38,11 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
       && !Number.isNaN(Date.parse(row.deletedAt))) {
       try {
         await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: marker,
-          UpdateExpression: "SET candidateId = :candidate, subjectId = :subject, #state = :pending, notBeforeEpoch = :notBefore, requestedAt = :requestedAt",
+          UpdateExpression: "SET candidateId = :candidate, subjectId = :subject, #state = :pending, notBeforeEpoch = :notBefore, deletionIndexPk = :indexPk, deletionDue = :notBefore, requestedAt = :requestedAt",
           ConditionExpression: "attribute_exists(pk) AND attribute_exists(deletedAt) AND attribute_not_exists(subjectId) AND attribute_not_exists(#state)",
           ExpressionAttributeNames: { "#state": "state" },
           ExpressionAttributeValues: { ":candidate": candidateId, ":subject": subjectId,
-            ":pending": "pending", ":notBefore": notBeforeEpoch,
+            ":pending": "pending", ":notBefore": notBeforeEpoch, ":indexPk": "PENDING",
             ":requestedAt": new Date().toISOString() } }));
         return { state: "pending", subjectId, notBeforeEpoch };
       } catch (error) {
@@ -57,25 +58,64 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
     return { state: row.state, subjectId, notBeforeEpoch: row.notBeforeEpoch };
   }
 
+  async status(candidateId: string, subjectId: string): Promise<"none" | "pending" | "complete"> {
+    const row = (await this.db.send(new GetCommand({ TableName: this.tableName,
+      Key: key(candidateId), ConsistentRead: true }))).Item;
+    if (!row) return "none";
+    if (row.pk !== key(candidateId).pk || row.sk !== "DELETED"
+      || row.subjectId !== subjectId || (row.state !== "pending" && row.state !== "complete")) {
+      // A legacy or malformed tombstone remains a write barrier, but cannot
+      // be described to the candidate as a completed purge.
+      return "pending";
+    }
+    return row.state;
+  }
+
+  async due(nowEpoch: number, limit: number): Promise<Array<{ candidateId: string; subjectId: string }>> {
+    const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
+      IndexName: "DeletionDueIndex",
+      KeyConditionExpression: "deletionIndexPk = :pending AND deletionDue <= :now",
+      ExpressionAttributeValues: { ":pending": "PENDING", ":now": nowEpoch },
+      Limit: Math.min(Math.max(limit, 1), 25) }));
+    return (result.Items ?? []).flatMap(row => row.sk === "DELETED"
+      && typeof row.candidateId === "string" && typeof row.subjectId === "string"
+      && row.pk === `CANDIDATE#${row.candidateId}` && row.state === "pending"
+      ? [{ candidateId: row.candidateId, subjectId: row.subjectId }] : []);
+  }
+
+  async defer(candidateId: string, subjectId: string, nextEpoch: number): Promise<void> {
+    try {
+      await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: key(candidateId),
+        UpdateExpression: "SET deletionDue = :next",
+        ConditionExpression: "#state = :pending AND subjectId = :subject AND deletionIndexPk = :indexPk AND deletionDue < :next",
+        ExpressionAttributeNames: { "#state": "state" },
+        ExpressionAttributeValues: { ":pending": "pending", ":subject": subjectId,
+          ":indexPk": "PENDING", ":next": nextEpoch } }));
+    } catch (error) { if (!conditional(error)) throw error; }
+  }
+
   async hasActiveWriters(candidateId: string, nowEpoch: number): Promise<boolean> {
     const pk = key(candidateId).pk;
     const worker = await this.db.send(new GetCommand({ TableName: this.tableName,
       Key: { pk, sk: "LEASE" }, ConsistentRead: true }));
     if (worker.Item && (!Number.isSafeInteger(worker.Item.expiresAt)
       || worker.Item.expiresAt >= nowEpoch)) return true;
-    let cursor: Record<string, unknown> | undefined;
-    for (let page = 0; page < 100; page++) {
-      const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
-        KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": pk, ":prefix": "UPLOAD#" },
-        ConsistentRead: true, Limit: 100,
-        ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
-      if ((result.Items ?? []).some(item => !Number.isSafeInteger(item.expiresAt)
-        || item.expiresAt >= nowEpoch)) return true;
-      if (!result.LastEvaluatedKey) return false;
-      cursor = result.LastEvaluatedKey;
+    for (const prefix of ["UPLOAD#", "GRANT#"]) {
+      let cursor: Record<string, unknown> | undefined;
+      for (let page = 0; page < 100; page++) {
+        const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": pk, ":prefix": prefix },
+          ConsistentRead: true, Limit: 100,
+          ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
+        if ((result.Items ?? []).some(item => !Number.isSafeInteger(item.expiresAt)
+          || item.expiresAt >= nowEpoch)) return true;
+        if (!result.LastEvaluatedKey) break;
+        cursor = result.LastEvaluatedKey;
+        if (page === 99) return true; // Cannot prove all credentials expired.
+      }
     }
-    return true; // Bounded scan cannot prove all writers stopped.
+    return false;
   }
 
   async claimPurge(candidateId: string, subjectId: string, nowEpoch: number,
@@ -130,7 +170,7 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
 
   async markComplete(candidateId: string, subjectId: string): Promise<void> {
     await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: key(candidateId),
-      UpdateExpression: "SET #state = :complete, completedAt = :completedAt",
+      UpdateExpression: "SET #state = :complete, completedAt = :completedAt REMOVE deletionIndexPk, deletionDue",
       ConditionExpression: "#state = :pending AND subjectId = :subjectId",
       ExpressionAttributeNames: { "#state": "state" },
       ExpressionAttributeValues: { ":pending": "pending", ":complete": "complete",

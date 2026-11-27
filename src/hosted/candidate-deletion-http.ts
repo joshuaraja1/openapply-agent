@@ -11,7 +11,10 @@ export async function handleCandidateDeletionHttp(request: Request, deps: Candid
       "cache-control": "no-store", "referrer-policy": "no-referrer",
       "content-security-policy": "default-src 'none'" },
   });
-  if (new URL(request.url).pathname !== "/api/candidates/delete") return respond(404, "unavailable");
+  const path = new URL(request.url).pathname;
+  if (path !== "/api/candidates/delete" && path !== "/api/candidates/deletion-status") {
+    return respond(404, "unavailable");
+  }
   if (request.method !== "POST") return respond(405, "unavailable");
   if (request.headers.get("origin") !== deps.appOrigin) return respond(403, "unavailable");
   const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
@@ -20,6 +23,10 @@ export async function handleCandidateDeletionHttp(request: Request, deps: Candid
   let subjectId: string;
   try { subjectId = await deps.verifySubject(match[1]!); }
   catch { return respond(401, "unavailable"); }
+  if (path === "/api/candidates/deletion-status") {
+    try { return respond(200, await deps.store.status(deps.candidateIdForSubject(subjectId), subjectId)); }
+    catch { return respond(503, "unavailable"); }
+  }
   try {
     const result = await deleteCandidateAccount(subjectId, deps);
     return respond(result.state === "complete" ? 200 : 202, result.state);

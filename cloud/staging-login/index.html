@@ -52,6 +52,16 @@
       <p id="setup-status" role="status" aria-live="polite"></p>
       <p id="plan-status" class="note">Plan status will appear after billing is connected.</p>
     </section>
+    <section id="candidate-deletion" hidden aria-labelledby="deletion-heading">
+      <h2 id="deletion-heading">Delete candidate data</h2>
+      <p class="note">This stops future application work and starts deletion of your candidate profile and uploaded files. Payment records follow a separate retention policy.</p>
+      <p id="deletion-status" role="status" aria-live="polite">Checking deletion status…</p>
+      <label>Type DELETE to confirm<input id="deletion-confirm" autocomplete="off" spellcheck="false"></label>
+      <div class="actions">
+        <button id="deletion-request" type="button" disabled>Request deletion</button>
+        <button id="deletion-refresh" type="button" class="secondary">Refresh status</button>
+      </div>
+    </section>
     <p class="note">Private test environment. Checkout uses Stripe test mode; no real card is charged.</p>
   </main>
 </body>

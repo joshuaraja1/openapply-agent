@@ -10,6 +10,10 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableDeletionRetry:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
   CodeBucket:
     Type: String
   CodeKey:
@@ -35,6 +39,9 @@ Conditions:
   DeletionEnabled: !And
     - !Condition OnboardingEnabled
     - !Equals [!Ref EnableCandidateDeletion, 'true']
+  RetryEnabled: !And
+    - !Condition DeletionEnabled
+    - !Equals [!Ref EnableDeletionRetry, 'true']
 
 Resources:
   CandidateDataKey:
@@ -75,6 +82,9 @@ Resources:
               - Effect: Allow
                 Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem, dynamodb:Query]
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}/index/DeletionDueIndex'
               - Effect: Allow
                 Action: [s3:PutObject, s3:GetObject, s3:DeleteObject, s3:DeleteObjectVersion]
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
@@ -155,6 +165,57 @@ Resources:
       RouteKey: 'POST /api/candidates/delete'
       Target: !Sub 'integrations/${OnboardingIntegration}'
 
+  CandidateDeletionStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: DeletionEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/deletion-status'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
+  DeletionRetryFunction:
+    Type: AWS::Lambda::Function
+    Condition: RetryEnabled
+    Properties:
+      FunctionName: openapply-staging-deletion-retry
+      Runtime: nodejs22.x
+      Handler: aws-onboarding-lambda.retryHandler
+      Role: !GetAtt OnboardingRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: 'true'
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          CANDIDATE_KMS_KEY_ARN: !GetAtt CandidateDataKey.Arn
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  DeletionRetryRule:
+    Type: AWS::Events::Rule
+    Condition: RetryEnabled
+    Properties:
+      ScheduleExpression: 'rate(1 minute)'
+      State: ENABLED
+      Targets:
+        - Id: DeletionRetry
+          Arn: !GetAtt DeletionRetryFunction.Arn
+
+  DeletionRetryInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: RetryEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeletionRetryFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DeletionRetryRule.Arn
+
   OnboardingStage:
     Type: AWS::ApiGatewayV2::Stage
     Condition: OnboardingEnabled
@@ -192,6 +253,15 @@ Resources:
       FunctionName: !Ref OnboardingFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/delete'
+
+  CandidateDeletionStatusInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeletionEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/deletion-status'
 
 Outputs:
   OnboardingApiOrigin:

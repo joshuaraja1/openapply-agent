@@ -45,6 +45,8 @@ describe("candidate deletion Dynamo boundary", () => {
       Pick<DynamoDBDocumentClient, "send">, "ledger");
     const marker = await store.begin(candidateId, "sub-1", 1000);
     expect(marker).toEqual({ state: "pending", subjectId: "sub-1", notBeforeEpoch: 1000 });
+    const put = commands.find(command => command instanceof PutCommand) as PutCommand;
+    expect(put.input.Item).toMatchObject({ deletionIndexPk: "PENDING", deletionDue: 1000 });
     expect(await store.hasActiveWriters(candidateId, 1001)).toBe(false);
     expect(await store.purgeMetadata(candidateId)).toBe(true);
     await store.markComplete(candidateId, "sub-1");
@@ -116,6 +118,21 @@ describe("candidate deletion Dynamo boundary", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("waits out a broker STS grant and fails closed on malformed grant expiry", async () => {
+    let expiry: unknown = 2000;
+    const send = vi.fn(async (command: unknown) => command instanceof GetCommand
+      ? { Item: undefined } : command instanceof QueryCommand
+        ? { Items: command.input.ExpressionAttributeValues?.[":prefix"] === "GRANT#"
+          ? [{ pk, sk: "GRANT#one", expiresAt: expiry }] : [] } : {});
+    const store = new DynamoCandidateDeletionStore({ send } as unknown as
+      Pick<DynamoDBDocumentClient, "send">, "ledger");
+    expect(await store.hasActiveWriters(candidateId, 1500)).toBe(true);
+    expiry = "unknown";
+    expect(await store.hasActiveWriters(candidateId, 3000)).toBe(true);
+    expiry = 2000;
+    expect(await store.hasActiveWriters(candidateId, 3000)).toBe(false);
+  });
+
   it("serializes purge attempts with a bounded owner lease", async () => {
     const commands: UpdateCommand[] = [];
     let occupied = false;
@@ -138,5 +155,27 @@ describe("candidate deletion Dynamo boundary", () => {
     expect(await store.claimPurge(candidateId, "sub-1", 1000, "owner-b")).toBe(true);
     expect(commands[0]?.input.ConditionExpression).toContain("purgeLeaseUntil < :now");
     expect(commands[2]?.input.ConditionExpression).toContain("purgeOwner = :owner");
+  });
+
+  it("queries only bounded due tombstones and removes them from the index on completion", async () => {
+    const commands: unknown[] = [];
+    const send = vi.fn(async (command: unknown) => {
+      commands.push(command);
+      if (command instanceof QueryCommand) return { Items: [
+        { pk, sk: "DELETED", candidateId, subjectId: "sub-1", state: "pending" },
+        { pk, sk: "PROFILE#other", candidateId, subjectId: "sub-1", state: "pending" },
+      ] };
+      return {};
+    });
+    const store = new DynamoCandidateDeletionStore({ send } as unknown as
+      Pick<DynamoDBDocumentClient, "send">, "ledger");
+    expect(await store.due(1000, 1000)).toEqual([{ candidateId, subjectId: "sub-1" }]);
+    await store.defer(candidateId, "sub-1", 1060);
+    await store.markComplete(candidateId, "sub-1");
+    const query = commands[0] as QueryCommand;
+    expect(query.input.IndexName).toBe("DeletionDueIndex");
+    expect(query.input.Limit).toBe(25);
+    const completed = commands[2] as UpdateCommand;
+    expect(completed.input.UpdateExpression).toContain("REMOVE deletionIndexPk, deletionDue");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deleteCandidateAccount, type CandidateDeletionDeps } from "../src/hosted/candidate-deletion.js";
+import { DELETE_HOLD_SECONDS, deleteCandidateAccount, retryCandidateDeletions, type CandidateDeletionDeps } from "../src/hosted/candidate-deletion.js";
 import { handleCandidateDeletionHttp } from "../src/hosted/candidate-deletion-http.js";
 
 const candidateId = "11111111-1111-4111-8111-111111111111";
@@ -19,6 +19,10 @@ function fixture() {
         marker ??= { state: "pending", subjectId: subject, notBeforeEpoch };
         return marker;
       },
+      async status() { return marker?.state ?? "none"; },
+      async due(nowEpoch) { return marker?.state === "pending" && marker.notBeforeEpoch <= nowEpoch
+        ? [{ candidateId, subjectId }] : []; },
+      async defer() {},
       async hasActiveWriters() { return active; },
       async claimPurge() { if (claimed) return false; claimed = true; return true; },
       async releasePurge() { claimed = false; },
@@ -82,5 +86,50 @@ describe("hosted candidate deletion", () => {
     expect(accepted.status).toBe(202);
     expect(await accepted.json()).toEqual({ state: "pending" });
     expect(test.marker()?.subjectId).toBe(subjectId);
+  });
+
+  it("resumes after the hold without a second browser request and retries partial S3 failure", async () => {
+    const test = fixture();
+    await deleteCandidateAccount(subjectId, test.deps, t0);
+    test.purge.mockRejectedValueOnce(new Error("partial S3 deletion"));
+    const later = new Date(t0.getTime() + 241_000);
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 0, failed: 1 });
+    expect(test.marker()?.state).toBe("pending");
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 1, failed: 0 });
+    expect(test.marker()?.state).toBe("complete");
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 0, completed: 0, failed: 0 });
+  });
+
+  it("returns authenticated status without exposing identity or starting deletion", async () => {
+    const test = fixture();
+    const deps = { ...test.deps, appOrigin: "https://app.example.com",
+      verifySubject: async () => subjectId };
+    const request = new Request("https://app.example.com/api/candidates/deletion-status", {
+      method: "POST", headers: { origin: deps.appOrigin, authorization: "Bearer a.b.c" } });
+    const response = await handleCandidateDeletionHttp(request, deps);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ state: "none" });
+    expect(test.marker()).toBeUndefined();
+    expect(JSON.stringify(Object.fromEntries(response.headers))).not.toContain(subjectId);
+  });
+
+  it("never turns a partial purge into an HTTP completion response", async () => {
+    const test = fixture();
+    const deps = { ...test.deps, appOrigin: "https://app.example.com",
+      verifySubject: async () => subjectId };
+    const request = () => new Request("https://app.example.com/api/candidates/delete", {
+      method: "POST", headers: { origin: deps.appOrigin, authorization: "Bearer a.b.c" } });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(t0);
+      expect((await handleCandidateDeletionHttp(request(), deps)).status).toBe(202);
+      test.purge.mockRejectedValueOnce(new Error(`partial S3 deletion for ${subjectId}`));
+      vi.setSystemTime(new Date(t0.getTime() + DELETE_HOLD_SECONDS * 1000 + 1000));
+      const failed = await handleCandidateDeletionHttp(request(), deps);
+      expect(failed.status).toBe(503);
+      const body = await failed.text();
+      expect(JSON.parse(body)).toEqual({ state: "pending" });
+      expect(body).not.toContain(subjectId);
+    } finally { vi.useRealTimers(); }
   });
 });

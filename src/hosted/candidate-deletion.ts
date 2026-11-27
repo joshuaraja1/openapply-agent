@@ -13,12 +13,40 @@ export interface DeletionRecord {
 
 export interface CandidateDeletionStore {
   begin(candidateId: string, subjectId: string, notBeforeEpoch: number): Promise<DeletionRecord>;
+  status(candidateId: string, subjectId: string): Promise<"none" | "pending" | "complete">;
+  due(nowEpoch: number, limit: number): Promise<Array<{ candidateId: string; subjectId: string }>>;
+  defer(candidateId: string, subjectId: string, nextEpoch: number): Promise<void>;
   hasActiveWriters(candidateId: string, nowEpoch: number): Promise<boolean>;
   claimPurge(candidateId: string, subjectId: string, nowEpoch: number, owner: string): Promise<boolean>;
   releasePurge(candidateId: string, subjectId: string, owner: string): Promise<void>;
   /** Delete candidate ledger rows in bounded batches, retaining DELETED. */
   purgeMetadata(candidateId: string): Promise<boolean>;
   markComplete(candidateId: string, subjectId: string): Promise<void>;
+}
+
+/** A bounded scheduled tick. Due rows are durable, so an interrupted tick is
+ * retried by the next invocation. A failed purge never becomes complete. */
+export async function retryCandidateDeletions(deps: CandidateDeletionDeps, now = new Date()) {
+  const nowEpoch = Math.floor(now.getTime() / 1000);
+  if (!Number.isSafeInteger(nowEpoch)) throw new Error("Invalid deletion clock");
+  let attempted = 0;
+  let completed = 0;
+  let failed = 0;
+  for (const row of await deps.store.due(nowEpoch, 25)) {
+    attempted++;
+    try {
+      if (deps.candidateIdForSubject(row.subjectId) !== row.candidateId) {
+        throw new Error("Deletion candidate mismatch");
+      }
+      const result = await deleteCandidateAccount(row.subjectId, deps, now);
+      if (result.state === "complete") completed++;
+    } catch { failed++; }
+    // Move still-pending rows to the next minute so one blocked candidate
+    // cannot starve other due deletions. Completion removes the index keys.
+    try { await deps.store.defer(row.candidateId, row.subjectId, nowEpoch + 60); }
+    catch { failed++; }
+  }
+  return { attempted, completed, failed };
 }
 
 export interface CandidateDeletionDeps {
