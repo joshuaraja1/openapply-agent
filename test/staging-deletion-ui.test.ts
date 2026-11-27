@@ -34,7 +34,8 @@ describe("signed-in staging deletion UI", () => {
     button.emit("click");
     for (let index = 0; index < 10; index++) await Promise.resolve();
     expect(elements.get("#candidate-setup")?.hidden).toBe(true);
-    expect(elements.get("#deletion-status")?.textContent).toContain("Final account deletion requires");
+    expect(elements.get("#deletion-status")?.textContent).toContain("application data cleanup is complete");
+    expect(elements.get("#deletion-status")?.textContent).toContain("sign-in identity and payment records are handled separately");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 

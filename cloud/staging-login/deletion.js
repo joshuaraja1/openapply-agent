@@ -27,7 +27,7 @@ export function attachCandidateDeletion(auth) {
     }
     status.textContent = state === 'none' ? 'No deletion request is pending.'
       : state === 'pending' ? 'Deletion is pending. Application work is blocked while cleanup continues.'
-      : state === 'complete' ? 'Storage cleanup reported complete. Final account deletion requires a separate active-task safety check. Payment records follow a separate retention policy.'
+      : state === 'complete' ? 'OpenApply application data cleanup is complete. Your sign-in identity and payment records are handled separately. Applications already sent to employers remain with those employers.'
       : 'Deletion status is unavailable. Refresh to check again.';
     request.disabled = busy || state !== 'none' || confirm.value !== 'DELETE';
     if (timer) clearTimeout(timer);

@@ -1,5 +1,15 @@
 # Hosted deletion tombstone, staging slice
 
+OpenApply serves **job seekers**. The internal `candidate` identifier is the
+job seeker's tenant ID; it does not represent an employer-side applicant
+database. Deletion here removes OpenApply's encrypted profile, uploaded files,
+application artifacts and receipts, and per-seeker run ledger rows. It does not
+withdraw applications already submitted to employers or delete employer-held
+copies. It also does not delete the Cognito sign-in identity or Stripe payment
+records. The UI must describe this as **OpenApply application-data cleanup**,
+not full account deletion. Full account deletion remains a separate release
+gate.
+
 `POST /api/candidates/delete` is a same-origin, Cognito-authenticated route in
 the optional onboarding API. It does not require an active plan. Its candidate
 ID comes only from the verified issuer and subject. The first request writes a
