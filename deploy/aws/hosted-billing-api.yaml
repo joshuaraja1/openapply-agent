@@ -64,11 +64,22 @@ Parameters:
     Default: openapply-staging-application.fifo
     AllowedPattern: '^openapply-[a-z0-9-]+-application\.fifo$'
 
+  FargateLauncherArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:openapply-staging-fargate-launcher$'
+
 Conditions:
   HostedEnqueueEnabled: !Equals [!Ref EnableApplicationEnqueue, 'true']
+  FargateLauncherEnabled: !Not [!Equals [!Ref FargateLauncherArn, '']]
   HostedRunCreationEnabled: !Equals [!Ref EnableApplicationRunCreation, 'true']
 
 Rules:
+  FargateLauncherConfiguration:
+    RuleCondition: !Not [!Equals [!Ref FargateLauncherArn, '']]
+    Assertions:
+      - Assert: !Equals [!Ref EnableApplicationEnqueue, 'true']
+        AssertDescription: Fargate launcher requires authenticated hosted enqueue.
   HostedEnqueueConfiguration:
     RuleCondition: !Equals [!Ref EnableApplicationEnqueue, 'true']
     Assertions:
@@ -232,6 +243,22 @@ Resources:
                   Action: sqs:SendMessage
                   Resource: !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ApplicationQueueName}'
           - !Ref AWS::NoValue
+        - !If
+          - FargateLauncherEnabled
+          - PolicyName: OpenApplyInvokeStagingLauncher
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !Ref FargateLauncherArn
+                - Effect: Allow
+                  Action:
+                    - dynamodb:PutItem
+                    - dynamodb:UpdateItem
+                    - dynamodb:ConditionCheckItem
+                  Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+          - !Ref AWS::NoValue
 
   BillingReplayRole:
     Type: AWS::IAM::Role
@@ -304,6 +331,7 @@ Resources:
           ENQUEUE_ENABLED: !Ref EnableApplicationEnqueue
           RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
           APPLICATION_QUEUE_URL: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${ApplicationQueueName}'
+          FARGATE_LAUNCHER_ARN: !Ref FargateLauncherArn
 
   BillingReplayFunction:
     Type: AWS::Lambda::Function

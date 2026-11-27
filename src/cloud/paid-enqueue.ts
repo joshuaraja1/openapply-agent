@@ -16,6 +16,18 @@ export async function enqueueHostedApplication(
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
     queue: { send(message: { body: string; groupId: string;
       deduplicationId: string }): Promise<void> };
+    dispatch?: {
+      ensurePending(candidateId: string, runId: string,
+        envelope: ReturnType<typeof encodeCloudRunEnvelope>): Promise<{
+        state: "pending_queue" | "queued" | "launched" | "blocked" | "needs_reconciliation";
+        body: string; groupId: string; deduplicationId: string;
+      }>;
+      markQueued(candidateId: string, runId: string): Promise<void>;
+      markLaunched(candidateId: string, runId: string): Promise<void>;
+      markNeedsReconciliation(candidateId: string, runId: string): Promise<void>;
+    };
+    /** Optional staging hook. A scheduled dispatcher retries after failure. */
+    launcher?: { launch(candidateId: string, runId: string): Promise<"started" | "capacity_busy" | "already_stopped"> };
   },
   now = new Date(),
 ): Promise<void> {
@@ -33,5 +45,29 @@ export async function enqueueHostedApplication(
   }
   requireHostedAccess(authenticatedSubjectId,
     await ports.billing.loadEntitlements(authenticatedSubjectId), now);
-  await ports.queue.send(envelope);
+  if (ports.launcher && !ports.dispatch) throw new Error("Durable dispatch required for launcher");
+  if (!ports.dispatch) {
+    await ports.queue.send(envelope);
+    return;
+  }
+  const pending = await ports.dispatch.ensurePending(candidateId, runId, envelope);
+  if (pending.state === "blocked") throw new Error("Application run is not authorized");
+  if (pending.state === "needs_reconciliation") throw new Error("Application run needs reconciliation");
+  if (pending.state === "launched") return;
+  if (pending.state === "pending_queue") {
+    await ports.queue.send({ body: pending.body, groupId: pending.groupId,
+      deduplicationId: pending.deduplicationId });
+    await ports.dispatch.markQueued(candidateId, runId);
+  }
+  // The outbox is durable now. A busy slot or transient Lambda error is picked
+  // up by the scheduled dispatcher, so the HTTP request can return queued.
+  let launchOutcome: "started" | "capacity_busy" | "already_stopped" | undefined;
+  try { launchOutcome = await ports.launcher?.launch(candidateId, runId); }
+  catch { return; /* scheduled retry owns the durable pending record */ }
+  if (launchOutcome === "started") {
+    await ports.dispatch.markLaunched(candidateId, runId);
+  } else if (launchOutcome === "already_stopped") {
+    await ports.dispatch.markNeedsReconciliation(candidateId, runId);
+    throw new Error("Application run needs reconciliation");
+  }
 }

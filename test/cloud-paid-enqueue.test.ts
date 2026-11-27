@@ -58,4 +58,33 @@ describe("hosted application enqueue access", () => {
       .rejects.toThrow("not authorized");
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("launches only after SQS accepts the durable message", async () => {
+    const { ports, send } = harness();
+    const order: string[] = [];
+    const dispatch = {
+      ensurePending: vi.fn(async (_candidateId: string, _runId: string,
+        envelope: { body: string; groupId: string; deduplicationId: string }) => {
+        order.push("durable");
+        return { ...envelope, state: "pending_queue" as const };
+      }),
+      markQueued: vi.fn(async () => { order.push("queued"); }),
+      markLaunched: vi.fn(async () => { order.push("launched"); }),
+      markNeedsReconciliation: vi.fn(async () => {}),
+    };
+    send.mockImplementation(async () => { order.push("sqs"); });
+    const launch = vi.fn(async () => {
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["durable", "sqs", "queued"]);
+      return "started" as const;
+    });
+    await enqueueHostedApplication("sub-a", candidateId, runId,
+      { ...ports, dispatch, launcher: { launch } }, now);
+    expect(order).toEqual(["durable", "sqs", "queued", "launched"]);
+    expect(launch).toHaveBeenCalledWith(candidateId, runId);
+    send.mockRejectedValueOnce(new Error("SQS unavailable"));
+    await expect(enqueueHostedApplication("sub-a", candidateId, runId,
+      { ...ports, dispatch, launcher: { launch } }, now)).rejects.toThrow("SQS unavailable");
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
 });
