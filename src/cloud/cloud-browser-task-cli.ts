@@ -9,6 +9,7 @@ import { SyntheticBrowserApplication, SyntheticReceiptVerifier }
 import { runSyntheticBrowserFixture } from "./synthetic-browser-fixture.js";
 import { createBrokeredRunState } from "./aws-run-state-broker-client.js";
 import { syntheticCheckpoint, syntheticCrashStage } from "./synthetic-fault-probe.js";
+import { runAwsCloudPreSubmitPreview } from "./aws-cloud-preview-runtime.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -30,6 +31,22 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
   const mode = process.env.OPENAPPLY_CLOUD_TASK_MODE ?? "smoke";
   if (mode === "smoke") { await runBrowserSmoke(); return "smoke"; }
   if (mode === "fixture") { await runSyntheticBrowserFixture(); return "fixture"; }
+  if (mode === "preview") {
+    if (process.env.OPENAPPLY_CLOUD_PREVIEW_ONLY !== "1"
+      || process.env.OPENAPPLY_SUBMISSION_MODE !== "disabled") {
+      throw new Error("Cloud browser preview mode is disabled");
+    }
+    return runAwsCloudPreSubmitPreview({
+      region: required("AWS_REGION"),
+      bucket: required("OPENAPPLY_ARTIFACT_BUCKET"),
+      kmsKeyArn: required("OPENAPPLY_ARTIFACT_KMS_KEY_ARN"),
+      brokerArn: required("OPENAPPLY_ARTIFACT_BROKER_ARN"),
+      tectonicBinary: required("OPENAPPLY_TECTONIC_BIN"),
+      tectonicCache: required("OPENAPPLY_TECTONIC_CACHE"),
+      privateRoot: required("OPENAPPLY_PRIVATE_WORK_ROOT"),
+    }, { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
+      runId: required("OPENAPPLY_RUN_ID"), capability: required("OPENAPPLY_RUN_CAPABILITY") });
+  }
   if (mode !== "synthetic" || process.env.OPENAPPLY_CLOUD_SYNTHETIC_ONLY !== "1"
     || process.env.OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK !== "1"
     || process.env.OPENAPPLY_SUBMISSION_MODE !== "disabled") {

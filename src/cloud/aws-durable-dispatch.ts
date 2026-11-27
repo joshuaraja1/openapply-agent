@@ -6,7 +6,7 @@ import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.j
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const rowSchema = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid,
-  state: z.enum(["pending_queue", "queued", "launched", "completed", "blocked", "needs_reconciliation"]),
+  state: z.enum(["pending_queue", "queued", "launched", "preview_complete", "completed", "blocked", "needs_reconciliation"]),
   body: z.string().max(1024), groupId: uuid,
   deduplicationId: z.string().regex(/^[a-f0-9]{64}$/),
   createdAt: z.string().datetime(),
@@ -85,7 +85,8 @@ export class DynamoApplicationDispatchStore {
 
   async markQueued(candidateId: string, runId: string): Promise<void> {
     const row = await this.read(candidateId, runId);
-    if (row?.state === "queued" || row?.state === "launched" || row?.state === "completed") return;
+    if (row?.state === "queued" || row?.state === "launched"
+      || row?.state === "preview_complete" || row?.state === "completed") return;
     if (row?.state !== "pending_queue") throw new Error("Dispatch not pending");
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:queued",
@@ -96,7 +97,8 @@ export class DynamoApplicationDispatchStore {
 
   async markLaunched(candidateId: string, runId: string): Promise<void> {
     const row = await this.read(candidateId, runId);
-    if (row?.state === "launched" || row?.state === "completed") return;
+    if (row?.state === "launched" || row?.state === "preview_complete"
+      || row?.state === "completed") return;
     if (row?.state !== "queued") throw new Error("Dispatch not queued");
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:launched REMOVE gsi1pk, gsi1sk",
@@ -112,6 +114,25 @@ export class DynamoApplicationDispatchStore {
       ExpressionAttributeNames: { "#state": "state" },
       ExpressionAttributeValues: { ":completed": "completed", ":queued": "queued",
         ":launched": "launched" } }));
+  }
+
+  /** A pre-submit preview is terminal for this task generation. It is not an
+   * employer submission and must never become a confirmed receipt. */
+  async markPreviewComplete(candidateId: string, runId: string, outcome: {
+    status: "ready-for-review" | "needs-human"; blockerCount: number;
+    resumeSha256: string; uploaded: boolean;
+  }): Promise<void> {
+    if (!Number.isSafeInteger(outcome.blockerCount) || outcome.blockerCount < 0
+      || outcome.blockerCount > 100 || !/^[a-f0-9]{64}$/.test(outcome.resumeSha256)) {
+      throw new Error("Invalid preview outcome");
+    }
+    await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
+      UpdateExpression: "SET #state=:preview, previewStatus=:status, previewBlockerCount=:count, previewResumeSha256=:sha, previewResumeUploaded=:uploaded REMOVE gsi1pk, gsi1sk",
+      ConditionExpression: "#state=:launched",
+      ExpressionAttributeNames: { "#state": "state" },
+      ExpressionAttributeValues: { ":preview": "preview_complete", ":launched": "launched",
+        ":status": outcome.status, ":count": outcome.blockerCount,
+        ":sha": outcome.resumeSha256, ":uploaded": outcome.uploaded } }));
   }
 
   async markBlocked(candidateId: string, runId: string): Promise<void> {

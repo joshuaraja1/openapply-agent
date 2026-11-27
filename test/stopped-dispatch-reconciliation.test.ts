@@ -23,6 +23,14 @@ function harness(status: "not_started" | "needs_reconciliation" | "confirmed", g
 }
 
 describe("stopped exact dispatch reconciliation", () => {
+  it("does not relaunch a completed pre-submit preview", async () => {
+    const h = harness("not_started");
+    h.dispatch.read.mockResolvedValueOnce({ state: "preview_complete" } as never);
+    expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports))
+      .toBe("preview_complete");
+    expect(h.admission.loadIdentity).not.toHaveBeenCalled();
+    expect(h.dispatch.markNeedsReconciliation).not.toHaveBeenCalled();
+  });
   it("repairs a confirmed journal without requeueing or a second submit", async () => {
     const h = harness("confirmed");
     expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports)).toBe("completed");

@@ -42,6 +42,29 @@ function harness() {
 }
 
 describe("durable application outbox dispatch", () => {
+  it("records only bounded pre-submit metadata and removes the pending index", async () => {
+    const send = vi.fn(async (command: UpdateCommand) => {
+      expect(command).toBeInstanceOf(UpdateCommand);
+      expect(command.input.ConditionExpression).toBe("#state=:launched");
+      expect(command.input.UpdateExpression).toContain("REMOVE gsi1pk, gsi1sk");
+      expect(command.input.ExpressionAttributeValues).toMatchObject({
+        ":preview": "preview_complete", ":status": "needs-human",
+        ":count": 1, ":sha": "a".repeat(64), ":uploaded": true,
+      });
+      expect(JSON.stringify(command.input)).not.toContain("Security clearance");
+      return {};
+    });
+    const store = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markPreviewComplete(candidateId, runId, { status: "needs-human",
+      blockerCount: 1, resumeSha256: "a".repeat(64), uploaded: true });
+    expect(send).toHaveBeenCalledOnce();
+    await expect(store.markPreviewComplete(candidateId, runId, { status: "needs-human",
+      blockerCount: 101, resumeSha256: "a".repeat(64), uploaded: true }))
+      .rejects.toThrow("Invalid preview outcome");
+    expect(send).toHaveBeenCalledOnce();
+  });
   it("retries entitlement read failures without blocking a queued run", async () => {
     const h = harness();
     h.authorize.mockImplementationOnce(() => confirmedHostedAccess("sub-a", async () => {
