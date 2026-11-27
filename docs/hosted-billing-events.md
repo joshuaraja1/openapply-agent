@@ -38,6 +38,11 @@ The sparse `gsi1` pending-event index and staging table are defined in
 begins at the paid charge timestamp, lasts four UTC calendar months, and is
 revoked on refund or dispute. `DynamoBillingStore.loadEntitlements` is the
 authoritative queue read; `hasPaidAccess` is the Checkout guard.
+A signed event with a missing Customer binding gets a five-minute grace window
+for the Checkout transaction to commit. After that, the worker records a
+durable quarantine reason and removes it from the pending index. An operator
+must investigate or backfill it if a binding appears later. Quarantine never
+grants access and never blocks later events in the same replay batch.
 An external employer Submit click cannot be atomic with a Stripe webhook.
 The queue must recheck access at its durable submit intent, and a revocation
 may still race with a click already in flight.

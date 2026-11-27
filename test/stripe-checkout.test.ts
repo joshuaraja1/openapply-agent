@@ -133,6 +133,45 @@ describe("Stripe hosted checkout", () => {
     expect(h.create).not.toHaveBeenCalled();
   });
 
+  it("reopens an expired Checkout only after durable Stripe reconciliation", async () => {
+    const h = harness();
+    const old = { subjectId: "candidate123", customerId: "cus_123",
+      requestId: "oldRequest", plan: "monthly" as const,
+      createdAt: "2026-11-26T12:00:00Z",
+      session: { sessionId: "cs_test_old", priceId: config.prices.monthly.id,
+        url: "https://checkout.stripe.com/c/pay/cs_test_old",
+        expiresAt: "2026-11-27T12:00:00Z" } };
+    const fresh = { subjectId: "candidate123", customerId: "cus_123",
+      requestId: "newRequest", plan: "monthly" as const,
+      createdAt: "2026-11-27T13:00:00Z" };
+    h.ports.reserve = vi.fn()
+      .mockResolvedValueOnce(old).mockResolvedValueOnce(fresh);
+    h.ports.closeReservation = vi.fn(async () => {});
+    h.create.mockResolvedValue({ id: "cs_test_new",
+      url: "https://checkout.stripe.com/c/pay/cs_test_new",
+      expires_at: Date.parse("2026-11-28T12:00:00Z") / 1000 });
+    await createHostedCheckout("candidate123", "monthly", config, h.stripe, h.ports,
+      new Date("2026-11-27T13:00:00Z"));
+    expect(h.ports.closeReservation).toHaveBeenCalledWith("candidate123", "monthly", "oldRequest");
+    expect(h.create).toHaveBeenCalledWith(expect.anything(),
+      { idempotencyKey: "openapply-checkout-newRequest" });
+    expect(h.ports.recordSession).toHaveBeenCalledWith("newRequest", expect.anything());
+  });
+
+  it("does not create Checkout when Stripe has not confirmed expiration", async () => {
+    const h = harness();
+    h.ports.reserve = vi.fn(async () => ({ subjectId: "candidate123", customerId: "cus_123",
+      requestId: "oldRequest", plan: "monthly" as const,
+      createdAt: "2026-11-26T12:00:00Z",
+      session: { sessionId: "cs_test_old", priceId: config.prices.monthly.id,
+        url: "https://checkout.stripe.com/c/pay/cs_test_old",
+        expiresAt: "2026-11-27T12:00:00Z" } }));
+    h.ports.closeReservation = vi.fn(async () => { throw new Error("Stripe session still open"); });
+    await expect(createHostedCheckout("candidate123", "monthly", config, h.stripe, h.ports,
+      new Date("2026-11-27T13:00:00Z"))).rejects.toThrow("still open");
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a recorded session reserved for another plan or price", async () => {
     const h = harness();
     h.ports.reserve = vi.fn(async (subjectId) => ({ subjectId, customerId: "cus_123",
