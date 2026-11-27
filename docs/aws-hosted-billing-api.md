@@ -3,8 +3,8 @@
 `src/hosted/aws-billing-lambda.ts` makes the hosted billing runtime deployable
 behind an AWS HTTP API. It accepts only Stripe **test-mode** credentials from
 AWS Secrets Manager, uses the isolated OpenApply DynamoDB table, and never
-contains a card form. The two API Gateway routes are Checkout and the signed
-Stripe webhook. Application enqueue is deliberately **not routed** here until
+contains a card form. The API Gateway routes are Checkout, the signed Stripe
+webhook, and the authenticated billing status read. Application enqueue is deliberately **not routed** here until
 the candidate run ledger, consent records, and FIFO queue ports are deployed.
 
 `deploy/aws/hosted-billing-api.yaml` defines the HTTP API, two Lambda
@@ -68,9 +68,24 @@ job application was made.
 The API and scheduled replay Lambda were subsequently updated to use distinct
 Stripe test-key Secrets Manager ARNs. IAM simulation reports `implicitDeny`
 when the API role requests the replay secret and when the replay role requests
-the API secret. The API key is restricted; the replay role still uses the
-preexisting broader OpenApply test key until a separate read-only replay key is
-created and tested. After the split, a signed-in staging candidate created and
+the API secret. Both Stripe keys are now restricted to the separate OpenApply
+test account. The API key has only the permissions required for Checkout
+creation and its supporting reads. The replay key has five read permissions:
+Charges and Refunds, Checkout Sessions, Invoices, Payment Intents, and
+Subscriptions. Stripe returned HTTP 200 for subscription, invoice,
+invoice-payment, PaymentIntent, charge, Checkout Session, and Checkout line-item
+reads with the replay key; a PaymentIntent write request returned HTTP 403.
+A direct current-state read using that key produced one candidate-bound monthly
+snapshot and one candidate-bound semester payment. A customerless charge was
+not available in the sandbox sample, so its refund-resolution branch remains
+fixture-tested. The previous broader test secret remains available for
+rollback but neither Lambda role can read it. The scoped CloudFormation change
+set preserved the deployed API bundle and billing status route; the stack
+reached `UPDATE_COMPLETE`. IAM simulation confirms the API role is denied the
+replay secret and the replay role is denied the API secret and previous broad
+secret. A signed replay Lambda invocation returned successfully with no pending
+events (`processed: 0`, `deferred: 0`); it did not itself exercise a payment
+event. After the split, a signed-in staging candidate created and
 retrieved an unpaid test Checkout Session using the restricted API key; the
 session was then expired. The authenticated billing status page subsequently
 showed active access for the semester test candidate and no access for the
