@@ -1,6 +1,8 @@
 # Cloud execution for OpenApply
 
-Status: proposed product architecture. No candidate browser or application is running in AWS yet.
+Status: proposed product architecture. The staging queue, ledger, and artifact
+bucket are deployed. A separate one-off Fargate smoke task started Chromium and
+exited successfully; no candidate browser service or application run is active.
 
 ## Decision
 
@@ -79,3 +81,14 @@ The first cloud beta must keep real submission disabled until the candidate's
 verified history, preferences, account sessions, provider allowlist, and
 durable submit journal are present. A cloud deployment by itself does not prove
 the 99% autonomous-completion goal.
+
+## Staging infrastructure check, 2026-11-26
+
+CloudFormation stack `openapply-staging-control-plane` reached `CREATE_COMPLETE`
+in `us-east-1`. It created `openapply-staging-application.fifo`, its dead-letter
+queue, `openapply-staging-run-ledger`, and a private, versioned artifact bucket.
+The queue has SQS-managed encryption, explicit deduplication IDs, a three-receive
+dead-letter policy, and zero messages at the check. The artifact bucket reports
+all four S3 public-access blocks enabled. This stack has no scheduled task,
+consumer, or candidate data. The queue contract and recovery path still require
+an end-to-end staging test before application execution can be enabled.
