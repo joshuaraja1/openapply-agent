@@ -1,13 +1,11 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { ECSClient } from "@aws-sdk/client-ecs";
-import { SQSClient } from "@aws-sdk/client-sqs";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { HostedAccessDeniedError, requireHostedAccess } from "../hosted/entitlement.js";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
-import { SqsApplicationQueueSender } from "./aws-enqueue-ports.js";
 import { DynamoApplicationDispatchStore, dispatchOnePendingApplication } from "./aws-durable-dispatch.js";
 import { DynamoFargateLaunchStore, launchQueuedFargateRun, sweepFargateSlot,
   type FargateLaunchConfig } from "./fargate-launcher.js";
@@ -108,7 +106,6 @@ async function sweepHandler(config: FargateLaunchConfig) {
     const authorizeLaunch = queuedAuthorization(db, config.ledgerTable, eligible);
     const dispatch = await dispatchOnePendingApplication({
       store: new DynamoApplicationDispatchStore(db, config.ledgerTable),
-      queue: new SqsApplicationQueueSender(new SQSClient({}), config.queueUrl),
       authorize: eligible,
       launch: (candidateId, runId) => launchQueuedFargateRun(candidateId, runId,
         config, { store, ecs, signingKey: secret, authorize: authorizeLaunch }),

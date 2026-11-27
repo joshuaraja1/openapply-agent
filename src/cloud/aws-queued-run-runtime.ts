@@ -1,12 +1,11 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { KMSClient } from "@aws-sdk/client-kms";
 import { S3Client } from "@aws-sdk/client-s3";
-import type { SQSClient } from "@aws-sdk/client-sqs";
 import type { LambdaClient } from "@aws-sdk/client-lambda";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { KmsDataKeys, S3ArtifactStore } from "./aws-artifact-store.js";
-import { SqsApplicationQueueReceiver } from "./aws-queue-consumer.js";
+import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 import { CandidateVault, receiptObjectKey } from "./candidate-vault.js";
 import { DurableApplicationJournal } from "./durable-journal.js";
 import { decodeCloudRunEnvelope } from "./run-envelope.js";
@@ -18,7 +17,6 @@ export interface AwsQueuedRunConfiguration {
   entitlementTable: string;
   artifactBucket: string;
   artifactKmsKeyArn: string;
-  applicationQueueUrl: string;
   artifactBrokerArn: string;
 }
 
@@ -26,15 +24,14 @@ export interface AwsQueuedRunConfiguration {
  * only from broker-issued, short-lived per-candidate credentials. The ECS task
  * role must have no direct S3/KMS permission. */
 export function createAwsQueuedRunRuntime(
-  clients: { dynamo: DynamoDBDocumentClient; sqs: SQSClient; lambda: LambdaClient },
+  clients: { dynamo: DynamoDBDocumentClient; lambda: LambdaClient },
   config: AwsQueuedRunConfiguration,
   scope: { candidateId: string; runId: string; capability: string },
   application: CloudRunPorts["application"],
   receiptVerifier: CloudRunPorts["receiptVerifier"],
-): { receiver: SqsApplicationQueueReceiver;
-  handle(message: { body: string; receiptHandle: string }): Promise<CloudRunOutcome> } {
+): { runExact(): Promise<CloudRunOutcome> } {
   if (!config.ledgerTable || !config.entitlementTable || !config.artifactBucket
-    || !config.artifactKmsKeyArn || !config.applicationQueueUrl || !config.artifactBrokerArn) {
+    || !config.artifactKmsKeyArn || !config.artifactBrokerArn) {
     throw new Error("AWS application runtime configuration is incomplete");
   }
   const region = /^arn:aws[a-z-]*:kms:([a-z0-9-]+):\d{12}:key\//.exec(config.artifactKmsKeyArn)?.[1];
@@ -43,7 +40,7 @@ export function createAwsQueuedRunRuntime(
   }
   const awsRegion = region;
   const admission = new DynamoHostedRunAdmission(clients.dynamo, config.ledgerTable);
-  const receiver = new SqsApplicationQueueReceiver(clients.sqs, config.applicationQueueUrl);
+  const dispatch = new DynamoApplicationDispatchStore(clients.dynamo, config.ledgerTable);
   async function scopedGrant(candidateId: string, runId: string, leaseToken: string) {
     if (candidateId !== scope.candidateId || runId !== scope.runId) {
       throw new Error("Artifact run scope mismatch");
@@ -90,13 +87,19 @@ export function createAwsQueuedRunRuntime(
     vault,
     application,
     receiptVerifier,
-    queue: receiver,
+    queue: { async acknowledge(receiptHandle) {
+      if (receiptHandle !== scope.runId) throw new Error("Dispatch run scope mismatch");
+      await dispatch.markCompleted(scope.candidateId, scope.runId);
+    } },
   };
-  return { receiver, async handle(message) {
-    const envelope = decodeCloudRunEnvelope(message.body);
-    if (envelope.candidateId !== scope.candidateId || envelope.runId !== scope.runId) {
-      throw new Error("Artifact run scope mismatch");
+  return { async runExact() {
+    const row = await dispatch.read(scope.candidateId, scope.runId);
+    if (!row || (row.state !== "queued" && row.state !== "launched")) {
+      throw new Error("Exact dispatch is not ready");
     }
-    return handleQueuedApplication(message, ports);
+    const envelope = decodeCloudRunEnvelope(row.body);
+    if (envelope.candidateId !== scope.candidateId || envelope.runId !== scope.runId
+      || envelope.kind !== "apply") throw new Error("Dispatch run scope mismatch");
+    return handleQueuedApplication({ body: row.body, receiptHandle: scope.runId }, ports);
   } };
 }

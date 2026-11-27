@@ -123,15 +123,15 @@ describe("durable application outbox dispatch", () => {
     const h = harness();
     expect(await dispatchOnePendingApplication(h)).toBe("capacity_busy");
     expect(h.row.state).toBe("queued");
-    expect(h.queue.send).toHaveBeenCalledTimes(1);
+    expect(h.queue.send).not.toHaveBeenCalled();
     h.setLaunchResult("started");
     expect(await dispatchOnePendingApplication(h)).toBe("started");
     expect(h.row.state).toBe("launched");
-    expect(h.queue.send).toHaveBeenCalledTimes(1);
+    expect(h.queue.send).not.toHaveBeenCalled();
     expect(await dispatchOnePendingApplication(h)).toBe("empty");
   });
 
-  it("recovers a crash after SQS send by resending the same opaque envelope", async () => {
+  it("recovers a crash before marking queued without SQS receive or send", async () => {
     const h = harness();
     h.setFailMarkQueued(true);
     await expect(dispatchOnePendingApplication(h)).rejects.toThrow("crash after SQS send");
@@ -139,8 +139,7 @@ describe("durable application outbox dispatch", () => {
     h.setFailMarkQueued(false);
     h.setLaunchResult("started");
     expect(await dispatchOnePendingApplication(h)).toBe("started");
-    expect(h.queue.send).toHaveBeenCalledTimes(2);
-    expect(h.queue.send.mock.calls[0]).toEqual(h.queue.send.mock.calls[1]);
+    expect(h.queue.send).not.toHaveBeenCalled();
   });
 
   it("rechecks consent and payment before replaying a pending message", async () => {

@@ -6,7 +6,7 @@ import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.j
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const rowSchema = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid,
-  state: z.enum(["pending_queue", "queued", "launched", "blocked", "needs_reconciliation"]),
+  state: z.enum(["pending_queue", "queued", "launched", "completed", "blocked", "needs_reconciliation"]),
   body: z.string().max(1024), groupId: uuid,
   deduplicationId: z.string().regex(/^[a-f0-9]{64}$/),
   createdAt: z.string().datetime(),
@@ -33,9 +33,8 @@ function parseDispatchRow(value: unknown): DurableDispatchRecord {
   return row;
 }
 
-/** An outbox written before SQS send closes the send-to-launch crash gap.
- * The scheduler may resend the same FIFO envelope after its deduplication
- * window; the durable submission journal still prevents another Submit. */
+/** The dispatch row is the durable hosted queue. Exact key reads avoid
+ * receiving another candidate's SQS message or incrementing its DLQ count. */
 export class DynamoApplicationDispatchStore {
   constructor(private readonly db: Pick<DynamoDBDocumentClient, "send">,
     private readonly table: string) {
@@ -86,7 +85,7 @@ export class DynamoApplicationDispatchStore {
 
   async markQueued(candidateId: string, runId: string): Promise<void> {
     const row = await this.read(candidateId, runId);
-    if (row?.state === "queued" || row?.state === "launched") return;
+    if (row?.state === "queued" || row?.state === "launched" || row?.state === "completed") return;
     if (row?.state !== "pending_queue") throw new Error("Dispatch not pending");
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:queued",
@@ -97,13 +96,22 @@ export class DynamoApplicationDispatchStore {
 
   async markLaunched(candidateId: string, runId: string): Promise<void> {
     const row = await this.read(candidateId, runId);
-    if (row?.state === "launched") return;
+    if (row?.state === "launched" || row?.state === "completed") return;
     if (row?.state !== "queued") throw new Error("Dispatch not queued");
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:launched REMOVE gsi1pk, gsi1sk",
       ConditionExpression: "#state=:queued",
       ExpressionAttributeNames: { "#state": "state" },
       ExpressionAttributeValues: { ":launched": "launched", ":queued": "queued" } }));
+  }
+
+  async markCompleted(candidateId: string, runId: string): Promise<void> {
+    await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
+      UpdateExpression: "SET #state=:completed REMOVE gsi1pk, gsi1sk",
+      ConditionExpression: "#state IN (:queued, :launched)",
+      ExpressionAttributeNames: { "#state": "state" },
+      ExpressionAttributeValues: { ":completed": "completed", ":queued": "queued",
+        ":launched": "launched" } }));
   }
 
   async markBlocked(candidateId: string, runId: string): Promise<void> {
@@ -118,9 +126,10 @@ export class DynamoApplicationDispatchStore {
   async markNeedsReconciliation(candidateId: string, runId: string): Promise<void> {
     await this.db.send(new UpdateCommand({ TableName: this.table, Key: key(candidateId, runId),
       UpdateExpression: "SET #state=:review REMOVE gsi1pk, gsi1sk",
-      ConditionExpression: "#state=:queued",
+      ConditionExpression: "#state IN (:queued, :launched)",
       ExpressionAttributeNames: { "#state": "state" },
-      ExpressionAttributeValues: { ":review": "needs_reconciliation", ":queued": "queued" } }));
+      ExpressionAttributeValues: { ":review": "needs_reconciliation", ":queued": "queued",
+        ":launched": "launched" } }));
   }
 
   async listPending(limit = 25): Promise<DurableDispatchRecord[]> {
@@ -151,13 +160,10 @@ export class DynamoApplicationDispatchStore {
 }
 
 /** One scheduler tick advances at most one browser launch. Querying Dynamo's
- * outbox never increments SQS receive counts. A pending_queue record repairs
- * a crash between durable intent and SendMessage by replaying the same IDs. */
+ * outbox never increments SQS receive counts. */
 export async function dispatchOnePendingApplication(ports: {
   store: Pick<DynamoApplicationDispatchStore, "listPending" | "markQueued"
     | "markLaunched" | "markBlocked" | "markNeedsReconciliation">;
-  queue: { send(message: { body: string; groupId: string;
-    deduplicationId: string }): Promise<void> };
   authorize(candidateId: string, runId: string): Promise<boolean>;
   launch(candidateId: string, runId: string): Promise<"started" | "capacity_busy" | "already_stopped">;
 }): Promise<"empty" | "started" | "capacity_busy" | "blocked" | "needs_reconciliation"> {
@@ -170,8 +176,6 @@ export async function dispatchOnePendingApplication(ports: {
       return "blocked";
     }
     if (row.state === "pending_queue") {
-      await ports.queue.send({ body: row.body, groupId: row.groupId,
-        deduplicationId: row.deduplicationId });
       await ports.store.markQueued(row.candidateId, row.runId);
     }
     const outcome = await ports.launch(row.candidateId, row.runId);
