@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { DescribeTasksCommand, ListTasksCommand, RunTaskCommand, StopTaskCommand, type ECSClient } from "@aws-sdk/client-ecs";
+import { GetCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { DynamoFargateLaunchStore, launchQueuedFargateRun, stopCandidateFargateTask,
   stopFargateRun, sweepFargateSlot,
   type FargateLaunchConfig } from "../src/cloud/fargate-launcher.js";
@@ -28,6 +30,16 @@ function harness() {
     } : undefined),
     listCandidateTasks: vi.fn(async () => row ? [row] : []),
     reserve: vi.fn(async (fresh: Record<string, unknown>) => {
+      if (row?.state === "stopped") {
+        if (Number(row.generation) >= 2) return "existing";
+        if (slot) return "busy";
+        const generation = Number(row.generation) + 1;
+        row = { ...fresh, generation,
+          clientToken: createHash("sha256")
+            .update(`${candidateId}:${runId}:${generation}`).digest("hex") };
+        slot = true;
+        return "created";
+      }
       if (row) return "existing";
       if (slot) return "busy";
       row = { ...fresh };
@@ -71,6 +83,98 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("publishes a retryable row only in the same transaction that frees its old slot", async () => {
+    let slotHeld = true;
+    let taskState = "started";
+    let dispatchState = "launched";
+    let sawRace = false;
+    const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "started" as const, generation: 0,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000, taskArn };
+    const envelope = { version: 1 as const, candidateId, runId, kind: "apply" as const,
+      scheduledAt: "2026-11-26T20:00:00.000Z" };
+    const { encodeCloudRunEnvelope } = await import("../src/cloud/run-envelope.js");
+    const encoded = encodeCloudRunEnvelope(envelope);
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      if (command instanceof GetCommand) return { Item: {
+        pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}`,
+        candidateId, runId, state: dispatchState, ...encoded,
+        createdAt: envelope.scheduledAt } };
+      const items = command.input.TransactItems ?? [];
+      expect(items).toHaveLength(3);
+      expect(items[2]?.Update?.Key).toEqual({
+        pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}` });
+      // A concurrent controller can observe only the pre-commit state here.
+      sawRace = dispatchState === "queued" && taskState === "started";
+      expect(slotHeld).toBe(true);
+      expect(dispatchState).toBe("launched");
+      taskState = "stopped";
+      slotHeld = false;
+      dispatchState = "queued";
+      return {};
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markStopped(row, true);
+    expect(sawRace).toBe(false);
+    expect({ slotHeld, taskState, dispatchState }).toEqual({
+      slotHeld: false, taskState: "stopped", dispatchState: "queued" });
+  });
+  it("reserves a fresh ECS token only after an observed stopped task", async () => {
+    const oldToken = "a".repeat(64);
+    let row: Record<string, unknown> = {
+      pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "stopped", generation: 0,
+      clientToken: oldToken, configHash: "b".repeat(64), reservedAt: 1_800_000_000,
+    };
+    const sent: unknown[] = [];
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      sent.push(command);
+      if (command instanceof GetCommand) return { Item: row };
+      if (command instanceof TransactWriteCommand) {
+        const entries = command.input.TransactItems ?? [];
+        expect(entries[0]?.ConditionCheck?.Key).toEqual({ pk: row.pk, sk: "DELETED" });
+        expect(entries[1]?.Update?.ConditionExpression).toContain("#state=:stopped");
+        const values = entries[1]?.Update?.ExpressionAttributeValues as Record<string, unknown>;
+        expect(values[":oldToken"]).toBe(oldToken);
+        expect(values[":newToken"]).not.toBe(oldToken);
+        row = { ...row, state: "reserved", capability: "new-capability",
+          clientToken: values[":newToken"], generation: values[":generation"],
+          reservedAt: values[":time"] };
+        return {};
+      }
+      throw new Error("Unexpected Dynamo command");
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    const result = await store.reserve({ ...row, state: "reserved", capability: "new-capability",
+      reservedAt: 1_800_000_030 } as Parameters<DynamoFargateLaunchStore["reserve"]>[0]);
+    expect(result).toBe("created");
+    expect(row.generation).toBe(1);
+    expect(row.clientToken).not.toBe(oldToken);
+    expect(sent.some(command => command instanceof TransactWriteCommand)).toBe(true);
+  });
+  it("leaves a stopped run queued when another candidate owns the slot", async () => {
+    const old = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "stopped" as const, generation: 0,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000 };
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      if (command instanceof GetCommand) return { Item: old };
+      const error = new Error("another candidate holds the slot");
+      error.name = "TransactionCanceledException";
+      throw error;
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    const retry = { ...old, state: "reserved", capability: "new-capability" } as
+      Parameters<DynamoFargateLaunchStore["reserve"]>[0];
+    expect(await store.reserve(retry)).toBe("busy");
+  });
   it("is disabled by default before touching any port", async () => {
     const h = harness();
     await expect(launchQueuedFargateRun(candidateId, runId,
@@ -117,7 +221,7 @@ describe("bounded Fargate run launch", () => {
     expect(h.sends).toHaveLength(1);
   });
 
-  it("keeps the slot until a task is observed STOPPED", async () => {
+  it("keeps the slot until STOPPED and retries with a fresh ECS token", async () => {
     const h = harness();
     const ports = { ...h, signingKey: Buffer.alloc(32, 7), authorize: async () => true };
     await launchQueuedFargateRun(candidateId, runId, config, ports, 1_800_000_000);
@@ -127,8 +231,13 @@ describe("bounded Fargate run launch", () => {
     h.setStopped(true);
     expect(await stopFargateRun(candidateId, runId, config, h)).toBe("stopped");
     expect(h.row?.state).toBe("stopped");
+    const firstRun = h.sends.find(command => command instanceof RunTaskCommand);
+    const firstToken = (firstRun as RunTaskCommand).input.clientToken;
     expect(await launchQueuedFargateRun(candidateId, runId, config, ports, 1_800_000_030))
-      .toBe("already_stopped");
+      .toBe("started");
+    const retryTask = h.sends.filter(command => command instanceof RunTaskCommand)[1] as RunTaskCommand;
+    expect(retryTask.input.clientToken).not.toBe(firstToken);
+    expect(h.row?.generation).toBe(1);
   });
 
   it("candidate deletion waits for ECS STOPPED acknowledgement", async () => {
@@ -151,6 +260,24 @@ describe("bounded Fargate run launch", () => {
     h.setStopped(true);
     expect(await sweepFargateSlot(config, h, 1_800_000_910)).toBe("stopped");
     expect(await sweepFargateSlot(config, h, 1_800_000_920)).toBe("idle");
+  });
+
+  it("retains the slot if stopped-task reconciliation fails transiently", async () => {
+    const h = harness();
+    const ports = { ...h, signingKey: Buffer.alloc(32, 7), authorize: async () => true };
+    await launchQueuedFargateRun(candidateId, runId, config, ports, 1_800_000_000);
+    h.setStopped(true);
+    const onStopped = vi.fn()
+      .mockRejectedValueOnce(new Error("Dynamo unavailable"))
+      .mockResolvedValueOnce(undefined);
+    await expect(sweepFargateSlot(config, { ...h, onStopped }, 1_800_000_020))
+      .rejects.toThrow("Dynamo unavailable");
+    expect(h.row?.state).toBe("started");
+    expect(await h.store.readActiveSlot()).toBeDefined();
+    expect(await sweepFargateSlot(config, { ...h, onStopped }, 1_800_000_030))
+      .toBe("stopped");
+    expect(onStopped).toHaveBeenCalledTimes(2);
+    expect(await h.store.readActiveSlot()).toBeUndefined();
   });
 
   it("reconciles an old ambiguous launch only when the cluster has no active tasks", async () => {

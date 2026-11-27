@@ -59,7 +59,7 @@ describe("hosted application enqueue access", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("launches only after SQS accepts the durable message", async () => {
+  it("launches from the exact durable row without sending to shared SQS", async () => {
     const { ports, send } = harness();
     const order: string[] = [];
     const dispatch = {
@@ -72,19 +72,15 @@ describe("hosted application enqueue access", () => {
       markLaunched: vi.fn(async () => { order.push("launched"); }),
       markNeedsReconciliation: vi.fn(async () => {}),
     };
-    send.mockImplementation(async () => { order.push("sqs"); });
     const launch = vi.fn(async () => {
-      expect(send).toHaveBeenCalledTimes(1);
-      expect(order).toEqual(["durable", "sqs", "queued"]);
+      expect(send).not.toHaveBeenCalled();
+      expect(order).toEqual(["durable", "queued"]);
       return "started" as const;
     });
     await enqueueHostedApplication("sub-a", candidateId, runId,
       { ...ports, dispatch, launcher: { launch } }, now);
-    expect(order).toEqual(["durable", "sqs", "queued", "launched"]);
+    expect(order).toEqual(["durable", "queued", "launched"]);
     expect(launch).toHaveBeenCalledWith(candidateId, runId);
-    send.mockRejectedValueOnce(new Error("SQS unavailable"));
-    await expect(enqueueHostedApplication("sub-a", candidateId, runId,
-      { ...ports, dispatch, launcher: { launch } }, now)).rejects.toThrow("SQS unavailable");
-    expect(launch).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
   });
 });

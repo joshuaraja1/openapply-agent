@@ -3,6 +3,7 @@ import { DescribeTasksCommand, ListTasksCommand, RunTaskCommand, StopTaskCommand
 import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { mintArtifactRunCapability } from "./artifact-credential-broker.js";
+import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const arn = z.string().startsWith("arn:aws:");
@@ -10,6 +11,7 @@ const launchRow = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid, capability: z.string().min(1).optional(),
   clientToken: z.string().length(64), configHash: z.string().length(64),
   reservedAt: z.number().int().positive(), taskArn: arn.optional(),
+  generation: z.number().int().nonnegative().max(2).default(0),
   state: z.enum(["reserved", "started", "stopped"]) });
 type LaunchRow = z.infer<typeof launchRow>;
 
@@ -110,6 +112,38 @@ export class DynamoFargateLaunchStore {
 
   async reserve(row: LaunchRow): Promise<"created" | "existing" | "busy"> {
     const existing = await this.read(row.candidateId, row.runId);
+    if (existing?.state === "stopped") {
+      if (existing.generation >= 2) return "existing";
+      const generation = existing.generation + 1;
+      const clientToken = createHash("sha256")
+        .update(`${row.candidateId}:${row.runId}:${generation}`).digest("hex");
+      const retry = { ...row, generation, clientToken };
+      try {
+        await this.db.send(new TransactWriteCommand({ TransactItems: [
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk: row.pk, sk: "DELETED" },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+          { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
+            UpdateExpression: "SET #state=:reserved, capability=:capability, clientToken=:newToken, reservedAt=:time, generation=:generation REMOVE taskArn",
+            ConditionExpression: "#state=:stopped AND clientToken=:oldToken AND configHash=:hash",
+            ExpressionAttributeNames: { "#state": "state" },
+            ExpressionAttributeValues: { ":reserved": "reserved", ":stopped": "stopped",
+              ":capability": row.capability, ":newToken": clientToken,
+              ":oldToken": existing.clientToken, ":time": row.reservedAt,
+              ":generation": generation, ":hash": row.configHash } } },
+          { Put: { TableName: this.table, Item: { ...slotKey,
+            candidateId: row.candidateId, runId: row.runId,
+            clientToken, reservedAt: row.reservedAt },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+        ] }));
+        return "created";
+      } catch (error) {
+        const name = (error as { name?: string }).name;
+        if (name !== "TransactionCanceledException" && name !== "ConditionalCheckFailedException") throw error;
+        const current = await this.read(row.candidateId, row.runId);
+        return current?.state === "stopped" ? "busy" : current ? "existing" : "busy";
+      }
+    }
     if (existing) return "existing";
     try {
       await this.db.send(new TransactWriteCommand({ TransactItems: [
@@ -141,7 +175,24 @@ export class DynamoFargateLaunchStore {
         ":reserved": "reserved", ":token": row.clientToken, ":hash": row.configHash } }));
   }
 
-  async markStopped(row: LaunchRow): Promise<void> {
+  private async retryDispatchUpdate(row: LaunchRow): Promise<NonNullable<ConstructorParameters<typeof TransactWriteCommand>[0]["TransactItems"]>[number]> {
+    const dispatch = await new DynamoApplicationDispatchStore(this.db, this.table)
+      .read(row.candidateId, row.runId);
+    if (!dispatch || (dispatch.state !== "launched" && dispatch.state !== "queued")) {
+      throw new Error("Stopped dispatch is not retryable");
+    }
+    return { Update: { TableName: this.table,
+      Key: { pk: dispatch.pk, sk: dispatch.sk },
+      UpdateExpression: "SET #state=:queued, gsi1pk=:index, gsi1sk=:order",
+      ConditionExpression: "#state IN (:launched, :queued)",
+      ExpressionAttributeNames: { "#state": "state" },
+      ExpressionAttributeValues: { ":queued": "queued", ":launched": "launched",
+        ":index": "APPLICATION_DISPATCH",
+        ":order": `${dispatch.createdAt}#${row.candidateId}#${row.runId}` } } };
+  }
+
+  async markStopped(row: LaunchRow, retry = false): Promise<void> {
+    const retryUpdate = retry ? await this.retryDispatchUpdate(row) : undefined;
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
         UpdateExpression: "SET #state=:stopped REMOVE capability",
@@ -153,10 +204,12 @@ export class DynamoFargateLaunchStore {
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
 
-  async markUnlaunched(row: LaunchRow): Promise<void> {
+  async markUnlaunched(row: LaunchRow, retry = false): Promise<void> {
+    const retryUpdate = retry ? await this.retryDispatchUpdate(row) : undefined;
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Update: { TableName: this.table, Key: runKey(row.candidateId, row.runId),
         UpdateExpression: "SET #state=:stopped REMOVE capability",
@@ -168,6 +221,7 @@ export class DynamoFargateLaunchStore {
         ConditionExpression: "clientToken=:token AND candidateId=:candidate AND runId=:run",
         ExpressionAttributeValues: { ":token": row.clientToken,
           ":candidate": row.candidateId, ":run": row.runId } } },
+      ...(retryUpdate ? [retryUpdate] : []),
     ] }));
   }
 }
@@ -199,8 +253,11 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
     clientToken, configHash, reservedAt: nowEpoch, state: "reserved" });
   const result = await ports.store.reserve(fresh);
   if (result === "busy") return "capacity_busy";
-  const row = result === "existing" ? await ports.store.read(candidateId, runId) : fresh;
-  if (!row || row.configHash !== configHash || row.clientToken !== clientToken) {
+  const row = await ports.store.read(candidateId, runId);
+  const expectedToken = row?.generation
+    ? createHash("sha256").update(`${candidateId}:${runId}:${row.generation}`).digest("hex")
+    : clientToken;
+  if (!row || row.configHash !== configHash || row.clientToken !== expectedToken) {
     throw new Error("Existing launch configuration differs");
   }
   if (row.state === "stopped") return "already_stopped";
@@ -211,7 +268,7 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
   if (!await ports.authorize(candidateId, runId)) throw new Error("Run launch unauthorized");
   const response = await ports.ecs.send(new RunTaskCommand({
     cluster: config.clusterArn, taskDefinition: config.taskDefinitionArn,
-    launchType: "FARGATE", count: 1, clientToken,
+    launchType: "FARGATE", count: 1, clientToken: row.clientToken,
     startedBy: runId,
     enableExecuteCommand: false,
     networkConfiguration: { awsvpcConfiguration: {
@@ -223,7 +280,6 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
         { name: "OPENAPPLY_RUN_CAPABILITY", value: row.capability },
         { name: "OPENAPPLY_CANDIDATE_ID", value: candidateId },
         { name: "OPENAPPLY_RUN_ID", value: runId },
-        { name: "OPENAPPLY_APPLICATION_QUEUE_URL", value: config.queueUrl },
         { name: "OPENAPPLY_SUBMISSION_MODE", value: "disabled" },
       ] }] },
     tags: [{ key: "openapply-environment", value: "staging" },
@@ -263,7 +319,8 @@ export async function stopFargateRun(candidateId: string, runId: string,
  * stops tasks at the 15-minute staging cost cap, and frees the slot only
  * after ECS confirms STOPPED. Missing/ambiguous ECS state stays fenced. */
 export async function sweepFargateSlot(config: FargateLaunchConfig,
-  ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send"> },
+  ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send">;
+    onStopped?(candidateId: string, runId: string, generation: number): Promise<boolean> },
   nowEpoch = Math.floor(Date.now() / 1000)): Promise<"idle" | "waiting" | "stopping" | "stopped"> {
   validated(config);
   const slot = await ports.store.readActiveSlot();
@@ -299,7 +356,8 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
           cursor = active.nextToken;
         } while (cursor);
       }
-      await ports.store.markUnlaunched(row);
+      const retry = await ports.onStopped?.(row.candidateId, row.runId, row.generation);
+      await ports.store.markUnlaunched(row, retry ?? false);
       return "stopped";
     }
   }
@@ -308,7 +366,8 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
   const task = result.tasks?.find(item => item.taskArn === row.taskArn);
   if (!task || result.failures?.length) throw new Error("Task state unavailable");
   if (task.lastStatus === "STOPPED") {
-    await ports.store.markStopped(row);
+    const retry = await ports.onStopped?.(row.candidateId, row.runId, row.generation);
+    await ports.store.markStopped(row, retry ?? false);
     return "stopped";
   }
   if (nowEpoch - row.reservedAt >= 900) {
