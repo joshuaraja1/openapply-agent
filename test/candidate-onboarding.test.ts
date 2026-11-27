@@ -11,7 +11,8 @@ const input = { version: 1, submissionId, careerStage: "new-graduate", targetRol
 
 function fixture() {
   const objects = new Map<string, Buffer>();
-  const markers = new Map<string, { status: string; subjectId: string; digest: string }>();
+  const markers = new Map<string, { status: string; subjectId: string; digest: string;
+    applicationProfileReady?: boolean }>();
   const uploads = new Set<string>();
   let deleted = false;
   const deps: OnboardingDeps = {
@@ -42,10 +43,11 @@ function fixture() {
         if (deleted || markers.has(artifactId)) throw new Error("Marker exists or deleted");
         markers.set(artifactId, { status: "pending", subjectId, digest });
       },
-      async markVerified(_candidate, artifactId, subjectId) {
+      async markVerified(_candidate, artifactId, subjectId, applicationProfileReady) {
         if (deleted || markers.get(artifactId)?.status !== "pending"
           || markers.get(artifactId)?.subjectId !== subjectId) throw new Error("Cannot verify");
-        markers.set(artifactId, { ...markers.get(artifactId)!, status: "verified", subjectId });
+        markers.set(artifactId, { ...markers.get(artifactId)!, status: "verified", subjectId,
+          applicationProfileReady });
       },
     },
   };
@@ -57,6 +59,7 @@ describe("candidate onboarding", () => {
     const test = fixture();
     expect(await saveCandidateOnboarding("sub-1", input, test.deps)).toEqual({ candidateId, artifactId: submissionId });
     expect(test.markers.get(submissionId)).toMatchObject({ status: "verified", subjectId: "sub-1" });
+    expect(test.markers.get(submissionId)?.applicationProfileReady).toBe(false);
     const profile = JSON.parse(test.objects.get(submissionId)!.toString());
     expect(profile.provenance).toBe("candidate-entered-and-reviewed");
     expect(profile.targetRoles).toEqual(["Software engineer"]);
@@ -65,6 +68,40 @@ describe("candidate onboarding", () => {
     expect(await saveCandidateOnboarding("sub-1", input, test.deps)).toEqual({ candidateId, artifactId: submissionId });
     expect(test.objects.size).toBe(2);
     expect(test.uploads.size).toBe(0);
+  });
+
+  it("marks a profile ready only after exact job facts are reviewed and stored", async () => {
+    const test = fixture();
+    const applicationFacts = {
+      identity: { fullName: "Avery Example", location: "Chicago", email: "avery@example.test",
+        phone: "555-0100" },
+      authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
+      skills: ["TypeScript"], education: ["BS Computer Science, Example University, May 2026"],
+      experience: [], projects: [],
+    };
+    await saveCandidateOnboarding("sub-1", { ...input, applicationFacts }, test.deps);
+    expect(test.markers.get(submissionId)?.applicationProfileReady).toBe(true);
+    const stored = JSON.parse(test.objects.get(submissionId)!.toString());
+    expect(stored.applicationProfile.identity.fullName).toBe("Avery Example");
+    expect(stored.applicationProfile.authorization.sponsorshipRequiredNowOrFuture).toBe(false);
+    expect(stored.applicationProfile.education[0]).toMatchObject({
+      claim: "BS Computer Science, Example University, May 2026", status: "user-confirmed",
+      allowedUses: ["matching", "resume", "application"],
+    });
+  });
+
+  it("does not infer job facts from a résumé or contradictory authorization answers", async () => {
+    const test = fixture();
+    await saveCandidateOnboarding("sub-1", input, test.deps);
+    expect(JSON.parse(test.objects.get(submissionId)!.toString()).applicationProfile).toBeUndefined();
+    const changedId = "33333333-3333-4333-8333-333333333333";
+    await expect(saveCandidateOnboarding("sub-1", { ...input, submissionId: changedId,
+      applicationFacts: { identity: { fullName: "Avery Example", location: "Chicago",
+        email: "avery@example.test", phone: "555-0100" },
+      authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: true },
+      skills: [], education: ["BS Computer Science"], experience: [], projects: [] } },
+    test.deps)).rejects.toThrow();
+    expect(test.markers.has(changedId)).toBe(false);
   });
 
   it("rejects unconsented or malformed uploads without creating a marker", async () => {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { careerStageSchema } from "../candidate/intake.js";
 import type { CandidateVault } from "../cloud/candidate-vault.js";
+import { applicationFactsSchema, approvedApplicationProfile } from "./application-facts.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase(),
   "Use a lowercase submission ID");
@@ -22,11 +23,20 @@ export const onboardingSubmissionSchema = z.strictObject({
   graduationOrExperience: shortText,
   workAuthorization: shortText,
   sponsorshipRequiredNowOrFuture: z.boolean(),
+  applicationFacts: applicationFactsSchema.optional(),
   masterResume: pdf,
   transcript: pdf.optional(),
   reviewConfirmed: z.literal(true),
   storageConsent: z.literal(true),
   automationConsent: z.literal(true),
+}).superRefine((submission, context) => {
+  const facts = submission.applicationFacts;
+  if (!facts) return;
+  if (facts.authorization.sponsorshipRequiredNowOrFuture !== submission.sponsorshipRequiredNowOrFuture
+    || facts.authorization.countries.join(", ") !== submission.workAuthorization) {
+    context.addIssue({ code: "custom", path: ["applicationFacts", "authorization"],
+      message: "Reviewed work authorization answers must match" });
+  }
 });
 
 export type OnboardingSubmission = z.infer<typeof onboardingSubmissionSchema>;
@@ -41,7 +51,8 @@ export interface OnboardingMarkerStore {
   /** Conditional create. A pending marker is never eligible to create a run. */
   createPending(candidateId: string, artifactId: string, subjectId: string, digest: string): Promise<void>;
   /** Conditional update from pending to verified for the same subject and artifact. */
-  markVerified(candidateId: string, artifactId: string, subjectId: string): Promise<void>;
+  markVerified(candidateId: string, artifactId: string, subjectId: string,
+    applicationProfileReady: boolean): Promise<void>;
 }
 
 export interface OnboardingDeps {
@@ -108,6 +119,8 @@ export async function saveCandidateOnboarding(subjectId: string,
     resume.fill(0); transcript?.fill(0);
     throw new Error("PDF uploads exceed the combined size limit");
   }
+  const applicationProfile = submission.applicationFacts
+    ? approvedApplicationProfile(artifactId, submission.applicationFacts) : undefined;
   const profile = Buffer.from(JSON.stringify({
     version: 1, provenance: "candidate-entered-and-reviewed", candidateId,
     careerStage: submission.careerStage, targetRoles: submission.targetRoles,
@@ -115,6 +128,7 @@ export async function saveCandidateOnboarding(subjectId: string,
     graduationOrExperience: submission.graduationOrExperience,
     workAuthorization: submission.workAuthorization,
     sponsorshipRequiredNowOrFuture: submission.sponsorshipRequiredNowOrFuture,
+    ...(applicationProfile ? { applicationProfile } : {}),
     masterResume: { artifactId: resumeId, name: submission.masterResume.name, mimeType: "application/pdf" },
     ...(transcriptId ? { transcript: { artifactId: transcriptId,
       name: submission.transcript!.name, mimeType: "application/pdf" } } : {}),
@@ -129,7 +143,7 @@ export async function saveCandidateOnboarding(subjectId: string,
     await putOrVerify(deps.vault, candidateId, artifactId, profile);
     // Run creation trusts only this verified marker, never a partial upload.
     if (await deps.markers.isDeleted(candidateId)) throw new Error("Candidate account unavailable");
-    await deps.markers.markVerified(candidateId, artifactId, subjectId);
+    await deps.markers.markVerified(candidateId, artifactId, subjectId, Boolean(applicationProfile));
     return { candidateId, artifactId };
   } finally {
     resume.fill(0); transcript?.fill(0); profile.fill(0);
