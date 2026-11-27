@@ -7,11 +7,11 @@ import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { KmsDataKeys, S3ArtifactStore } from "./aws-artifact-store.js";
 import { SqsApplicationQueueReceiver } from "./aws-queue-consumer.js";
-import { CandidateVault } from "./candidate-vault.js";
+import { CandidateVault, receiptObjectKey } from "./candidate-vault.js";
 import { DurableApplicationJournal } from "./durable-journal.js";
 import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { handleQueuedApplication, type CloudRunPorts, type CloudRunOutcome } from "./queued-run.js";
-import { requestScopedArtifactCredentials } from "./aws-artifact-broker-client.js";
+import { requestScopedArtifactCredentials, uploadEncryptedReceipt } from "./aws-artifact-broker-client.js";
 
 export interface AwsQueuedRunConfiguration {
   ledgerTable: string;
@@ -44,12 +44,15 @@ export function createAwsQueuedRunRuntime(
   const awsRegion = region;
   const admission = new DynamoHostedRunAdmission(clients.dynamo, config.ledgerTable);
   const receiver = new SqsApplicationQueueReceiver(clients.sqs, config.applicationQueueUrl);
-  async function scopedVault(candidateId: string, runId: string, leaseToken: string) {
+  async function scopedGrant(candidateId: string, runId: string, leaseToken: string) {
     if (candidateId !== scope.candidateId || runId !== scope.runId) {
       throw new Error("Artifact run scope mismatch");
     }
-    const grant = await requestScopedArtifactCredentials(clients.lambda,
+    return requestScopedArtifactCredentials(clients.lambda,
       config.artifactBrokerArn, scope.capability, { candidateId, runId, leaseToken });
+  }
+  async function scopedVault(candidateId: string, runId: string, leaseToken: string) {
+    const grant = await scopedGrant(candidateId, runId, leaseToken);
     const credentials = { accessKeyId: grant.accessKeyId,
       secretAccessKey: grant.secretAccessKey, sessionToken: grant.sessionToken };
     return new CandidateVault(new KmsDataKeys(new KMSClient({ region: awsRegion, credentials }),
@@ -62,8 +65,21 @@ export function createAwsQueuedRunRuntime(
         .restoreToPrivateTemp(candidateId, artifactId);
     },
     async put(candidateId, runId, leaseToken, artifactId, bytes) {
-      return (await scopedVault(candidateId, runId, leaseToken))
-        .putReceipt(candidateId, runId, artifactId, bytes);
+      const grant = await scopedGrant(candidateId, runId, leaseToken);
+      const credentials = { accessKeyId: grant.accessKeyId,
+        secretAccessKey: grant.secretAccessKey, sessionToken: grant.sessionToken };
+      const key = receiptObjectKey(candidateId, runId, artifactId);
+      const brokerStore = {
+        async putCreateOnly(actualKey: string, body: Uint8Array) {
+          if (actualKey !== key) throw new Error("Receipt object key mismatch");
+          await uploadEncryptedReceipt(clients.lambda, config.artifactBrokerArn,
+            scope.capability, { candidateId, runId, leaseToken, artifactId }, body);
+        },
+        async get(): Promise<Uint8Array> { throw new Error("Receipt read unavailable to worker"); },
+        async purgeVersions(): Promise<void> { throw new Error("Worker cannot purge receipts"); },
+      };
+      return new CandidateVault(new KmsDataKeys(new KMSClient({ region: awsRegion, credentials }),
+        config.artifactKmsKeyArn), brokerStore).putReceipt(candidateId, runId, artifactId, bytes);
     },
   };
   const ports: CloudRunPorts = {

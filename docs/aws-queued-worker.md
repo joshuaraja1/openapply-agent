@@ -16,7 +16,9 @@ entitlement and run/consent reads, the DynamoDB submit journal, KMS-wrapped
 candidate artifacts in private S3, and the SQS receiver. It now requires a
 launcher-minted candidate/run capability. It invokes the broker only after
 acquiring the durable lease and constructs artifact clients from the returned
-short-lived grant; see `docs/aws-artifact-credential-broker.md`. The trusted run row,
+short-lived grant. Its receipt upload goes through the create-only broker
+operation; worker credentials cannot Put to S3. See
+`docs/aws-artifact-credential-broker.md`. The trusted run row,
 not the SQS body, supplies the subject, job, and profile artifact ID. The vault
 restores plaintext to an owner-only task-local file and removes it after use.
 The runtime requires a separately reviewed browser adapter and an exact-job

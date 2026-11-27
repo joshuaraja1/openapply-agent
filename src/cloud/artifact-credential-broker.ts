@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { AssumeRoleCommand, type STSClient } from "@aws-sdk/client-sts";
 import { z } from "zod";
 import { requireHostedAccess } from "../hosted/entitlement.js";
+import { receiptObjectKey } from "./candidate-vault.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const capabilitySchema = z.strictObject({
@@ -81,8 +82,6 @@ export function candidateArtifactSessionPolicy(candidateId: string, runId: strin
   return JSON.stringify({ Version: "2012-10-17", Statement: [
     { Effect: "Allow", Action: ["s3:GetObject"],
       Resource: `arn:aws:s3:::${config.artifactBucket}/candidates/${id}/artifacts/*` },
-    { Effect: "Allow", Action: ["s3:PutObject"],
-      Resource: `arn:aws:s3:::${config.artifactBucket}/candidates/${id}/runs/${run}/receipts/*` },
     { Effect: "Allow", Action: ["kms:Decrypt", "kms:GenerateDataKey"],
       Resource: config.kmsKeyArn,
       Condition: { StringEquals: {
@@ -91,6 +90,62 @@ export function candidateArtifactSessionPolicy(candidateId: string, runId: strin
         "kms:EncryptionContext:candidateId": id,
       }, Null: { "kms:EncryptionContext:artifactId": "false" } } },
   ] });
+}
+
+const receiptEnvelopeSchema = z.strictObject({ version: z.literal(1),
+  candidateId: uuid, artifactId: uuid,
+  wrappedKey: z.string().min(1).max(12_000), nonce: z.string().min(1).max(32),
+  tag: z.string().min(1).max(32), ciphertext: z.string().min(1).max(1_500_000) });
+const MAX_RECEIPT_ENVELOPE_BYTES = 1_600_000;
+function canonicalBase64(value: string, minBytes: number, maxBytes: number): boolean {
+  const bytes = Buffer.from(value, "base64");
+  return bytes.length >= minBytes && bytes.length <= maxBytes
+    && bytes.toString("base64") === value;
+}
+
+/** The worker has no S3 Put permission. The broker alone performs this exact
+ * create-only write after confirming the reserved submit-intent receipt ID. */
+export async function storeEncryptedReceipt(token: string, leaseToken: string,
+  artifactId: string, body: Uint8Array, secret: Uint8Array, nowEpoch: number,
+  config: ArtifactBrokerConfiguration, ports: {
+    admission: {
+      hasReceiptUploadEligibility(candidateId: string, runId: string,
+        leaseToken: string, artifactId: string, nowEpoch: number): Promise<boolean>;
+      loadIdentity(candidateId: string, runId: string): Promise<{ subjectId: string }>;
+    };
+    billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
+    grantFence: { reserve(candidateId: string, nowEpoch: number): Promise<void> };
+    receipts: { putCreateOnly(key: string, body: Uint8Array): Promise<void> };
+  }): Promise<{ candidateId: string; runId: string; artifactId: string }> {
+  const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
+  uuid.parse(leaseToken);
+  uuid.parse(artifactId);
+  if (body.byteLength === 0 || body.byteLength > MAX_RECEIPT_ENVELOPE_BYTES) {
+    throw new Error("Receipt envelope unavailable");
+  }
+  let envelope: z.infer<typeof receiptEnvelopeSchema>;
+  try { envelope = receiptEnvelopeSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body))); }
+  catch { throw new Error("Receipt envelope unavailable"); }
+  if (envelope.candidateId !== claims.candidateId || envelope.artifactId !== artifactId) {
+    throw new Error("Receipt envelope identity mismatch");
+  }
+  if (!canonicalBase64(envelope.wrappedKey, 1, 8192)
+    || !canonicalBase64(envelope.nonce, 12, 12)
+    || !canonicalBase64(envelope.tag, 16, 16)
+    || !canonicalBase64(envelope.ciphertext, 1, 1024 * 1024)) {
+    throw new Error("Receipt envelope unavailable");
+  }
+  if (!await ports.admission.hasReceiptUploadEligibility(claims.candidateId, claims.runId,
+    leaseToken, artifactId, nowEpoch)) throw new Error("Receipt upload unavailable");
+  const run = await ports.admission.loadIdentity(claims.candidateId, claims.runId);
+  requireHostedAccess(run.subjectId, await ports.billing.loadEntitlements(run.subjectId),
+    new Date(nowEpoch * 1000));
+  if (!await ports.admission.hasReceiptUploadEligibility(claims.candidateId, claims.runId,
+    leaseToken, artifactId, nowEpoch)) throw new Error("Receipt upload unavailable");
+  await ports.grantFence.reserve(claims.candidateId, nowEpoch);
+  await ports.receipts.putCreateOnly(receiptObjectKey(claims.candidateId, claims.runId,
+    artifactId), body);
+  return { candidateId: claims.candidateId, runId: claims.runId, artifactId };
 }
 
 export interface ScopedArtifactCredentials {

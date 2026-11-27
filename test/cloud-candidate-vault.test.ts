@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import {
   DeleteObjectsCommand, GetObjectCommand, ListObjectVersionsCommand, PutObjectCommand, S3Client,
@@ -65,6 +65,12 @@ describe("cloud candidate vault", () => {
     expect(objects.versions.has(artifactObjectKey(alice, resume))).toBe(true);
     expect(objects.versions.has(receiptObjectKey(alice, bob, profile))).toBe(true);
     expect(objects.versions.has(artifactObjectKey(alice, profile))).toBe(false);
+    const digest = createHash("sha256").update("confirmation").digest("hex");
+    const verified = await vault.readReceiptVerified(alice, bob, profile, digest);
+    expect(verified.toString()).toBe("confirmation");
+    verified.fill(0);
+    await expect(vault.readReceiptVerified(alice, bob, profile, "0".repeat(64)))
+      .rejects.toThrow("digest mismatch");
   });
   it("encrypts artifacts with an authenticated tenant and artifact identity", async () => {
     const keys = new FakeKeys();

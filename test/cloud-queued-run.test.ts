@@ -362,6 +362,18 @@ describe("cloud queued application bridge", () => {
     expect(h.getStoredArtifactId()).toBe(reservedReceiptId);
   });
 
+  it("never re-clicks after a broker receipt write fails after the first submit", async () => {
+    const h = harness();
+    h.ports.vault.put = async () => { throw new Error("PreconditionFailed"); };
+    await expect(handleQueuedApplication(message(), h.ports)).rejects.toThrow("PreconditionFailed");
+    expect(h.events).toContain("click");
+    expect(h.events).not.toContain("ack");
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
+  });
+
   it("rejects discovery messages before acquiring a candidate lease", async () => {
     const h = harness();
     const discovery = encodeCloudRunEnvelope({ version: 1, candidateId, runId,

@@ -21,6 +21,7 @@ const leaseToken = "03d5915b-b52d-41d1-8b99-b70c977e172e";
 const nowEpoch = 1795737600;
 const lease = { pk, sk: "LEASE", ownerToken: leaseToken, runId, expiresAt: nowEpoch + 120 };
 const submissionKey = officialJobKey(run.job);
+const receiptId = "00000000-0000-4000-8000-000000000006";
 
 function admission(rows: Record<string, unknown> = { [run.sk]: run,
   [consentKey]: consent }) {
@@ -87,6 +88,25 @@ describe("durable hosted run admission", () => {
     ]) {
       expect(await admission(changed).port.hasArtifactGrantEligibility(candidateId, runId,
         leaseToken, nowEpoch)).toBe(false);
+    }
+  });
+
+  it("authorizes receipt upload only for the exact reserved submit intent", async () => {
+    const intent = { pk, sk: submissionKey, state: "submit_intent", ownerToken: leaseToken,
+      runId, receiptArtifactId: receiptId };
+    const rows = { [run.sk]: run, [consentKey]: consent, LEASE: lease,
+      [submissionKey]: intent };
+    expect(await admission(rows).port.hasReceiptUploadEligibility(candidateId, runId,
+      leaseToken, receiptId, nowEpoch)).toBe(true);
+    for (const changed of [
+      { ...rows, [submissionKey]: undefined },
+      { ...rows, [submissionKey]: { ...intent, state: "confirmed" } },
+      { ...rows, [submissionKey]: { ...intent, state: "uncertain" } },
+      { ...rows, [submissionKey]: { ...intent, receiptArtifactId: run.profileArtifactId } },
+      { ...rows, LEASE: { ...lease, expiresAt: nowEpoch } },
+    ]) {
+      expect(await admission(changed).port.hasReceiptUploadEligibility(candidateId, runId,
+        leaseToken, receiptId, nowEpoch)).toBe(false);
     }
   });
 });

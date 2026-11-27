@@ -23,6 +23,7 @@ const leaseRow = z.object({ pk: z.string(), sk: z.literal("LEASE"),
   ownerToken: uuid, runId: uuid, expiresAt: z.number().int().positive() });
 const submissionRow = z.object({ pk: z.string(), sk: z.string(),
   state: z.literal("submit_intent"), ownerToken: uuid, runId: uuid });
+const receiptIntentRow = submissionRow.extend({ receiptArtifactId: uuid });
 
 function keys(candidateId: string, runId: string) {
   return { pk: `CANDIDATE#${uuid.parse(candidateId).toLowerCase()}`,
@@ -109,6 +110,24 @@ export class DynamoHostedRunAdmission {
       && submission.data.sk === officialJobKey(run.job)
       && submission.data.ownerToken === token
       && submission.data.runId === uuid.parse(runId).toLowerCase();
+  }
+
+  async hasReceiptUploadEligibility(candidateId: string, runId: string,
+    leaseToken: string, artifactId: string, nowEpoch: number): Promise<boolean> {
+    if (!await this.hasArtifactGrantEligibility(candidateId, runId, leaseToken, nowEpoch)) {
+      return false;
+    }
+    const key = keys(candidateId, runId);
+    const run = await this.readRun(candidateId, runId);
+    if (!run) return false;
+    const result = await this.db.send(new GetCommand({ TableName: this.tableName,
+      Key: { pk: key.pk, sk: officialJobKey(run.job) }, ConsistentRead: true }));
+    const intent = receiptIntentRow.safeParse(result.Item);
+    return intent.success && intent.data.pk === key.pk
+      && intent.data.sk === officialJobKey(run.job)
+      && intent.data.runId === uuid.parse(runId).toLowerCase()
+      && intent.data.ownerToken === uuid.parse(leaseToken).toLowerCase()
+      && intent.data.receiptArtifactId === uuid.parse(artifactId).toLowerCase();
   }
 }
 
