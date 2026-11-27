@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Optional single-AZ outbound network for private synthetic Fargate browser tasks.
+
+Parameters:
+  EnableBrowserEgress:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in VpcId with a route to an internet gateway.
+  PrivateSubnetCidr:
+    Type: String
+    Default: 172.31.96.0/24
+    Description: Unused CIDR within VpcId; verify against existing subnets before enablement.
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+Conditions:
+  EgressEnabled: !Equals [!Ref EnableBrowserEgress, 'true']
+
+Resources:
+  BrowserPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: EgressEnabled
+    Properties:
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Ref AvailabilityZone
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: openapply-staging-browser-private }
+
+  BrowserPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: EgressEnabled
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - { Key: Name, Value: openapply-staging-browser-private }
+
+  BrowserPrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: EgressEnabled
+    Properties:
+      SubnetId: !Ref BrowserPrivateSubnet
+      RouteTableId: !Ref BrowserPrivateRouteTable
+
+  BrowserNatAddress:
+    Type: AWS::EC2::EIP
+    Condition: EgressEnabled
+    Properties:
+      Domain: vpc
+
+  BrowserNatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: EgressEnabled
+    Properties:
+      SubnetId: !Ref PublicSubnetId
+      AllocationId: !GetAtt BrowserNatAddress.AllocationId
+      Tags:
+        - { Key: Name, Value: openapply-staging-browser-egress }
+
+  BrowserOutboundRoute:
+    Type: AWS::EC2::Route
+    Condition: EgressEnabled
+    Properties:
+      RouteTableId: !Ref BrowserPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref BrowserNatGateway
+
+Outputs:
+  PrivateSubnetId:
+    Condition: EgressEnabled
+    Value: !Ref BrowserPrivateSubnet
+  NatGatewayId:
+    Condition: EgressEnabled
+    Value: !Ref BrowserNatGateway
