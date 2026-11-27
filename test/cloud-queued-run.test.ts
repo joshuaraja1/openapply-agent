@@ -44,6 +44,7 @@ function harness() {
   let prepareThrows = false;
   let ackThrows = false;
   let cleanupThrows = false;
+  let browserCloseThrows = false;
   const ports: CloudRunPorts = {
     billing: { async loadEntitlements() {
       events.push("billing");
@@ -107,6 +108,9 @@ function harness() {
           events.push("click");
           if (clickThrows) throw new Error("browser lost after click");
           return clickResult;
+        }, async close() {
+          events.push("browser-close");
+          if (browserCloseThrows) throw new Error("browser cleanup failed");
         } };
       },
     },
@@ -137,6 +141,7 @@ function harness() {
     setClickResult(value: VerifiedReceipt | null) { clickResult = value; },
     setAckThrows(value: boolean) { ackThrows = value; },
     setCleanupThrows(value: boolean) { cleanupThrows = value; },
+    setBrowserCloseThrows(value: boolean) { browserCloseThrows = value; },
     getStatus() { return status; },
     getStoredArtifactId() { return storedArtifactId; },
   };
@@ -289,6 +294,20 @@ describe("cloud queued application bridge", () => {
     expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
     expect(h.events).not.toContain("click");
     expect(h.events).not.toContain("ack");
+  });
+
+  it("never acknowledges while the private browser remains open", async () => {
+    const h = harness();
+    h.setBrowserCloseThrows(true);
+    await expect(handleQueuedApplication(message(), h.ports)).rejects.toThrow("browser cleanup failed");
+    expect(h.getStatus()).toBe("confirmed");
+    expect(h.events).toContain("cleanup");
+    expect(h.events).not.toContain("ack");
+    h.setBrowserCloseThrows(false);
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("already_confirmed");
+    expect(h.events).not.toContain("click");
+    expect(h.events).toContain("ack");
   });
 
   it("rejects mismatched exact-job evidence without acknowledging", async () => {

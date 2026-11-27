@@ -16,8 +16,14 @@ entitlement and run/consent reads, the DynamoDB submit journal, KMS-wrapped
 candidate artifacts in private S3, and the SQS receiver. The trusted run row,
 not the SQS body, supplies the subject, job, and profile artifact ID. The vault
 restores plaintext to an owner-only task-local file and removes it after use.
-The runtime requires a separately reviewed browser adapter and an exact-job
-receipt verifier; this PR supplies neither, so it cannot submit to a site.
+The next staging slice adds `SyntheticBrowserApplication` and
+`SyntheticReceiptVerifier`. They use the existing owned Playwright browser on
+an intercepted `.invalid` host, fill only two reviewed profile answers, and
+accept only explicit confirmation containing the exact requisition ID. The
+Docker entrypoint defaults to its existing smoke. Synthetic queue mode needs
+three deliberate environment flags and accepts no real provider identity.
+The adapter closes its private browser before the queue receipt is deleted.
+This is a controlled fixture, not evidence of real ATS completion.
 
 ## Enablement order
 
@@ -39,6 +45,8 @@ receipt verifier; this PR supplies neither, so it cannot submit to a site.
    queue, and CloudWatch evidence. Only then enable low-volume consented
    real-site tests for an explicit provider allowlist.
 
-The test in `test/aws-queue-consumer.test.ts` exercises one synthetic message,
-its redelivery, and the actual SQS command boundary with an in-memory AWS
-client. It proves local handler ordering, not deployed Fargate behavior.
+`test/aws-queue-consumer.test.ts` exercises one synthetic message, its
+redelivery, and the SQS command boundary with an in-memory AWS client.
+`test/synthetic-browser-application.test.ts` runs a real Chromium final click
+and redelivery when `OPENAPPLY_BROWSER_E2E=1`; CI's owned-browser job enables
+it. These prove local ordering, not deployed Fargate behavior.
