@@ -43,7 +43,8 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
     || event.rawPath === "/api/applications/enqueue"
     || event.rawPath === "/api/applications/runs"
     || event.rawPath === "/api/candidates/onboarding"
-    || event.rawPath === "/api/candidates/plan";
+    || event.rawPath === "/api/candidates/plan"
+    || event.rawPath === "/api/candidates/delete";
   if (browserRoute && method === "OPTIONS") {
     const requestedHeaders = (header("access-control-request-headers") ?? "")
       .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);

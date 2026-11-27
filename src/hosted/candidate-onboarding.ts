@@ -33,6 +33,9 @@ export type OnboardingSubmission = z.infer<typeof onboardingSubmissionSchema>;
 
 export interface OnboardingMarkerStore {
   isDeleted(candidateId: string): Promise<boolean>;
+  /** Atomically reserve a bounded in-flight write while DELETED is absent. */
+  beginUpload(candidateId: string, artifactId: string, subjectId: string): Promise<string>;
+  endUpload(candidateId: string, artifactId: string, leaseId: string): Promise<void>;
   /** Existing marker must belong to this subject. */
   get(candidateId: string, artifactId: string): Promise<{ status: string; subjectId: string; digest: string } | null>;
   /** Conditional create. A pending marker is never eligible to create a run. */
@@ -117,7 +120,9 @@ export async function saveCandidateOnboarding(subjectId: string,
       name: submission.transcript!.name, mimeType: "application/pdf" } } : {}),
     consent: { storage: true, automation: true, reviewed: true },
   }), "utf8");
+  let leaseId: string | undefined;
   try {
+    leaseId = await deps.markers.beginUpload(candidateId, artifactId, subjectId);
     if (!prior) await deps.markers.createPending(candidateId, artifactId, subjectId, digest);
     await putOrVerify(deps.vault, candidateId, resumeId, resume);
     if (transcript && transcriptId) await putOrVerify(deps.vault, candidateId, transcriptId, transcript);
@@ -128,5 +133,6 @@ export async function saveCandidateOnboarding(subjectId: string,
     return { candidateId, artifactId };
   } finally {
     resume.fill(0); transcript?.fill(0); profile.fill(0);
+    if (leaseId) await deps.markers.endUpload(candidateId, artifactId, leaseId);
   }
 }

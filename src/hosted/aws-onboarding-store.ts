@@ -1,6 +1,9 @@
-import { GetCommand, TransactWriteCommand,
+import { randomUUID } from "node:crypto";
+import { DeleteCommand, GetCommand, TransactWriteCommand,
   type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import type { OnboardingMarkerStore } from "./candidate-onboarding.js";
+
+export const UPLOAD_LEASE_SECONDS = 180;
 
 /** A candidate's profile is usable only after all encrypted objects exist. */
 export class DynamoOnboardingMarkers implements OnboardingMarkerStore {
@@ -13,6 +16,29 @@ export class DynamoOnboardingMarkers implements OnboardingMarkerStore {
     const result = await this.db.send(new GetCommand({ TableName: this.tableName,
       Key: { pk: `CANDIDATE#${candidateId}`, sk: "DELETED" }, ConsistentRead: true }));
     return Boolean(result.Item);
+  }
+
+  async beginUpload(candidateId: string, artifactId: string, subjectId: string): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const leaseId = randomUUID();
+    const pk = `CANDIDATE#${candidateId}`;
+    await this.db.send(new TransactWriteCommand({ TransactItems: [
+      { ConditionCheck: { TableName: this.tableName, Key: { pk, sk: "DELETED" },
+        ConditionExpression: "attribute_not_exists(pk)" } },
+      { Put: { TableName: this.tableName,
+        Item: { pk, sk: `UPLOAD#${artifactId}`, artifactId, subjectId, leaseId,
+          expiresAt: now + UPLOAD_LEASE_SECONDS },
+        ConditionExpression: "attribute_not_exists(pk) OR expiresAt < :now",
+        ExpressionAttributeValues: { ":now": now } } },
+    ] }));
+    return leaseId;
+  }
+
+  async endUpload(candidateId: string, artifactId: string, leaseId: string): Promise<void> {
+    await this.db.send(new DeleteCommand({ TableName: this.tableName,
+      Key: { pk: `CANDIDATE#${candidateId}`, sk: `UPLOAD#${artifactId}` },
+      ConditionExpression: "leaseId = :leaseId",
+      ExpressionAttributeValues: { ":leaseId": leaseId } }));
   }
 
   async get(candidateId: string, artifactId: string): Promise<{

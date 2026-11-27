@@ -6,6 +6,10 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableCandidateDeletion:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
   CodeBucket:
     Type: String
   CodeKey:
@@ -28,6 +32,9 @@ Parameters:
 
 Conditions:
   OnboardingEnabled: !Equals [!Ref EnableOnboarding, 'true']
+  DeletionEnabled: !And
+    - !Condition OnboardingEnabled
+    - !Equals [!Ref EnableCandidateDeletion, 'true']
 
 Resources:
   CandidateDataKey:
@@ -66,11 +73,17 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:ConditionCheckItem]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem, dynamodb:Query]
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
               - Effect: Allow
-                Action: [s3:PutObject, s3:GetObject]
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject, s3:DeleteObjectVersion]
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+              - Effect: Allow
+                Action: s3:ListBucketVersions
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix: 'candidates/*/'
               - Effect: Allow
                 Action: [kms:GenerateDataKey, kms:Decrypt]
                 Resource: !GetAtt CandidateDataKey.Arn
@@ -92,6 +105,7 @@ Resources:
       Environment:
         Variables:
           ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: !Ref EnableCandidateDeletion
           APP_ORIGIN: !Ref AppOrigin
           COGNITO_ISSUER: !Ref CognitoIssuer
           COGNITO_CLIENT_ID: !Ref CognitoClientId
@@ -133,6 +147,14 @@ Resources:
       RouteKey: 'POST /api/candidates/plan'
       Target: !Sub 'integrations/${OnboardingIntegration}'
 
+  CandidateDeletionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: DeletionEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/delete'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
   OnboardingStage:
     Type: AWS::ApiGatewayV2::Stage
     Condition: OnboardingEnabled
@@ -161,6 +183,15 @@ Resources:
       FunctionName: !Ref OnboardingFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/plan'
+
+  CandidateDeletionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeletionEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/delete'
 
 Outputs:
   OnboardingApiOrigin:
