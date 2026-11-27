@@ -20,6 +20,8 @@ export interface VerifiedReceipt {
 export interface PreparedApplication {
   /** The only final Submit action; the handler calls this only after durable intent. */
   submitOnce(): Promise<VerifiedReceipt | null>;
+  /** Release the private browser profile on every terminal or retry path. */
+  close?(): Promise<void>;
 }
 
 export interface CloudRunPorts {
@@ -63,7 +65,7 @@ export interface CloudRunPorts {
   };
   application: {
     /** No real browser implementation is registered by this staging module. */
-    prepare(profilePath: string, job: OfficialJobIdentity): Promise<PreparedApplication>;
+    prepare(profilePath: string, job: OfficialJobIdentity, candidateId: string): Promise<PreparedApplication>;
   };
   receiptVerifier: {
     /** Verify explicit employer confirmation for this exact requisition. */
@@ -126,64 +128,70 @@ export async function handleQueuedApplication(
     const profile = await ports.vault.restoreToPrivateTemp(run.candidateId, run.runId,
       token, profileArtifactId);
     cleanupComplete = false;
+    let browserCleanupComplete = false;
     try {
-      const prepared = await ports.application.prepare(profile.path, record.job);
-      if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
-      if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
-      try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
-      catch { return "retry"; }
-      const artifactId = await ports.journal.beginSubmission(
-        run.candidateId, token, run.runId, record.consentVersion, record.job);
-      if (!artifactId) {
-        const { status: afterConflict } = await ports.journal.readSubmission(run.candidateId, record.job);
-        if (afterConflict === "not_started") return "retry";
-        if (afterConflict === "confirmed") {
-          shouldAck = true;
-          return "already_confirmed";
-        }
-        return "needs_reconciliation";
-      }
-
-      // One final read after the durable intent narrows the window in which a
-      // payment or consent revocation could race with the external Submit.
-      // If it changed, keep the intent uncertain; never try this job again
-      // automatically because a browser click may already be in flight.
-      let stillAuthorized = false;
+      const prepared = await ports.application.prepare(profile.path, record.job, run.candidateId);
       try {
-        stillAuthorized = await ports.authorization.hasCurrentConsent(run.candidateId, run.runId);
-        if (stillAuthorized) {
-          stillAuthorized = await hasHostedAccess(record.subjectId, ports.billing);
+        if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
+        if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
+        try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
+        catch { return "retry"; }
+        const artifactId = await ports.journal.beginSubmission(
+          run.candidateId, token, run.runId, record.consentVersion, record.job);
+        if (!artifactId) {
+          const { status: afterConflict } = await ports.journal.readSubmission(run.candidateId, record.job);
+          if (afterConflict === "not_started") return "retry";
+          if (afterConflict === "confirmed") {
+            shouldAck = true;
+            return "already_confirmed";
+          }
+          return "needs_reconciliation";
         }
-      } catch { stillAuthorized = false; }
-      if (!stillAuthorized) {
-        await ports.journal.markUncertain(run.candidateId, token, record.job);
-        return "needs_reconciliation";
-      }
 
-      let receipt: VerifiedReceipt | null;
-      try {
-        receipt = await prepared.submitOnce();
-      } catch {
-        await ports.journal.markUncertain(run.candidateId, token, record.job);
-        return "needs_reconciliation";
-      }
-      if (!receipt || receipt.evidence.byteLength === 0
-        || receipt.evidence.byteLength > MAX_RECEIPT_BYTES
-        || officialJobKey(receipt.job) !== officialJobKey(record.job)
-        || !await ports.receiptVerifier.verify(receipt, record.job)) {
-        await ports.journal.markUncertain(run.candidateId, token, record.job);
-        return "needs_reconciliation";
-      }
+        // One final read after the durable intent narrows the window in which a
+        // payment or consent revocation could race with the external Submit.
+        // If it changed, keep the intent uncertain; never try this job again
+        // automatically because a browser click may already be in flight.
+        let stillAuthorized = false;
+        try {
+          stillAuthorized = await ports.authorization.hasCurrentConsent(run.candidateId, run.runId);
+          if (stillAuthorized) {
+            stillAuthorized = await hasHostedAccess(record.subjectId, ports.billing);
+          }
+        } catch { stillAuthorized = false; }
+        if (!stillAuthorized) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
 
-      const sha256 = createHash("sha256").update(receipt.evidence).digest("hex");
-      await ports.vault.put(run.candidateId, run.runId, token, artifactId, receipt.evidence);
-      if (!await ports.journal.confirmAfterVerification(run.candidateId, token, record.job,
-        { artifactId, sha256 })) return "needs_reconciliation";
-      shouldAck = true;
-      return "confirmed";
+        let receipt: VerifiedReceipt | null;
+        try {
+          receipt = await prepared.submitOnce();
+        } catch {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
+        if (!receipt || receipt.evidence.byteLength === 0
+          || receipt.evidence.byteLength > MAX_RECEIPT_BYTES
+          || officialJobKey(receipt.job) !== officialJobKey(record.job)
+          || !await ports.receiptVerifier.verify(receipt, record.job)) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
+
+        const sha256 = createHash("sha256").update(receipt.evidence).digest("hex");
+        await ports.vault.put(run.candidateId, run.runId, token, artifactId, receipt.evidence);
+        if (!await ports.journal.confirmAfterVerification(run.candidateId, token, record.job,
+          { artifactId, sha256 })) return "needs_reconciliation";
+        shouldAck = true;
+        return "confirmed";
+      } finally {
+        await prepared.close?.();
+        browserCleanupComplete = true;
+      }
     } finally {
       await profile.cleanup();
-      cleanupComplete = true;
+      cleanupComplete = browserCleanupComplete;
     }
   } finally {
     await ports.journal.releaseLease(run.candidateId, token);

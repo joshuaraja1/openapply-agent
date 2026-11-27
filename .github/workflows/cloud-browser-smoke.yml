@@ -24,3 +24,12 @@ jobs:
           --tmpfs /home/openapply:rw,nosuid,size=128m,uid=10001,gid=10001
           --shm-size=1g --cap-drop=ALL --security-opt=no-new-privileges
           openapply-browser-smoke
+      - name: Run synthetic application fixture in the isolated image
+        run: >-
+          docker run --rm --read-only
+          --tmpfs /tmp:rw,exec,nosuid,size=1g
+          --tmpfs /work:rw,nosuid,size=128m,uid=10001,gid=10001
+          --tmpfs /home/openapply:rw,nosuid,size=128m,uid=10001,gid=10001
+          --shm-size=1g --cap-drop=ALL --security-opt=no-new-privileges
+          -e OPENAPPLY_CLOUD_TASK_MODE=fixture
+          openapply-browser-smoke

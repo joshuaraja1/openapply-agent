@@ -4,14 +4,15 @@ ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
-COPY package.json package-lock.json tsconfig.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev \
+    && npx playwright install --with-deps chromium
+
+COPY tsconfig.json vitest.config.ts ./
 COPY src ./src
 COPY test ./test
-COPY vitest.config.ts ./
 
-RUN npm ci --include=dev \
-    && npm run build \
-    && npx playwright install --with-deps chromium \
+RUN npm run build \
     && npm prune --omit=dev \
     && rm -rf src test dist/test \
     && groupadd --system --gid 10001 openapply \
@@ -23,4 +24,4 @@ RUN npm ci --include=dev \
 USER openapply
 ENV HOME=/home/openapply
 WORKDIR /work
-CMD ["node", "/app/dist/src/cloud/browser-smoke-cli.js"]
+CMD ["node", "/app/dist/src/cloud/cloud-browser-task-cli.js"]
