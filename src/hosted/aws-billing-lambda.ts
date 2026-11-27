@@ -7,6 +7,7 @@ import Stripe from "stripe";
 import { handleBillingSchedule, handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 import { createHostedBillingRuntime } from "./billing-runtime.js";
 import { DynamoHostedRunAdmission, SqsApplicationQueueSender } from "../cloud/aws-enqueue-ports.js";
+import { DynamoApplicationDispatchStore } from "../cloud/aws-durable-dispatch.js";
 
 type Environment = Record<string, string | undefined>;
 type SecretReader = (arn: string) => Promise<string>;
@@ -70,6 +71,7 @@ export function createStagingApplicationQueuePorts(env: Environment,
   }
   return { runRecords: admission, authorization: admission,
     queue: new SqsApplicationQueueSender(queueClient, queueUrl),
+    ...(launcherArn ? { dispatch: new DynamoApplicationDispatchStore(runDb, ledger) } : {}),
     ...(launcherArn ? { launcher: { async launch(candidateId: string, runId: string) {
       const result = await lambda.send(new InvokeCommand({ FunctionName: launcherArn,
         InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify({ candidateId, runId })) }));
@@ -77,9 +79,11 @@ export function createStagingApplicationQueuePorts(env: Environment,
         throw new Error("Fargate launch unavailable");
       }
       const response = JSON.parse(Buffer.from(result.Payload).toString("utf8")) as { status?: unknown };
-      if (response.status !== "started") {
+      if (response.status !== "started" && response.status !== "capacity_busy"
+        && response.status !== "already_stopped") {
         throw new Error("Fargate launch capacity unavailable");
       }
+      return response.status;
     } } } : {}),
   };
 }

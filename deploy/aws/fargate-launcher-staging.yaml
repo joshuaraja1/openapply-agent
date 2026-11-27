@@ -6,6 +6,11 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
+  DeletionStopGateReady:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Set true only after hosted deletion invokes candidate-wide ECS stop and waits for STOPPED before erasure.
   CodeBucket:
     Type: String
     Default: ''
@@ -71,6 +76,8 @@ Rules:
         AssertDescription: Image pull role is required.
       - Assert: !Not [!Equals [!Ref EcsSecurityGroupId, '']]
         AssertDescription: Private browser security group is required.
+      - Assert: !Equals [!Ref DeletionStopGateReady, 'true']
+        AssertDescription: Hosted deletion must enforce the ECS stop acknowledgement gate before launch can be enabled.
 
 Resources:
   FargateLauncherRole:
@@ -95,10 +102,18 @@ Resources:
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
               - Effect: Allow
                 Action: dynamodb:Query
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}/index/gsi1'
+              - Effect: Allow
+                Action: dynamodb:Query
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref ArtifactSigningSecretArn
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ApplicationQueueName}'
               - Effect: Allow
                 Action: ecs:RunTask
                 Resource: !Ref EcsTaskDefinitionArn
