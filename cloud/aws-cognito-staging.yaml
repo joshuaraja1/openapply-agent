@@ -18,7 +18,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       UserPoolName: !Sub 'openapply-${Environment}-candidates'
-      UserPoolTier: LITE
+      # Refresh-token rotation requires Essentials or Plus.
+      UserPoolTier: ESSENTIALS
       DeletionProtection: ACTIVE
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
@@ -72,6 +73,7 @@ Resources:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
       Domain: !Sub 'openapply-${Environment}-${AWS::AccountId}'
+      # Use classic hosted UI until managed-login branding is configured.
       ManagedLoginVersion: 1
       UserPoolId: !Ref CandidateUserPool
 
