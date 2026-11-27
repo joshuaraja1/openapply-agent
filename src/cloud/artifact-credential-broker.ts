@@ -16,6 +16,12 @@ function signingKey(value: Uint8Array): Uint8Array {
   return value;
 }
 
+function freshEpoch(clock: () => number): number {
+  const value = clock();
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("Artifact broker clock unavailable");
+  return value;
+}
+
 /** A trusted task launcher passes this bearer capability in ECS task overrides,
  * never in SQS, logs, or candidate-visible URLs. */
 export function mintArtifactRunCapability(candidateId: string, runId: string,
@@ -110,6 +116,7 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
     };
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
     grantFence: { reserve(candidateId: string, nowEpoch: number): Promise<void> };
+    clock: () => number;
     sts: Pick<STSClient, "send">;
   }): Promise<ScopedArtifactCredentials> {
   const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
@@ -122,15 +129,17 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
     throw new Error("Task artifact access unavailable");
   }
   const run = await ports.admission.loadIdentity(claims.candidateId, claims.runId);
-  requireHostedAccess(run.subjectId, await ports.billing.loadEntitlements(run.subjectId),
-    new Date(nowEpoch * 1000));
+  const entitlements = await ports.billing.loadEntitlements(run.subjectId);
+  const finalEpoch = freshEpoch(ports.clock);
+  verifyArtifactRunCapability(token, secret, finalEpoch);
+  requireHostedAccess(run.subjectId, entitlements, new Date(finalEpoch * 1000));
   if (!await ports.admission.hasArtifactGrantEligibility(claims.candidateId, claims.runId,
-    leaseToken, nowEpoch)) {
+    leaseToken, finalEpoch)) {
     throw new Error("Task artifact access unavailable");
   }
   // Deletion observes this row before it can purge. A failed reservation must
   // never result in an STS credential, even if all prior checks succeeded.
-  await ports.grantFence.reserve(claims.candidateId, nowEpoch);
+  await ports.grantFence.reserve(claims.candidateId, finalEpoch);
   const result = await ports.sts.send(new AssumeRoleCommand({
     RoleArn: config.dataRoleArn,
     RoleSessionName: `oa-${claims.runId.slice(0, 8)}`,
@@ -139,7 +148,7 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
   }));
   const credentials = result.Credentials;
   if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken
-    || !credentials.Expiration || credentials.Expiration.getTime() <= (nowEpoch + 60) * 1000) {
+    || !credentials.Expiration || credentials.Expiration.getTime() <= (finalEpoch + 60) * 1000) {
     throw new Error("Scoped artifact credentials unavailable");
   }
   return { candidateId: claims.candidateId, runId: claims.runId, leaseToken,

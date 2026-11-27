@@ -40,6 +40,7 @@ export async function handler(event: unknown) {
         admission: new DynamoHostedRunAdmission(dynamo, env.RUN_LEDGER_TABLE_NAME!),
         grantFence: new DynamoArtifactGrantFence(dynamo, env.RUN_LEDGER_TABLE_NAME!),
         billing: new DynamoCandidatePlanStatus(dynamo, env.ENTITLEMENT_TABLE_NAME!),
+        clock: () => Math.floor(Date.now() / 1000),
         sts: new STSClient({}),
       });
   } finally { secret.fill(0); }

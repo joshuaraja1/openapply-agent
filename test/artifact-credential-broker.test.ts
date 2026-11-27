@@ -18,7 +18,8 @@ const config = { dataRoleArn: "arn:aws:iam::123456789012:role/openapply-artifact
 
 function fixture() {
   const admission = { hasCurrentConsent: vi.fn(async () => true),
-    hasArtifactGrantEligibility: vi.fn(async () => true),
+    hasArtifactGrantEligibility: vi.fn(async (_candidateId: string, _runId: string,
+      _leaseToken: string, _checkedEpoch: number) => true),
     loadIdentity: vi.fn(async () => ({ subjectId })) };
   const billing = { loadEntitlements: vi.fn(async () => [{ kind: "free-grant", subjectId,
     grantId: "beta", approvedBy: "admin", startsAt: "2026-11-25T00:00:00.000Z",
@@ -29,7 +30,7 @@ function fixture() {
     return { Credentials: { AccessKeyId: "ASIATEST", SecretAccessKey: "secret",
       SessionToken: "session", Expiration: new Date((nowEpoch + 900) * 1000) } };
   });
-  return { admission, billing, grantFence,
+  return { admission, billing, grantFence, clock: vi.fn(() => nowEpoch),
     sts: { send } as unknown as Pick<STSClient, "send">, send };
 }
 
@@ -84,6 +85,20 @@ describe("candidate-scoped artifact credentials", () => {
     await expect(issueCandidateArtifactCredentials(token, leaseToken, secret,
       nowEpoch, config, tombstoned)).rejects.toThrow("tombstoned");
     expect(tombstoned.send).not.toHaveBeenCalled();
+  });
+
+  it("does not issue STS credentials if the lease expires during billing latency", async () => {
+    const ports = fixture();
+    const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
+    ports.clock.mockReturnValue(nowEpoch + 121);
+    ports.admission.hasArtifactGrantEligibility.mockImplementation(async (_candidate, _run,
+      _lease, checkedEpoch) => checkedEpoch < nowEpoch + 120);
+    await expect(issueCandidateArtifactCredentials(token, leaseToken, secret,
+      nowEpoch, config, ports)).rejects.toThrow("Task artifact access unavailable");
+    expect(ports.admission.hasArtifactGrantEligibility).toHaveBeenLastCalledWith(
+      candidateId, runId, leaseToken, nowEpoch + 121);
+    expect(ports.grantFence.reserve).not.toHaveBeenCalled();
+    expect(ports.send).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe configuration before STS", () => {
