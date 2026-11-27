@@ -6,6 +6,10 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableCandidateDeletion:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
   CodeBucket:
     Type: String
   CodeKey:
@@ -28,6 +32,9 @@ Parameters:
 
 Conditions:
   OnboardingEnabled: !Equals [!Ref EnableOnboarding, 'true']
+  DeletionEnabled: !And
+    - !Condition OnboardingEnabled
+    - !Equals [!Ref EnableCandidateDeletion, 'true']
 
 Resources:
   CandidateDataKey:
@@ -98,6 +105,7 @@ Resources:
       Environment:
         Variables:
           ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: !Ref EnableCandidateDeletion
           APP_ORIGIN: !Ref AppOrigin
           COGNITO_ISSUER: !Ref CognitoIssuer
           COGNITO_CLIENT_ID: !Ref CognitoClientId
@@ -141,7 +149,7 @@ Resources:
 
   CandidateDeletionRoute:
     Type: AWS::ApiGatewayV2::Route
-    Condition: OnboardingEnabled
+    Condition: DeletionEnabled
     Properties:
       ApiId: !Ref OnboardingApi
       RouteKey: 'POST /api/candidates/delete'
@@ -178,7 +186,7 @@ Resources:
 
   CandidateDeletionInvokePermission:
     Type: AWS::Lambda::Permission
-    Condition: OnboardingEnabled
+    Condition: DeletionEnabled
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref OnboardingFunction

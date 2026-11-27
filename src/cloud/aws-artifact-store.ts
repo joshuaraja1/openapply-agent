@@ -65,33 +65,37 @@ export class S3ArtifactStore implements ArtifactStorePort {
   }
 
   async purgeVersions(prefix: string, exactKey: boolean): Promise<void> {
-    const objects: { Key: string; VersionId: string }[] = [];
     let keyMarker: string | undefined;
     let versionIdMarker: string | undefined;
-    do {
+    // Delete one bounded page at a time, then relist from the beginning.
+    // Continuing with a marker after deleting that page can skip versions.
+    for (let page = 0; page < 100; page++) {
       const result = await this.client.send(new ListObjectVersionsCommand({
-        Bucket: this.bucket, Prefix: prefix,
+        Bucket: this.bucket, Prefix: prefix, MaxKeys: 1000,
         ...(keyMarker ? { KeyMarker: keyMarker } : {}),
         ...(versionIdMarker ? { VersionIdMarker: versionIdMarker } : {}),
       }));
-      for (const item of [...(result.Versions ?? []), ...(result.DeleteMarkers ?? [])]) {
-        if (item.Key && item.VersionId && (exactKey ? item.Key === prefix : item.Key.startsWith(prefix))) {
-          objects.push({ Key: item.Key, VersionId: item.VersionId });
-        }
+      const objects = [...(result.Versions ?? []), ...(result.DeleteMarkers ?? [])]
+        .filter(item => item.Key && item.VersionId
+          && (exactKey ? item.Key === prefix : item.Key.startsWith(prefix)))
+        .map(item => ({ Key: item.Key!, VersionId: item.VersionId! }));
+      if (objects.length) {
+        const deleted = await this.client.send(new DeleteObjectsCommand({
+          Bucket: this.bucket, Delete: { Objects: objects, Quiet: true },
+        }));
+        if (deleted.Errors?.length) throw new Error("S3 could not delete every artifact version");
+        keyMarker = undefined;
+        versionIdMarker = undefined;
+        continue;
       }
-      if (!result.IsTruncated) break;
+      if (!result.IsTruncated) return;
       if (!result.NextKeyMarker || (result.NextKeyMarker === keyMarker
         && result.NextVersionIdMarker === versionIdMarker)) {
         throw new Error("S3 version listing did not advance");
       }
       keyMarker = result.NextKeyMarker;
       versionIdMarker = result.NextVersionIdMarker;
-    } while (true);
-    for (let i = 0; i < objects.length; i += 1000) {
-      const result = await this.client.send(new DeleteObjectsCommand({
-        Bucket: this.bucket, Delete: { Objects: objects.slice(i, i + 1000), Quiet: true },
-      }));
-      if (result.Errors?.length) throw new Error("S3 could not delete every artifact version");
     }
+    throw new Error("S3 version purge needs another bounded retry");
   }
 }

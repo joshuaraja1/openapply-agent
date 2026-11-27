@@ -12,6 +12,9 @@ export default {
       const onboarding = url.pathname === '/api/candidates/onboarding';
       const plan = url.pathname === '/api/candidates/plan';
       const deletion = url.pathname === '/api/candidates/delete';
+      if (deletion && env.CANDIDATE_DELETION_ENABLED !== 'true') {
+        return new Response('Not found', { status: 404, headers: securityHeaders });
+      }
       if ((!onboarding && !plan && !deletion && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
@@ -52,7 +55,8 @@ export default {
       upstream.pathname = url.pathname;
       try {
         const response = await fetch(upstream, {
-          method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(onboarding ? 60_000 : 10_000),
+          method: 'POST', body, redirect: 'manual',
+          signal: AbortSignal.timeout(onboarding ? 60_000 : deletion ? 65_000 : 10_000),
           headers: {
             'authorization': request.headers.get('authorization'),
             'content-type': request.headers.get('content-type'),

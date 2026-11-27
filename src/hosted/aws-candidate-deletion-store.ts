@@ -27,7 +27,30 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
     } catch (error) { if (!conditional(error)) throw error; }
     const existing = await this.db.send(new GetCommand({ TableName: this.tableName,
       Key: marker, ConsistentRead: true }));
-    const row = existing.Item;
+    let row = existing.Item;
+    // The earlier durable journal wrote a minimal DELETED marker. The
+    // authenticated route derives this candidate key from the verified subject,
+    // so it can safely adopt that marker without clearing the deletion barrier.
+    if (row?.pk === marker.pk && row.sk === marker.sk
+      && !Object.hasOwn(row, "subjectId") && !Object.hasOwn(row, "state")
+      && typeof row.deletedAt === "string"
+      && !Number.isNaN(Date.parse(row.deletedAt))) {
+      try {
+        await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: marker,
+          UpdateExpression: "SET candidateId = :candidate, subjectId = :subject, #state = :pending, notBeforeEpoch = :notBefore, requestedAt = :requestedAt",
+          ConditionExpression: "attribute_exists(pk) AND attribute_exists(deletedAt) AND attribute_not_exists(subjectId) AND attribute_not_exists(#state)",
+          ExpressionAttributeNames: { "#state": "state" },
+          ExpressionAttributeValues: { ":candidate": candidateId, ":subject": subjectId,
+            ":pending": "pending", ":notBefore": notBeforeEpoch,
+            ":requestedAt": new Date().toISOString() } }));
+        return { state: "pending", subjectId, notBeforeEpoch };
+      } catch (error) {
+        if (!conditional(error)) throw error;
+        // Another request may have adopted it first. Read its owner/state.
+        row = (await this.db.send(new GetCommand({ TableName: this.tableName,
+          Key: marker, ConsistentRead: true }))).Item;
+      }
+    }
     if (!row || row.pk !== marker.pk || row.sk !== marker.sk || row.candidateId !== candidateId
       || row.subjectId !== subjectId || (row.state !== "pending" && row.state !== "complete")
       || !Number.isSafeInteger(row.notBeforeEpoch)) throw new Error("Invalid deletion marker");
@@ -53,6 +76,35 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
       cursor = result.LastEvaluatedKey;
     }
     return true; // Bounded scan cannot prove all writers stopped.
+  }
+
+  async claimPurge(candidateId: string, subjectId: string, nowEpoch: number,
+    owner: string): Promise<boolean> {
+    try {
+      await this.db.send(new UpdateCommand({ TableName: this.tableName,
+        Key: key(candidateId),
+        UpdateExpression: "SET purgeOwner = :owner, purgeLeaseUntil = :until",
+        ConditionExpression: "#state = :pending AND subjectId = :subject AND (attribute_not_exists(purgeLeaseUntil) OR purgeLeaseUntil < :now)",
+        ExpressionAttributeNames: { "#state": "state" },
+        ExpressionAttributeValues: { ":pending": "pending", ":subject": subjectId,
+          ":owner": owner, ":until": nowEpoch + 120, ":now": nowEpoch } }));
+      return true;
+    } catch (error) {
+      if (conditional(error)) return false;
+      throw error;
+    }
+  }
+
+  async releasePurge(candidateId: string, subjectId: string, owner: string): Promise<void> {
+    try {
+      await this.db.send(new UpdateCommand({ TableName: this.tableName,
+        Key: key(candidateId),
+        UpdateExpression: "REMOVE purgeOwner, purgeLeaseUntil",
+        ConditionExpression: "subjectId = :subject AND purgeOwner = :owner",
+        ExpressionAttributeValues: { ":subject": subjectId, ":owner": owner } }));
+    } catch (error) {
+      if (!conditional(error)) throw error;
+    }
   }
 
   async purgeMetadata(candidateId: string): Promise<boolean> {

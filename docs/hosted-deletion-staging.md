@@ -15,13 +15,16 @@ The onboarding Lambda's hard timeout is 60 seconds. Deletion waits at least
 lease before
 purging; this leaves an extra minute beyond the longest upload lease. It then
 deletes all S3 object versions and delete markers under that candidate's
-prefix, removes candidate ledger rows in bounded batches, and marks the
+prefix in bounded pages, removes candidate ledger rows in bounded batches, and marks the
 tombstone `complete`. Any failed step leaves the tombstone pending and a later
-same-subject request retries the purge. `200 complete` is returned only after
+same-subject request retries the purge. A conditional 120-second purge claim
+prevents two requests from deleting the same candidate concurrently; the claim
+is released after a completed or failed attempt. `200 complete` is returned only after
 the purge and ledger cleanup finish.
 
-The API, Cloudflare route, and added IAM actions are all behind the existing
-`EnableOnboarding=false` staging default. No candidate deletion was run in
+The API and Cloudflare route have a separate `EnableCandidateDeletion=false`
+staging default in addition to `EnableOnboarding=false`; enabling intake alone
+does not expose deletion. No candidate deletion was run in
 AWS by this PR. The route has no hosted UI control yet.
 
 ## Gates before enabling

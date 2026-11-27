@@ -9,6 +9,7 @@ const t0 = new Date("2026-11-26T12:00:00.000Z");
 function fixture() {
   let marker: { state: "pending" | "complete"; subjectId: string; notBeforeEpoch: number } | undefined;
   let active = false;
+  let claimed = false;
   const purge = vi.fn(async () => {});
   const deps: CandidateDeletionDeps = {
     candidateIdForSubject: () => candidateId,
@@ -19,6 +20,8 @@ function fixture() {
         return marker;
       },
       async hasActiveWriters() { return active; },
+      async claimPurge() { if (claimed) return false; claimed = true; return true; },
+      async releasePurge() { claimed = false; },
       async purgeMetadata() { return true; },
       async markComplete() { if (!marker) throw new Error("No marker"); marker.state = "complete"; },
     },

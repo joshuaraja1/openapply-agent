@@ -34,7 +34,7 @@ describe('staging login Worker', () => {
 
   it('isolates onboarding, plan and deletion requests to their dedicated API origin', async () => {
     const env = { ...assets(), AWS_API_ORIGIN: 'https://billing.example.com',
-      ONBOARDING_API_ORIGIN: 'https://candidate.example.com' };
+      ONBOARDING_API_ORIGIN: 'https://candidate.example.com', CANDIDATE_DELETION_ENABLED: 'true' };
     const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
       new Response('{"status":"inactive"}', { status: 200 }));
     vi.stubGlobal('fetch', upstream);
@@ -53,6 +53,15 @@ describe('staging login Worker', () => {
         'https://candidate.example.com/api/candidates/delete',
       ]);
     } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('keeps the deletion proxy closed while onboarding is staged', async () => {
+    const env = { ...assets(), ONBOARDING_API_ORIGIN: 'https://candidate.example.com' };
+    const response = await worker.fetch(new Request('https://test.workers.dev/api/candidates/delete', {
+      method: 'POST', headers: { origin: 'https://test.workers.dev',
+        authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
+    }), env);
+    expect(response.status).toBe(404);
   });
 
   it('forwards only a bounded authenticated checkout request to configured AWS API', async () => {

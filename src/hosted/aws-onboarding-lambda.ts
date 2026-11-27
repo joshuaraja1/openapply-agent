@@ -36,9 +36,11 @@ function runtime() {
   const deletion = new DynamoCandidateDeletionStore(db, required("RUN_LEDGER_TABLE_NAME"));
   const plans = new DynamoCandidatePlanStatus(db, required("ENTITLEMENT_TABLE_NAME"));
   const candidateId = (subject: string) => candidateIdForSubject(issuer, subject);
-  return { handleRequest: (request: Request) => new URL(request.url).pathname === "/api/candidates/delete"
-    ? handleCandidateDeletionHttp(request, { appOrigin, verifySubject, store: deletion, vault,
-      candidateIdForSubject: candidateId })
+  return { handleRequest: async (request: Request) => new URL(request.url).pathname === "/api/candidates/delete"
+    ? process.env.CANDIDATE_DELETION_ENABLED === "true"
+      ? handleCandidateDeletionHttp(request, { appOrigin, verifySubject, store: deletion, vault,
+        candidateIdForSubject: candidateId })
+      : new Response("", { status: 404, headers: { "cache-control": "no-store" } })
     : handleCandidateOnboardingHttp(request, {
     appOrigin, verifySubject, vault, markers,
     loadEntitlements: (subject: string) => plans.loadEntitlements(subject),

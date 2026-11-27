@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CandidateVault } from "../cloud/candidate-vault.js";
 
 /** The onboarding Lambda has a 60-second hard timeout. The 180-second upload
@@ -13,6 +14,8 @@ export interface DeletionRecord {
 export interface CandidateDeletionStore {
   begin(candidateId: string, subjectId: string, notBeforeEpoch: number): Promise<DeletionRecord>;
   hasActiveWriters(candidateId: string, nowEpoch: number): Promise<boolean>;
+  claimPurge(candidateId: string, subjectId: string, nowEpoch: number, owner: string): Promise<boolean>;
+  releasePurge(candidateId: string, subjectId: string, owner: string): Promise<void>;
   /** Delete candidate ledger rows in bounded batches, retaining DELETED. */
   purgeMetadata(candidateId: string): Promise<boolean>;
   markComplete(candidateId: string, subjectId: string): Promise<void>;
@@ -34,10 +37,19 @@ export async function deleteCandidateAccount(subjectId: string, deps: CandidateD
   if (marker.state === "complete") return { state: "complete" };
   if (nowEpoch < marker.notBeforeEpoch
     || await deps.store.hasActiveWriters(candidateId, nowEpoch)) return { state: "pending" };
+  const owner = randomUUID();
+  if (!await deps.store.claimPurge(candidateId, subjectId, nowEpoch, owner)) {
+    return { state: "pending" };
+  }
   // The tombstone blocks new uploads, run creation, queue admission, and
   // journal writes before any object version is removed.
-  await deps.vault.deleteCandidate(candidateId);
-  if (!await deps.store.purgeMetadata(candidateId)) return { state: "pending" };
-  await deps.store.markComplete(candidateId, subjectId);
-  return { state: "complete" };
+  try {
+    if (await deps.store.hasActiveWriters(candidateId, nowEpoch)) return { state: "pending" };
+    await deps.vault.deleteCandidate(candidateId);
+    if (!await deps.store.purgeMetadata(candidateId)) return { state: "pending" };
+    await deps.store.markComplete(candidateId, subjectId);
+    return { state: "complete" };
+  } finally {
+    await deps.store.releasePurge(candidateId, subjectId, owner);
+  }
 }
