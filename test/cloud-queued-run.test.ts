@@ -32,6 +32,7 @@ function harness() {
   let currentConsent = true;
   let entitlement: unknown[] = [paid];
   let revokePaymentDuringPrepare = false;
+  let revokePaymentAtIntent = false;
   let revokeDuringPrepare = false;
   let consentGranted = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
@@ -59,6 +60,7 @@ function harness() {
         if (!intentWriteSucceeds || !consentGranted) return null;
         if (status !== "not_started") return null;
         status = "needs_reconciliation";
+        if (revokePaymentAtIntent) entitlement = [];
         return reservedReceiptId;
       },
       async markUncertain() { events.push("uncertain"); },
@@ -114,6 +116,7 @@ function harness() {
     setCurrentConsent(value: boolean) { currentConsent = value; },
     setEntitlement(value: unknown[]) { entitlement = value; },
     setRevokePaymentDuringPrepare(value: boolean) { revokePaymentDuringPrepare = value; },
+    setRevokePaymentAtIntent(value: boolean) { revokePaymentAtIntent = value; },
     setRevokeDuringPrepare(value: boolean) { revokeDuringPrepare = value; },
     setConsentGranted(value: boolean) { consentGranted = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
@@ -145,6 +148,16 @@ describe("cloud queued application bridge", () => {
     expect(h.events).toContain("cleanup");
     expect(h.events).not.toContain("intent");
     expect(h.events).not.toContain("click");
+  });
+
+  it("does not click after paid access disappears during submit intent", async () => {
+    const h = harness();
+    h.setRevokePaymentAtIntent(true);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).toContain("intent");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("ack");
   });
   it("persists intent before one click and confirms before acknowledging SQS", async () => {
     const h = harness();

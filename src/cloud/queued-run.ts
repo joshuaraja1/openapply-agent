@@ -134,6 +134,23 @@ export async function handleQueuedApplication(
         return "needs_reconciliation";
       }
 
+      // One final read after the durable intent narrows the window in which a
+      // payment or consent revocation could race with the external Submit.
+      // If it changed, keep the intent uncertain; never try this job again
+      // automatically because a browser click may already be in flight.
+      let stillAuthorized = false;
+      try {
+        stillAuthorized = await ports.authorization.hasCurrentConsent(run.candidateId, run.runId);
+        if (stillAuthorized) {
+          requireHostedAccess(record.subjectId,
+            await ports.billing.loadEntitlements(record.subjectId));
+        }
+      } catch { stillAuthorized = false; }
+      if (!stillAuthorized) {
+        await ports.journal.markUncertain(run.candidateId, token, record.job);
+        return "needs_reconciliation";
+      }
+
       let receipt: VerifiedReceipt | null;
       try {
         receipt = await prepared.submitOnce();
