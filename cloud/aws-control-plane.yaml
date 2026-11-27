@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: OpenApply staging control-plane storage and queue; no browser compute or candidate data is provisioned.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: staging
+    AllowedPattern: '^[a-z0-9-]{2,24}$'
+
+Resources:
+  ApplicationDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      FifoQueue: true
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+      QueueName: !Sub 'openapply-${Environment}-application-dlq.fifo'
+
+  ApplicationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      FifoQueue: true
+      ContentBasedDeduplication: false
+      SqsManagedSseEnabled: true
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 1209600
+      QueueName: !Sub 'openapply-${Environment}-application.fifo'
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ApplicationDeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  RunLedger:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub 'openapply-${Environment}-run-ledger'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  PrivateArtifacts:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  PrivateArtifactsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PrivateArtifacts
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt PrivateArtifacts.Arn
+              - !Sub '${PrivateArtifacts.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  ApplicationQueueUrl:
+    Value: !Ref ApplicationQueue
+  ApplicationQueueArn:
+    Value: !GetAtt ApplicationQueue.Arn
+  DeadLetterQueueUrl:
+    Value: !Ref ApplicationDeadLetterQueue
+  RunLedgerName:
+    Value: !Ref RunLedger
+  PrivateArtifactsBucket:
+    Value: !Ref PrivateArtifacts
