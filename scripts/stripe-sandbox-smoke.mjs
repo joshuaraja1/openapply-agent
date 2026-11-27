@@ -45,6 +45,29 @@ export async function cleanupSandboxCustomer(stripe, customerId) {
   }
 }
 
+/** A lost create response must not orphan an unidentifiable test Customer.
+ * Retry the same idempotent request, then search by the run marker if every
+ * response is lost. Stripe search can lag, so report the marker if unresolved. */
+export async function createDisposableCustomer(stripe, runId) {
+  const params = { metadata: { purpose: "openapply-sandbox-smoke", runId } };
+  const options = { idempotencyKey: `openapply-sandbox-customer-${runId}` };
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await stripe.customers.create(params, options); }
+    catch (error) { lastError = error; }
+  }
+  try {
+    const found = await stripe.customers.search({
+      query: `metadata['runId']:'${runId}'`, limit: 100,
+    });
+    if (found.data.length === 1 && found.data[0].metadata?.runId === runId) {
+      return found.data[0];
+    }
+  } catch { /* Preserve the original create error and report the run marker. */ }
+  throw new Error(`Stripe test Customer creation is uncertain; reconcile run ${runId} in the sandbox`,
+    { cause: lastError });
+}
+
 async function main() {
   // Pass a restricted test key on stdin. Never put it in args, logs, or the repo.
   const key = readFileSync(0, "utf8").trim();
@@ -55,6 +78,7 @@ async function main() {
   const stripe = new Stripe(key);
   const config = { prices, livemode: false, appOrigin: "https://openapplyagent.xyz" };
   const subjectId = `sandbox-smoke-${randomUUID()}`;
+  const runId = randomUUID();
   let customer;
 
   try {
@@ -67,7 +91,7 @@ async function main() {
         throw new Error(`${plan} sandbox Price does not match the reviewed plan`);
       }
     }
-    customer = await stripe.customers.create({ metadata: { purpose: "openapply-sandbox-smoke" } });
+    customer = await createDisposableCustomer(stripe, runId);
     for (const plan of ["monthly", "semester"]) {
       const reservation = { requestId: randomUUID(), subjectId, customerId: customer.id,
         plan, createdAt: new Date().toISOString() };
