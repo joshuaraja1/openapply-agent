@@ -4,6 +4,9 @@ import { handleQueuedApplication, type CloudRunPorts, type VerifiedReceipt }
   from "../src/cloud/queued-run.js";
 
 const candidateId = "ec5a592a-a5ea-409f-b21b-0064558c72bb";
+const paid = { kind: "free-grant", subjectId: candidateId, grantId: "grant-test",
+  approvedBy: "admin-test", startsAt: "2020-01-01T00:00:00Z",
+  endsAt: "2099-01-01T00:00:00Z", revokedAt: null };
 const runId = "e4590bf1-91c4-4a63-9203-a8715a68d8d4";
 const job = { provider: "Greenhouse", employerId: "acme", requisitionId: "109" };
 const evidence = new TextEncoder().encode("Employer confirmation for requisition 109");
@@ -27,6 +30,8 @@ function harness() {
   let storedArtifactId: string | undefined;
   let owned = true;
   let currentConsent = true;
+  let entitlement: unknown[] = [paid];
+  let revokePaymentDuringPrepare = false;
   let revokeDuringPrepare = false;
   let consentGranted = true;
   let clickResult: VerifiedReceipt | null = { evidence, job };
@@ -36,6 +41,7 @@ function harness() {
   let ackThrows = false;
   let cleanupThrows = false;
   const ports: CloudRunPorts = {
+    billing: { async loadEntitlements() { events.push("billing"); return entitlement; } },
     authorization: {
       async ownsRun() { events.push("owns-run"); return owned; },
       async hasCurrentConsent() { events.push("has-consent"); return currentConsent; },
@@ -64,7 +70,8 @@ function harness() {
       },
     },
     runRecords: {
-      async loadIdentity() { events.push("load-identity"); return { consentVersion: 1, job }; },
+      async loadIdentity() { events.push("load-identity"); return { subjectId: candidateId,
+        consentVersion: 1, job }; },
       async loadProfileArtifactId() { events.push("load-profile-id"); return runId; },
     },
     vault: {
@@ -82,6 +89,7 @@ function harness() {
         events.push("prepare");
         if (prepareThrows) throw new Error("preflight failed");
         if (revokeDuringPrepare) currentConsent = false;
+        if (revokePaymentDuringPrepare) entitlement = [];
         return { async submitOnce() {
           if (failsBeforeClick) throw new Error("browser closed before click");
           events.push("click");
@@ -104,6 +112,8 @@ function harness() {
     setConfirmSucceeds(value: boolean) { confirmSucceeds = value; },
     setOwned(value: boolean) { owned = value; },
     setCurrentConsent(value: boolean) { currentConsent = value; },
+    setEntitlement(value: unknown[]) { entitlement = value; },
+    setRevokePaymentDuringPrepare(value: boolean) { revokePaymentDuringPrepare = value; },
     setRevokeDuringPrepare(value: boolean) { revokeDuringPrepare = value; },
     setConsentGranted(value: boolean) { consentGranted = value; },
     setClickThrows(value: boolean) { clickThrows = value; },
@@ -118,6 +128,24 @@ function harness() {
 }
 
 describe("cloud queued application bridge", () => {
+  it("requires current paid or granted access before restoring a profile", async () => {
+    const h = harness();
+    h.setEntitlement([]);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("payment_required");
+    expect(h.events).not.toContain("restore");
+    expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("ack");
+  });
+
+  it("rechecks access after preparation and before durable submit intent", async () => {
+    const h = harness();
+    h.setRevokePaymentDuringPrepare(true);
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("payment_required");
+    expect(h.events.filter(event => event === "billing")).toHaveLength(2);
+    expect(h.events).toContain("cleanup");
+    expect(h.events).not.toContain("intent");
+    expect(h.events).not.toContain("click");
+  });
   it("persists intent before one click and confirms before acknowledging SQS", async () => {
     const h = harness();
     expect(await handleQueuedApplication(message(), h.ports)).toBe("confirmed");
