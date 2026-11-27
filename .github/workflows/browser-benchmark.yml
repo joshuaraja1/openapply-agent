@@ -15,7 +15,7 @@ concurrency:
 jobs:
   benchmark:
     name: Browser benchmark (${{ matrix.os }})
-    # Keep the required status name stable while pinning Linux browser dependencies.
+    # Keep the required status name stable on the Ubuntu 24.04 runner.
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     strategy:
       fail-fast: false
@@ -28,10 +28,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-        if: runner.os == 'Linux'
       - run: npx playwright install chromium
-        if: runner.os != 'Linux'
       - run: npm run build
       - run: node --test scripts/assert-browser-benchmark.test.mjs
       - name: Measure synthetic browser overhead
