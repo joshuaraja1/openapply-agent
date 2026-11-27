@@ -1,9 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { launchBrowser } from "../browser/runtime.js";
 
-async function main(): Promise<void> {
+export async function runBrowserSmoke(): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "openapply-browser-smoke-"));
   try {
     const browser = await launchBrowser({
@@ -28,7 +30,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(`${String(error)}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  runBrowserSmoke().catch((error: unknown) => {
+    process.stderr.write(`${String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

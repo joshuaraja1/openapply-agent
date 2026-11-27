@@ -39,9 +39,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # The hosted runner already has Chromium system libraries. Avoid apt
+      # refreshes from unrelated runner sources that can block browser tests.
+      - run: npx playwright install chromium
       - run: npm run browser:doctor
-      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/provider-portal.e2e.test.ts test/provider-completion-matrix.e2e.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts test/overleaf-session.test.ts test/first-run-browser-flow.e2e.test.ts test/pdf-verification.test.ts test/owner-action-proxy.e2e.test.ts
+      - run: npm test -- --run test/browser-runtime.test.ts test/browser-doctor.test.ts test/browser-actions.test.ts test/form-mapper.test.ts test/provider-portal.e2e.test.ts test/provider-completion-matrix.e2e.test.ts test/owned-discovery.test.ts test/owned-overleaf.test.ts test/overleaf-session.test.ts test/first-run-browser-flow.e2e.test.ts test/pdf-verification.test.ts test/owner-action-proxy.e2e.test.ts test/synthetic-browser-application.test.ts
         env:
           OPENAPPLY_BROWSER_E2E: "1"
 
@@ -59,10 +61,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - if: runner.os == 'Linux'
-        run: npx playwright install --with-deps chromium
-      - if: runner.os != 'Linux'
-        run: npx playwright install chromium
+      - run: npx playwright install chromium
       - run: npm test -- --run test/keyboard-accessibility.e2e.test.ts
         env:
           OPENAPPLY_BROWSER_E2E: "1"
