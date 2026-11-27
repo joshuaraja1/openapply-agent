@@ -85,7 +85,12 @@ export async function createTrustedApplicationRun(
     || profile.subjectId !== subjectId) {
     throw new RunInputsUnavailableError("Verified application inputs unavailable");
   }
-  const url = new URL(lead.canonicalUrl);
+  let url: URL;
+  try {
+    url = new URL(lead.canonicalUrl);
+  } catch {
+    throw new RunInputsUnavailableError("Verified application inputs unavailable");
+  }
   if (url.protocol !== "https:" || url.username || url.password || url.hash
     || !url.hostname || url.hostname === "localhost") {
     throw new RunInputsUnavailableError("Verified application inputs unavailable");
