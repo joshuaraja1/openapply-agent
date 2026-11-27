@@ -6,8 +6,10 @@ const signIn = document.querySelector('#sign-in');
 const signOut = document.querySelector('#sign-out');
 const checkoutActions = document.querySelector('#checkout-actions');
 const returnPath = location.pathname;
+const billingReturnKey = 'openapply.billing.return.v1';
 if (returnPath === '/billing/success' || returnPath === '/billing/cancel') {
   history.replaceState(null, '', returnPath); // Drop Stripe session ID before configuration fetch.
+  sessionStorage.setItem(billingReturnKey, returnPath);
 }
 
 try {
@@ -52,7 +54,11 @@ try {
     history.replaceState(null, '', '/auth/callback'); // Remove code before network work.
     try {
       await auth.completeCallback(callbackUrl);
-      status.textContent = 'Signed in for this tab. Staging setup is in progress.';
+      const billingReturn = sessionStorage.getItem(billingReturnKey);
+      sessionStorage.removeItem(billingReturnKey);
+      status.textContent = billingReturn === '/billing/success'
+        ? 'Signed in after test checkout. Checking paid access…'
+        : 'Signed in for this tab. Checking paid access…';
       signOut.hidden = false;
       checkoutActions.hidden = config.checkoutEnabled !== true;
       const token = auth.getIdToken();
@@ -71,17 +77,19 @@ try {
         } catch { status.textContent = 'Signed in. Billing status is temporarily unavailable.'; }
       }
     } catch {
+      sessionStorage.removeItem(billingReturnKey);
       status.textContent = 'Sign-in failed or expired. Please try again.';
       signIn.hidden = false;
     }
-  } else {
-    if (returnPath === '/billing/success') {
-      status.textContent = 'Stripe returned from test checkout. Sign in to check your verified paid-access status.';
-    } else if (returnPath === '/billing/cancel') {
-      status.textContent = 'Test checkout was canceled. Sign in to check your current paid-access status.';
-    } else {
-      status.textContent = 'Sign in to test your OpenApply candidate account.';
+  } else if (returnPath === '/billing/success' || returnPath === '/billing/cancel') {
+    status.textContent = 'Returning from Stripe test checkout. Verifying your account…';
+    try { location.assign(await auth.beginLogin()); }
+    catch {
+      status.textContent = 'Automatic sign-in could not start. Sign in to check your verified paid-access status.';
+      signIn.hidden = false;
     }
+  } else {
+    status.textContent = 'Sign in to test your OpenApply candidate account.';
     signIn.hidden = false;
   }
 } catch {
