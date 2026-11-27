@@ -147,6 +147,23 @@ export class StripeBillingReader {
     const intent = await this.stripe.paymentIntents.retrieve(intentId);
     const linkedCustomer = idOf(intent.customer);
     if (linkedCustomer) return { kind: "customer", customerId: linkedCustomer };
+    // A legacy invoice can own a PaymentIntent whose Customer field is absent.
+    // Never acknowledge that refund as an unrelated guest without checking
+    // invoice payments linked to the exact PaymentIntent.
+    const payments = await allPages(cursor => this.stripe.invoicePayments.list({
+      payment: { type: "payment_intent", payment_intent: intentId }, limit: 100,
+      ...(cursor ? { starting_after: cursor } : {}),
+    }));
+    const invoiceCustomers = new Set<string>();
+    for (const payment of payments) {
+      const invoice = await this.stripe.invoices.retrieve(idOf(payment.invoice)!);
+      const invoiceCustomer = idOf(invoice.customer);
+      if (!invoiceCustomer) throw new Error("Stripe invoice payment has no Customer");
+      invoiceCustomers.add(invoiceCustomer);
+    }
+    if (invoiceCustomers.size > 1) throw new Error("Refund charge links conflicting Customers");
+    const invoiceCustomer = [...invoiceCustomers][0];
+    if (invoiceCustomer) return { kind: "customer", customerId: invoiceCustomer };
     return { kind: "verified-unaffiliated-guest" };
   }
 }

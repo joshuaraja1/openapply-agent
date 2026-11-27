@@ -49,6 +49,10 @@ export class DynamoBillingStore {
       throw new Error("Stripe customer binding is invalid");
     }
     validSubject(row.subjectId);
+    const forward = await this.get(subjectKey(row.subjectId), "CUSTOMER");
+    if (forward?.customerId !== customerId || forward.subjectId !== row.subjectId) {
+      throw new Error("Stripe customer reverse binding disagrees with subject binding");
+    }
     return { subjectId: row.subjectId, customerId };
   }
 

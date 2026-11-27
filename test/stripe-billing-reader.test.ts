@@ -55,4 +55,16 @@ describe("fresh Stripe billing reader", () => {
     stripe.checkout.sessions.list.mockResolvedValue({ data: [], has_more: true });
     await expect(reader.loadSemesters(customer)).rejects.toThrow("pagination is incomplete");
   });
+
+  it("resolves a refunded charge through invoice payments when direct Customer is absent", async () => {
+    const { reader, stripe, charge, intent } = harness();
+    stripe.charges.retrieve.mockResolvedValue({ ...charge, customer: null as unknown as string });
+    stripe.paymentIntents.retrieve.mockResolvedValue({ ...intent, customer: null as unknown as string });
+    stripe.invoicePayments.list.mockResolvedValue(list([{ id: "inpay_1", invoice: "in_1" }]));
+    stripe.invoices.retrieve.mockResolvedValue({ id: "in_1", customer });
+    expect(await reader.resolveCharge("ch_test")).toEqual({ kind: "customer", customerId: customer });
+    expect(stripe.invoicePayments.list).toHaveBeenCalledWith(expect.objectContaining({
+      payment: { type: "payment_intent", payment_intent: "pi_test" },
+    }));
+  });
 });
