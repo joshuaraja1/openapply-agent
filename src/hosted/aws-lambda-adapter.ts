@@ -45,17 +45,18 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
     || event.rawPath === "/api/candidates/onboarding"
     || event.rawPath === "/api/candidates/plan"
     || event.rawPath === "/api/candidates/delete"
-    || event.rawPath === "/api/candidates/deletion-status";
+    || event.rawPath === "/api/candidates/deletion-status"
+    || event.rawPath === "/api/jobs/matches";
   if (browserRoute && method === "OPTIONS") {
     const requestedHeaders = (header("access-control-request-headers") ?? "")
       .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
     const allowed = header("origin") === origin.origin
-      && header("access-control-request-method") === "POST"
+      && header("access-control-request-method") === (event.rawPath === "/api/jobs/matches" ? "GET" : "POST")
       && requestedHeaders.every(value => value === "authorization" || value === "content-type");
     return { statusCode: allowed ? 204 : 403,
       headers: allowed ? {
         "access-control-allow-origin": origin.origin,
-        "access-control-allow-methods": "POST",
+        "access-control-allow-methods": event.rawPath === "/api/jobs/matches" ? "GET" : "POST",
         "access-control-allow-headers": "authorization, content-type",
         "access-control-max-age": "300",
         vary: "Origin",

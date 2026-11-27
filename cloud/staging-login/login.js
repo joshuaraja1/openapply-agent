@@ -2,6 +2,7 @@ import { createCognitoBrowserAuth } from '/cognito-browser-auth.js';
 import { stripeTestCheckoutUrl } from '/checkout-url.mjs';
 import { attachCandidateSetup } from '/onboarding.js';
 import { attachCandidateDeletion } from '/deletion.js';
+import { attachJobMatches } from '/jobs.js';
 
 const status = document.querySelector('#status');
 const signIn = document.querySelector('#sign-in');
@@ -54,13 +55,14 @@ try {
       signOut.hidden = false;
       checkoutActions.hidden = config.checkoutEnabled !== true;
       if (config.onboardingEnabled === true) attachCandidateSetup(auth);
+      if (config.jobDiscoveryEnabled === true) attachJobMatches(auth);
       if (config.deletionEnabled === true) attachCandidateDeletion(auth);
     } catch {
       status.textContent = 'Sign-in failed or expired. Please try again.';
       signIn.hidden = false;
     }
   } else {
-    status.textContent = 'Sign in to test your OpenApply candidate account.';
+    status.textContent = 'Sign in to test your OpenApply job seeker account.';
     signIn.hidden = false;
   }
 } catch {

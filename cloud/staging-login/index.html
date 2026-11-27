@@ -10,7 +10,7 @@
 <body>
   <main>
     <p class="eyebrow">OpenApply staging</p>
-    <h1>Candidate sign-in</h1>
+    <h1>Job seeker sign-in</h1>
     <p id="status" role="status" aria-live="polite">Checking setup…</p>
     <div class="actions">
       <button id="sign-in" hidden>Sign in or create account</button>
@@ -21,7 +21,7 @@
       <button data-plan="semester">Test $129 semester checkout</button>
     </div>
     <section id="candidate-setup" hidden aria-labelledby="setup-heading">
-      <h2 id="setup-heading">Your candidate profile</h2>
+      <h2 id="setup-heading">Your profile</h2>
       <p class="note">Enter the facts the application agent may use. Your PDFs stay private; their text is not turned into claims without your review.</p>
       <form id="setup-form">
         <label>Where are you now?
@@ -96,9 +96,19 @@
       <p id="setup-status" role="status" aria-live="polite"></p>
       <p id="plan-status" class="note">Plan status will appear after billing is connected.</p>
     </section>
+    <section id="job-matches" hidden aria-labelledby="jobs-heading">
+      <h2 id="jobs-heading">Jobs matching your reviewed targets</h2>
+      <p class="note">These are recent postings from configured official employer feeds. Opening a link takes you to the employer; this preview does not submit applications.</p>
+      <p id="jobs-status" role="status" aria-live="polite"></p>
+      <div id="jobs-list"></div>
+      <div class="actions">
+        <button id="jobs-refresh" type="button" class="secondary">Refresh matches</button>
+        <button id="jobs-more" type="button" class="secondary" hidden>More jobs</button>
+      </div>
+    </section>
     <section id="candidate-deletion" hidden aria-labelledby="deletion-heading">
-      <h2 id="deletion-heading">Delete candidate data</h2>
-      <p class="note">This stops future application work and starts deletion of your candidate profile and uploaded files. Payment records follow a separate retention policy.</p>
+      <h2 id="deletion-heading">Delete your data</h2>
+      <p class="note">This stops future application work and starts deletion of your profile and uploaded files. Payment records follow a separate retention policy.</p>
       <p id="deletion-status" role="status" aria-live="polite">Checking deletion status…</p>
       <label>Type DELETE to confirm<input id="deletion-confirm" autocomplete="off" spellcheck="false"></label>
       <div class="actions">

@@ -36,7 +36,7 @@ export interface OfficialLeadRow {
   verifiedAtEpoch: number;
   provenance: {
     kind: "official-ats-api"; provider: OfficialLeadSource["provider"];
-    sourceUrl: string; title: string; company: string;
+    sourceUrl: string; title: string; company: string; location: string | null;
     descriptionText: string; sourcePublishedAt: string | null;
   };
 }
@@ -66,7 +66,7 @@ function uuidFromJobKey(jobKey: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function sourceKey(source: OfficialLeadSource): string {
+export function sourceKey(source: OfficialLeadSource): string {
   const digest = createHash("sha256").update(JSON.stringify([
     source.provider, identifier(source).toLowerCase(), source.provider === "lever" ? source.region : "",
   ])).digest("hex");
@@ -175,7 +175,7 @@ export function verifiedOfficialLead(source: OfficialLeadSource, posting: Normal
     sourceKey: sourceKey(source), verifiedAt: at.toISOString(), verifiedAtEpoch: at.getTime(),
     provenance: { kind: "official-ats-api", provider: source.provider,
       sourceUrl: sourceUrl({ ...source, enabled: true, allowedApplicationHosts: [] } as JobSource),
-      title: posting.title, company: posting.company,
+      title: posting.title, company: posting.company, location: posting.location,
       descriptionText: posting.descriptionText,
       sourcePublishedAt: posting.sourcePublishedAt },
   };
