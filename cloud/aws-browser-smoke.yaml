@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: On-demand OpenApply browser smoke task only; no candidate data, application queue consumer, or ECS service.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: staging
+    AllowedPattern: '^[a-z0-9-]{2,24}$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  BrowserImageUri:
+    Type: String
+    Default: ''
+    Description: Leave empty to create the repository first; update with an ECR sha256 digest URI to register the smoke task.
+    AllowedPattern: '^$|^.+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[a-f0-9]{64}$'
+
+Conditions:
+  HasBrowserImage: !Not [!Equals [!Ref BrowserImageUri, '']]
+
+Resources:
+  BrowserRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Sub 'openapply-${Environment}-browser'
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+
+  BrowserCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'openapply-${Environment}-browser'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+
+  BrowserLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/openapply/${Environment}/browser-smoke'
+      RetentionInDays: 14
+
+  BrowserExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pull-image-and-write-smoke-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrAuthentication
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: PullStagingImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: !GetAtt BrowserRepository.Arn
+              - Sid: WriteSmokeLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/openapply/${Environment}/browser-smoke:*'
+
+  BrowserSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Egress-only browser smoke task; no inbound ports
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  BrowserSmokeTask:
+    Type: AWS::ECS::TaskDefinition
+    Condition: HasBrowserImage
+    Properties:
+      Family: !Sub 'openapply-${Environment}-browser-smoke'
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      Cpu: '1024'
+      Memory: '4096'
+      ExecutionRoleArn: !GetAtt BrowserExecutionRole.Arn
+      # Deliberately omit TaskRoleArn: the container cannot access AWS candidate state.
+      ContainerDefinitions:
+        - Name: browser-smoke
+          Image: !Ref BrowserImageUri
+          Essential: true
+          User: '10001:10001'
+          Command:
+            - node
+            - /app/dist/src/cloud/browser-smoke-cli.js
+          Environment:
+            - Name: OPENAPPLY_SUBMISSION_MODE
+              Value: disabled
+          # Chromium needs writable task-local storage. Fargate has no tmpfs or
+          # sharedMemorySize support; this differs from Docker CI and needs a live check.
+          ReadonlyRootFilesystem: false
+          LinuxParameters:
+            Capabilities:
+              Drop:
+                - ALL
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BrowserLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: browser-smoke
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt BrowserRepository.RepositoryUri
+  ClusterArn:
+    Value: !GetAtt BrowserCluster.Arn
+  SmokeTaskDefinitionArn:
+    Condition: HasBrowserImage
+    Value: !Ref BrowserSmokeTask
+  EgressOnlySecurityGroupId:
+    Value: !Ref BrowserSecurityGroup
