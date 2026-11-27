@@ -51,7 +51,8 @@ Parameters:
     Default: 'false'
   RunCreatorCodeKey:
     Type: String
-    Default: ''
+    Default: disabled/not-configured.zip
+    MinLength: 1
   PrivateArtifactBucketName:
     Type: String
     Default: ''
@@ -78,7 +79,7 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
         AssertDescription: Run creation requires a durable run ledger table.
-      - Assert: !Not [!Equals [!Ref RunCreatorCodeKey, '']]
+      - Assert: !Not [!Equals [!Ref RunCreatorCodeKey, 'disabled/not-configured.zip']]
         AssertDescription: Run creation requires its separate Lambda package.
       - Assert: !Not [!Equals [!Ref PrivateArtifactBucketName, '']]
         AssertDescription: Run creation requires a private artifact bucket.
