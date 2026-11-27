@@ -57,11 +57,15 @@ export function approvedApplicationProfile(submissionId: string, input: Applicat
   });
 }
 
-/** The hosted runner can use this only after the trusted PROFILE marker is ready. */
-export function parseApprovedHostedProfile(bytes: Uint8Array): CandidateProfile {
+/** The hosted runner can use this only after the trusted PROFILE marker is ready.
+ * Bind decrypted bytes to the tenant derived from the authenticated subject. */
+export function parseApprovedHostedProfile(bytes: Uint8Array, expectedCandidateId: string): CandidateProfile {
+  const candidateId = z.uuid().parse(expectedCandidateId);
   const stored = z.strictObject({ version: z.literal(1),
     provenance: z.literal("candidate-entered-and-reviewed"),
+    candidateId: z.uuid(),
     applicationProfile: candidateProfileSchema,
   }).passthrough().parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+  if (stored.candidateId !== candidateId) throw new Error("Stored application profile belongs to another account");
   return stored.applicationProfile;
 }

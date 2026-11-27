@@ -3,6 +3,7 @@ import { applicationFactsSchema, approvedApplicationProfile,
   parseApprovedHostedProfile } from "../src/hosted/application-facts.js";
 
 const id = "22222222-2222-4222-8222-222222222222";
+const candidateId = "11111111-1111-4111-8111-111111111111";
 const facts = {
   identity: { fullName: "Avery Example", location: "Chicago", email: "avery@example.test",
     phone: "555-0100", github: "https://github.com/avery" },
@@ -21,8 +22,8 @@ describe("hosted application facts", () => {
       evidence: [{ source: "candidate-reviewed-intake",
         uri: `urn:openapply:onboarding:${id}#education-0` }] });
     expect(profile.experience[0]?.claims[0]?.claim).toBe("Built a test dashboard");
-    expect(parseApprovedHostedProfile(Buffer.from(JSON.stringify({ version: 1,
-      provenance: "candidate-entered-and-reviewed", applicationProfile: profile })))).toEqual(profile);
+    expect(parseApprovedHostedProfile(Buffer.from(JSON.stringify({ version: 1, candidateId,
+      provenance: "candidate-entered-and-reviewed", applicationProfile: profile })), candidateId)).toEqual(profile);
   });
 
   it("rejects demographic fields, unresolved placeholders, non-HTTPS URLs and empty claims", () => {
@@ -36,7 +37,15 @@ describe("hosted application facts", () => {
   });
 
   it("rejects a legacy encrypted profile without approved application facts", () => {
-    expect(() => parseApprovedHostedProfile(Buffer.from(JSON.stringify({ version: 1,
-      provenance: "candidate-entered-and-reviewed", targetRoles: ["Engineer"] })))).toThrow();
+    expect(() => parseApprovedHostedProfile(Buffer.from(JSON.stringify({ version: 1, candidateId,
+      provenance: "candidate-entered-and-reviewed", targetRoles: ["Engineer"] })), candidateId)).toThrow();
+  });
+
+  it("refuses decrypted bytes for another job seeker even when claims are valid", () => {
+    const profile = approvedApplicationProfile(id, facts);
+    const stored = Buffer.from(JSON.stringify({ version: 1, candidateId,
+      provenance: "candidate-entered-and-reviewed", applicationProfile: profile }));
+    expect(() => parseApprovedHostedProfile(stored,
+      "33333333-3333-4333-8333-333333333333")).toThrow("another account");
   });
 });
