@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { officialJobKey } from "../src/cloud/durable-journal.js";
 import { DynamoOfficialLeadStore, officialLeadSyncConfigSchema, officialSourceRequest,
   syncOfficialLeads, verifiedOfficialLead, type LeadMember,
@@ -176,5 +176,59 @@ describe("official lead reconciliation", () => {
     expect(items[0]?.Put?.ConditionExpression).toContain("sourceKey = :source");
     expect(items[0]?.Put?.ConditionExpression).toContain("verifiedAtEpoch <= :time");
     expect(items[1]?.Put?.Item?.pk).toBe(row.sourceKey);
+  });
+  it("does not reopen a closed posting from older or equal-time in-flight refreshes", async () => {
+    const t0 = verifiedOfficialLead(greenhouse, gh(), now);
+    const t1 = verifiedOfficialLead(greenhouse, gh(), new Date(now.getTime() + 1000));
+    const t2 = verifiedOfficialLead(greenhouse, gh(), new Date(now.getTime() + 2000));
+    const t3 = verifiedOfficialLead(greenhouse, gh(), new Date(now.getTime() + 3000));
+    let lead: Record<string, unknown> | undefined;
+    let memberExists = false;
+    const db = { send: vi.fn(async (command: unknown): Promise<{ Item?: Record<string, unknown> }> => {
+      if (command instanceof GetCommand) return lead ? { Item: lead } : {};
+      if (!(command instanceof TransactWriteCommand)) throw new Error("Unexpected DynamoDB command");
+      const items = command.input.TransactItems ?? [];
+      const put = items[0]?.Put;
+      if (put) {
+        // Interpret the relevant DynamoDB condition for the simulated arrival order.
+        expect(put.ConditionExpression).toContain("verifiedAtEpoch <= :time");
+        expect(put.ConditionExpression).toContain("closedAtEpoch < :time");
+        const incoming = put.Item as Record<string, unknown>;
+        const incomingTime = incoming.verifiedAtEpoch as number;
+        if (lead && (lead.jobKey !== incoming.jobKey || lead.sourceKey !== incoming.sourceKey
+          || (lead.verifiedAtEpoch as number) > incomingTime
+          || (typeof lead.closedAtEpoch === "number" && lead.closedAtEpoch >= incomingTime))) {
+          throw new Error("ConditionalCheckFailedException");
+        }
+        lead = { ...incoming };
+        memberExists = true;
+        return {};
+      }
+      const update = items[0]?.Update;
+      if (!update) throw new Error("Unexpected transaction");
+      expect(update.UpdateExpression).toContain("verifiedAtEpoch = :time");
+      expect(update.UpdateExpression).toContain("closedAtEpoch = :time");
+      const time = update.ExpressionAttributeValues?.[":time"] as number;
+      if (!lead || (lead.verifiedAtEpoch as number) >= time || !memberExists) {
+        throw new Error("ConditionalCheckFailedException");
+      }
+      lead = { ...lead, status: "closed", expiresAt: update.ExpressionAttributeValues?.[":expires"],
+        verifiedAtEpoch: time, closedAtEpoch: time };
+      memberExists = false;
+      return {};
+    }) };
+    const store = new DynamoOfficialLeadStore(db as never, "ledger");
+    await store.upsert(t0);
+    const originalMember: LeadMember = { pk: t0.sourceKey, sk: `LEAD#${t0.leadId}`,
+      leadId: t0.leadId, jobKey: t0.jobKey, verifiedAtEpoch: t0.verifiedAtEpoch };
+    // T1 is in flight; T2 first observes the posting missing and closes it.
+    await store.closeMissing(originalMember, t2.verifiedAtEpoch, t2.expiresAt - 900);
+    expect(lead?.status).toBe("closed");
+    await expect(store.upsert(t1)).rejects.toThrow("ConditionalCheckFailedException");
+    await expect(store.upsert(t2)).rejects.toThrow("ConditionalCheckFailedException");
+    expect(lead?.status).toBe("closed");
+    await store.upsert(t3);
+    expect(lead?.status).toBe("open");
+    expect(lead?.verifiedAtEpoch).toBe(t3.verifiedAtEpoch);
   });
 });

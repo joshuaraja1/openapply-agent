@@ -240,7 +240,7 @@ export class DynamoOfficialLeadStore implements OfficialLeadStore {
       expiresAt: row.expiresAt };
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Put: { TableName: this.table, Item: row,
-        ConditionExpression: "attribute_not_exists(pk) OR (jobKey = :job AND sourceKey = :source AND verifiedAtEpoch <= :time)",
+        ConditionExpression: "attribute_not_exists(pk) OR (jobKey = :job AND sourceKey = :source AND verifiedAtEpoch <= :time AND (attribute_not_exists(closedAtEpoch) OR closedAtEpoch < :time))",
         ExpressionAttributeValues: { ":job": row.jobKey, ":source": row.sourceKey,
           ":time": row.verifiedAtEpoch } } },
       { Put: { TableName: this.table, Item: member,
@@ -287,7 +287,7 @@ export class DynamoOfficialLeadStore implements OfficialLeadStore {
     }
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { Update: { TableName: this.table, Key: key,
-        UpdateExpression: "SET #status = :closed, expiresAt = :expires, closedAtEpoch = :time",
+        UpdateExpression: "SET #status = :closed, expiresAt = :expires, verifiedAtEpoch = :time, closedAtEpoch = :time",
         ConditionExpression: "jobKey = :job AND sourceKey = :source AND verifiedAtEpoch < :time",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: { ":closed": "closed", ":expires": nowEpoch,
