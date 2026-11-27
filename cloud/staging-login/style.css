@@ -1,0 +1,19 @@
+:root { font-family: system-ui, sans-serif; color-scheme: light; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f7fb; color: #14233d; }
+main { width: min(90vw, 42rem); padding: 2.5rem; border-radius: 1rem; background: white; box-shadow: 0 0.5rem 2rem #14233d14; }
+.eyebrow { color: #2458b1; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: .75rem; }
+h1 { margin: .4rem 0 1rem; }
+.actions { display: flex; gap: .75rem; margin: 1.5rem 0; }
+button { padding: .75rem 1rem; border: 0; border-radius: .5rem; background: #2458b1; color: white; font: inherit; cursor: pointer; }
+button[hidden] { display: none; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+.note { color: #52627b; font-size: .9rem; }
+section { border-top: 1px solid #dce4ef; margin-top: 2rem; padding-top: 1.5rem; }
+form, #setup-review { display: grid; gap: 1rem; }
+label { display: grid; gap: .35rem; font-weight: 600; }
+input:not([type=checkbox]), textarea, select { box-sizing: border-box; width: 100%; padding: .7rem; border: 1px solid #98a7bc; border-radius: .4rem; font: inherit; }
+textarea { min-height: 5rem; resize: vertical; }
+.check { display: flex; align-items: flex-start; font-weight: 400; }
+.check input { margin-top: .3rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #f4f7fb; border-radius: .5rem; font: inherit; }
+.secondary { background: #e4ebf5; color: #14233d; }

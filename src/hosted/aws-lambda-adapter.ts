@@ -29,7 +29,8 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   }
   const raw = event.body === undefined || event.body === null ? undefined
     : Buffer.from(event.body, event.isBase64Encoded ? "base64" : "utf8");
-  if (raw && raw.byteLength > 1024 * 1024) throw new Error("HTTP API body is too large");
+  const maxBody = event.rawPath === "/api/candidates/onboarding" ? 7_500_000 : 1024 * 1024;
+  if (raw && raw.byteLength > maxBody) throw new Error("HTTP API body is too large");
   const method = event.requestContext?.http?.method;
   if (!method || !/^[A-Z]+$/.test(method)) throw new Error("Invalid HTTP method");
   const origin = new URL(appOrigin);
@@ -40,7 +41,9 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
     .find(([key]) => key.toLowerCase() === name)?.[1];
   const browserRoute = event.rawPath === "/api/billing/checkout"
     || event.rawPath === "/api/applications/enqueue"
-    || event.rawPath === "/api/applications/runs";
+    || event.rawPath === "/api/applications/runs"
+    || event.rawPath === "/api/candidates/onboarding"
+    || event.rawPath === "/api/candidates/plan";
   if (browserRoute && method === "OPTIONS") {
     const requestedHeaders = (header("access-control-request-headers") ?? "")
       .split(",").map(value => value.trim().toLowerCase()).filter(Boolean);
