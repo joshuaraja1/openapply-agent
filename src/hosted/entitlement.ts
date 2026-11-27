@@ -41,6 +41,10 @@ export interface HostedAccess {
   accessUntil: string;
 }
 
+export class HostedAccessDeniedError extends Error {
+  constructor() { super("Hosted access unavailable"); }
+}
+
 function accessUntil(record: HostedEntitlement): string {
   return record.kind === "subscription" && Date.parse(record.paidThrough) < Date.parse(record.endsAt)
     ? record.paidThrough : record.endsAt;
@@ -52,7 +56,7 @@ export function requireHostedAccess(
   storedRecords: readonly unknown[],
   now: Date = new Date(),
 ): HostedAccess {
-  if (!subjectId.trim() || !Number.isFinite(now.getTime())) throw new Error("Hosted access unavailable");
+  if (!subjectId.trim() || !Number.isFinite(now.getTime())) throw new HostedAccessDeniedError();
   // A damaged record makes the whole account's authorization state uncertain.
   const records = storedRecords.map((record) => hostedEntitlementSchema.parse(record));
   const eligible = records.filter((record) => record.subjectId === subjectId
@@ -62,7 +66,7 @@ export function requireHostedAccess(
     && Date.parse(record.startsAt) < Date.parse(record.endsAt)
     && (record.kind === "subscription" ? record.status === "active" :
       record.revokedAt === null));
-  if (!eligible.length) throw new Error("Hosted access unavailable");
+  if (!eligible.length) throw new HostedAccessDeniedError();
   eligible.sort((a, b) => Date.parse(accessUntil(b)) - Date.parse(accessUntil(a)));
   const chosen = eligible[0]!;
   return { kind: chosen.kind,

@@ -4,7 +4,7 @@ import { SQSClient } from "@aws-sdk/client-sqs";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
-import { requireHostedAccess } from "../hosted/entitlement.js";
+import { HostedAccessDeniedError, requireHostedAccess } from "../hosted/entitlement.js";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { SqsApplicationQueueSender } from "./aws-enqueue-ports.js";
@@ -43,15 +43,24 @@ async function readSigningKey(): Promise<Buffer> {
   return secret;
 }
 
+export async function confirmedHostedAccess(subjectId: string,
+  loadEntitlements: (subjectId: string) => Promise<readonly unknown[]>): Promise<boolean> {
+  const entitlements = await loadEntitlements(subjectId);
+  try { requireHostedAccess(subjectId, entitlements); return true; }
+  catch (error) {
+    if (error instanceof HostedAccessDeniedError) return false;
+    throw error;
+  }
+}
+
 function authorization(db: DynamoDBDocumentClient, ledger: string) {
   const admission = new DynamoHostedRunAdmission(db, ledger);
   const billing = new DynamoCandidatePlanStatus(db, required("ENTITLEMENT_TABLE_NAME"));
   return async (candidate: string, run: string) => {
     if (!await admission.hasCurrentConsent(candidate, run)) return false;
     const identity = await admission.loadIdentity(candidate, run);
-    try { requireHostedAccess(identity.subjectId,
-      await billing.loadEntitlements(identity.subjectId)); return true; }
-    catch { return false; }
+    return confirmedHostedAccess(identity.subjectId,
+      (subjectId) => billing.loadEntitlements(subjectId));
   };
 }
 

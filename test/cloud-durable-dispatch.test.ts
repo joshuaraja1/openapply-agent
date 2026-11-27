@@ -5,6 +5,7 @@ import { dispatchOnePendingApplication,
   DynamoApplicationDispatchStore, type DurableDispatchRecord }
   from "../src/cloud/aws-durable-dispatch.js";
 import { encodeCloudRunEnvelope } from "../src/cloud/run-envelope.js";
+import { confirmedHostedAccess } from "../src/cloud/aws-fargate-launcher-lambda.js";
 
 const candidateId = "19c886c7-3d13-4a16-92fa-7c84d862a9de";
 const runId = "9d24cb92-32e1-4e84-9420-ef436f42abf8";
@@ -41,6 +42,24 @@ function harness() {
 }
 
 describe("durable application outbox dispatch", () => {
+  it("retries entitlement read failures without blocking a queued run", async () => {
+    const h = harness();
+    h.authorize.mockImplementationOnce(() => confirmedHostedAccess("sub-a", async () => {
+      throw new Error("DynamoDB unavailable");
+    }));
+    await expect(dispatchOnePendingApplication(h)).rejects.toThrow("DynamoDB unavailable");
+    expect(h.store.markBlocked).not.toHaveBeenCalled();
+    expect(h.row.state).toBe("pending_queue");
+    h.setLaunchResult("started");
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+  });
+
+  it("blocks only a confirmed lack of hosted access", async () => {
+    expect(await confirmedHostedAccess("sub-a", async () => [])).toBe(false);
+    await expect(confirmedHostedAccess("sub-a", async () => [{}]))
+      .rejects.toThrow();
+  });
+
   it("skips malformed index rows and paginates to a valid queued run", async () => {
     const valid: DurableDispatchRecord = {
       pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}`,
