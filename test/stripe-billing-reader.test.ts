@@ -28,6 +28,17 @@ function harness() {
 }
 
 describe("fresh Stripe billing reader", () => {
+  it("carries Checkout-created subscription subject metadata into reconciliation", async () => {
+    const { reader, stripe } = harness();
+    stripe.subscriptions.list.mockResolvedValue(list([{ id: "sub_monthly", customer,
+      metadata: { subjectId: "candidate-a" }, status: "active", livemode: false,
+      latest_invoice: null, items: { has_more: false, data: [{ price: { id: "price_monthly" },
+        current_period_start: 1_762_000_000, current_period_end: 1_764_000_000 }] } }]) as never);
+    expect(await reader.loadCurrent(customer)).toEqual([expect.objectContaining({
+      customerId: customer, subjectId: "candidate-a", subscriptionId: "sub_monthly",
+    })]);
+  });
+
   it("only derives a semester payment from linked, paid provider objects", async () => {
     const { reader } = harness();
     expect(await reader.loadSemesters(customer)).toEqual([

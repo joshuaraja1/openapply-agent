@@ -8,8 +8,10 @@ Stripe webhook. Application enqueue is deliberately **not routed** here until
 the candidate run ledger, consent records, and FIFO queue ports are deployed.
 
 `deploy/aws/hosted-billing-api.yaml` defines the HTTP API, two Lambda
-functions, an EventBridge replay schedule, and a role limited to the existing
-billing-table policy and the two named secrets. The replay function runs every
+functions, an EventBridge replay schedule, and separate IAM roles. The HTTP
+role can write the Checkout and webhook journal but can only read the separate
+entitlement table. The scheduled replay role can write entitlements after
+reading current Stripe state. The replay function runs every
 minute. A webhook response acknowledges only a durable pending-event write;
 the replay function fetches current Stripe state and updates entitlements.
 
@@ -19,8 +21,12 @@ ZIP archive, upload it to the private S3 bucket created by
 `deploy/aws/staging-code-bucket.yaml`, and pass that
 bucket and object key to the CloudFormation template. Provide the **ARNs** of
 the separate test key and webhook signing secret, the staging site origin,
-Stripe test price IDs, Cognito issuer/JWKS/client ID, and the billing table's
-scoped policy ARN. Never pass key values as CloudFormation parameters.
+Stripe test price IDs, Cognito issuer/JWKS/client ID, and both billing journal
+and entitlement table names. Never pass key values as CloudFormation parameters.
+
+The tables and IAM change require the staged cutover described in
+`docs/hosted-billing-iam-isolation.md`. Do not point the API at an empty
+entitlement table while paid records remain only in the old billing table.
 
 The staging site must control its `/auth/callback` route before Cognito is
 activated. The Checkout HTTP API permits only that exact configured staging

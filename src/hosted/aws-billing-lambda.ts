@@ -34,6 +34,7 @@ export async function loadStagingBillingConfig(env: Environment, readSecret: Sec
     stripeKey,
     runtime: {
       tableName: required(env, "BILLING_TABLE_NAME"),
+      entitlementTableName: required(env, "ENTITLEMENT_TABLE_NAME"),
       checkout: { prices: {
         monthly: { id: required(env, "MONTHLY_PRICE_ID"), amountCents: 3900 },
         semester: { id: required(env, "SEMESTER_PRICE_ID"), amountCents: 12900 },

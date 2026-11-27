@@ -88,7 +88,8 @@ export class StripeBillingReader {
       }
       const status = subscription.status === "incomplete_expired" ? "incomplete"
         : subscription.status;
-      result.push({ customerId, subscriptionId: subscription.id,
+      result.push({ customerId, subjectId: subscription.metadata?.subjectId ?? "",
+        subscriptionId: subscription.id,
         status: status as TrustedStripeBillingSnapshot["status"],
         startsAt: instant(item.current_period_start),
         endsAt: instant(item.current_period_end),
