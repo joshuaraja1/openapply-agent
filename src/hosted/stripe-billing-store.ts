@@ -19,7 +19,9 @@ function validId(value: string, prefix: string): void {
   if (!new RegExp(`^${prefix}_[A-Za-z0-9_]+$`).test(value)) throw new Error(`Invalid ${prefix} ID`);
 }
 function validSubject(value: string): void {
-  if (!/^[A-Za-z0-9_:\-|.]{1,160}$/.test(value)) throw new Error("Invalid subject ID");
+  if (value.length < 1 || value.length > 160 || /[\u0000-\u001f\u007f-\u009f]/u.test(value)) {
+    throw new Error("Invalid subject ID");
+  }
 }
 function conditionFailed(error: unknown): boolean {
   return error instanceof Error && ["ConditionalCheckFailedException", "TransactionCanceledException"]
@@ -113,12 +115,13 @@ export class DynamoBillingStore {
     try {
       await this.db.send(new UpdateCommand({ TableName: this.tableName,
         Key: { pk: eventKey(request.eventId), sk: "RECONCILE" },
-        UpdateExpression: "SET #status=:processing, leaseToken=:token, leaseUntil=:leaseUntil",
+        UpdateExpression: "SET #status=:processing, leaseToken=:token, leaseUntil=:leaseUntil, gsi1sk=:leaseSort",
         ConditionExpression: "customerId=:customerId AND ((#status=:pending AND nextAttemptAt<=:now) OR (#status=:processing AND leaseUntil<:now))",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: { ":customerId": request.customerId,
           ":processing": "processing", ":pending": "pending", ":now": now.toISOString(),
-          ":token": token, ":leaseUntil": new Date(now.getTime() + leaseMs).toISOString() } }));
+          ":token": token, ":leaseUntil": new Date(now.getTime() + leaseMs).toISOString(),
+          ":leaseSort": `${new Date(now.getTime() + leaseMs).toISOString()}#${request.eventId}` } }));
       return token;
     } catch (error) {
       if (conditionFailed(error)) return undefined;
@@ -173,10 +176,15 @@ export class DynamoBillingStore {
 
   async releaseCustomer(customerId: string, token: string): Promise<void> {
     validId(customerId, "cus");
-    await this.db.send(new DeleteCommand({ TableName: this.tableName,
-      Key: { pk: customerKey(customerId), sk: "RECONCILE_LOCK" },
-      ConditionExpression: "leaseToken=:token",
-      ExpressionAttributeValues: { ":token": token } }));
+    try {
+      await this.db.send(new DeleteCommand({ TableName: this.tableName,
+        Key: { pk: customerKey(customerId), sk: "RECONCILE_LOCK" },
+        ConditionExpression: "leaseToken=:token",
+        ExpressionAttributeValues: { ":token": token } }));
+    } catch (error) {
+      // A newer worker owns the lock after an expired lease; never delete it.
+      if (!conditionFailed(error)) throw error;
+    }
   }
 
   async loadEntitlements(subjectId: string): Promise<HostedEntitlement[]> {
@@ -199,6 +207,18 @@ export class DynamoBillingStore {
       cursor = page.LastEvaluatedKey;
     } while (cursor);
     return records;
+  }
+
+  /** Free grants may upgrade; invalid paid rows fail before this can return false. */
+  async hasPaidAccess(subjectId: string): Promise<boolean> {
+    const now = this.now().getTime();
+    if (!Number.isFinite(now)) throw new Error("Invalid billing clock");
+    return (await this.loadEntitlements(subjectId)).some(record => {
+      if (record.kind === "free-grant") return false;
+      if (Date.parse(record.startsAt) > now || now >= Date.parse(record.endsAt)) return false;
+      return record.kind === "semester" ? record.revokedAt === null
+        : record.status === "active" && now < Date.parse(record.paidThrough);
+    });
   }
 
   async replaceKind<K extends HostedEntitlement["kind"]>(subjectId: string, kind: K,
@@ -244,5 +264,38 @@ export class DynamoBillingStore {
     records: readonly Extract<HostedEntitlement, { kind: "semester" }>[],
     guard: { customerId: string; token: string }): Promise<void> {
     return this.replaceKind(subjectId, "semester", records, guard);
+  }
+
+  /** Replace both paid kinds in one transaction so a refund cannot leave a
+   * stale grant while a different provider read fails. Free grants survive. */
+  async replacePaid(subjectId: string,
+    records: readonly Extract<HostedEntitlement, { kind: "subscription" | "semester" }>[],
+    guard: { customerId: string; token: string }): Promise<void> {
+    validSubject(subjectId);
+    validId(guard.customerId, "cus");
+    const checked = records.map(r => hostedEntitlementSchema.parse(r));
+    if (checked.some(r => r.subjectId !== subjectId || r.kind === "free-grant")) {
+      throw new Error("Paid entitlement replacement is not bound to candidate");
+    }
+    const current = (await this.loadEntitlements(subjectId)).filter(r => r.kind !== "free-grant");
+    const unique = new Set(checked.map(entitlementKey));
+    if (unique.size !== checked.length || current.length + checked.length > MAX_REPLACEMENT) {
+      throw new Error("Paid entitlement replacement exceeds atomic limit or contains duplicates");
+    }
+    const ops = [
+      ...current.filter(r => !unique.has(entitlementKey(r))).map(r => ({ Delete: {
+        TableName: this.tableName,
+        Key: { pk: subjectKey(subjectId), sk: entitlementKey(r) } } })),
+      ...checked.map(r => ({ Put: { TableName: this.tableName,
+        Item: { pk: subjectKey(subjectId), sk: entitlementKey(r), record: r } } })),
+    ];
+    await this.db.send(new TransactWriteCommand({ TransactItems: [
+      { ConditionCheck: { TableName: this.tableName,
+        Key: { pk: customerKey(guard.customerId), sk: "RECONCILE_LOCK" },
+        ConditionExpression: "leaseToken=:token AND leaseUntil>:now",
+        ExpressionAttributeValues: { ":token": guard.token,
+          ":now": this.now().toISOString() } } },
+      ...ops,
+    ] }));
   }
 }

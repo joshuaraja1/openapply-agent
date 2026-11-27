@@ -32,8 +32,21 @@ export async function handleStripeWebhookHttp(
   }
   let rawBody: Buffer;
   try {
-    rawBody = Buffer.from(await request.arrayBuffer());
-    if (rawBody.byteLength > MAX_BODY_BYTES) return new Response(null, { status: 413 });
+    if (!request.body) return new Response(null, { status: 400 });
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_BODY_BYTES) {
+        try { await reader.cancel(); } catch { /* Response remains oversized. */ }
+        return new Response(null, { status: 413 });
+      }
+      chunks.push(value);
+    }
+    rawBody = Buffer.concat(chunks, length);
   } catch { return new Response(null, { status: 400 }); }
 
   try {

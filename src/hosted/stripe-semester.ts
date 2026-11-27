@@ -66,6 +66,24 @@ export function projectSemesterPayment(
   }) as Extract<HostedEntitlement, { kind: "semester" }>;
 }
 
+export function projectSemesterSet(
+  binding: { subjectId: string; customerId: string },
+  payments: readonly TrustedSemesterPayment[],
+  plan: SemesterPlan,
+): Extract<HostedEntitlement, { kind: "semester" }>[] {
+  const seen = new Set<string>();
+  const entitlements: Extract<HostedEntitlement, { kind: "semester" }>[] = [];
+  for (const payment of payments) {
+    if (seen.has(payment.checkoutSessionId)) {
+      throw new Error("Duplicate Stripe semester payment in current state");
+    }
+    seen.add(payment.checkoutSessionId);
+    const grant = projectSemesterPayment(binding, payment, plan);
+    if (grant) entitlements.push(grant);
+  }
+  return entitlements;
+}
+
 /** Replace the complete current semester set; preserve free and monthly grants. */
 export async function reconcileSemesterPayments(
   customerId: string,
@@ -82,15 +100,6 @@ export async function reconcileSemesterPayments(
     throw new Error("Stripe customer is not bound to the candidate");
   }
   const payments = await ports.loadCurrent(customerId);
-  const seen = new Set<string>();
-  const entitlements: Extract<HostedEntitlement, { kind: "semester" }>[] = [];
-  for (const payment of payments) {
-    if (seen.has(payment.checkoutSessionId)) {
-      throw new Error("Duplicate Stripe semester payment in current state");
-    }
-    seen.add(payment.checkoutSessionId);
-    const grant = projectSemesterPayment(binding, payment, plan);
-    if (grant) entitlements.push(grant);
-  }
-  await ports.replaceSemesters(binding.subjectId, entitlements);
+  await ports.replaceSemesters(binding.subjectId,
+    projectSemesterSet(binding, payments, plan));
 }
