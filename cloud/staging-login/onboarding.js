@@ -5,10 +5,27 @@ export function attachCandidateSetup(auth) {
   const review = document.querySelector('#setup-review');
   const summary = document.querySelector('#setup-summary');
   const status = document.querySelector('#setup-status');
+  const planStatus = document.querySelector('#plan-status');
   const save = document.querySelector('#setup-save');
   const edit = document.querySelector('#setup-edit');
   section.hidden = false;
   let pending = null;
+
+  async function refreshPlan() {
+    const token = auth.getIdToken();
+    if (!token) { planStatus.textContent = 'Plan status: sign in again to check.'; return; }
+    try {
+      const response = await fetch('/api/candidates/plan', { method: 'POST', cache: 'no-store',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}' });
+      if (!response.ok) throw new Error('Plan unavailable');
+      const plan = await response.json();
+      planStatus.textContent = plan.status === 'active'
+        ? `Plan status: ${plan.plan} active until ${new Date(plan.accessUntil).toLocaleDateString()}.`
+        : 'Plan status: no active plan.';
+    } catch { planStatus.textContent = 'Plan status is temporarily unavailable.'; }
+  }
+  void refreshPlan();
 
   const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   form.addEventListener('input', () => { pending = null; review.hidden = true; });
@@ -91,6 +108,7 @@ export function attachCandidateSetup(auth) {
       form.hidden = true;
       review.hidden = true;
       status.textContent = 'Your reviewed profile was saved. Application runs are not enabled in this staging preview.';
+      void refreshPlan();
     } catch {
       status.textContent = 'Profile could not be saved. Check your files and try again.';
       save.disabled = false;

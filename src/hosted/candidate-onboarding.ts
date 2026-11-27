@@ -3,7 +3,8 @@ import { z } from "zod";
 import { careerStageSchema } from "../candidate/intake.js";
 import type { CandidateVault } from "../cloud/candidate-vault.js";
 
-const uuid = z.uuid();
+const uuid = z.uuid().refine(value => value === value.toLowerCase(),
+  "Use a lowercase submission ID");
 const shortText = z.string().trim().min(1).max(300);
 const pdf = z.strictObject({
   name: z.string().trim().min(1).max(120).regex(/\.pdf$/i),
@@ -97,7 +98,9 @@ export async function saveCandidateOnboarding(subjectId: string,
   const resumeId = derivedId(artifactId, "master-resume");
   const transcriptId = submission.transcript ? derivedId(artifactId, "transcript") : undefined;
   const resume = decodePdf(submission.masterResume);
-  const transcript = submission.transcript ? decodePdf(submission.transcript) : undefined;
+  let transcript: Buffer | undefined;
+  try { transcript = submission.transcript ? decodePdf(submission.transcript) : undefined; }
+  catch (error) { resume.fill(0); throw error; }
   if (resume.length + (transcript?.length ?? 0) > 5 * 1024 * 1024) {
     resume.fill(0); transcript?.fill(0);
     throw new Error("PDF uploads exceed the combined size limit");

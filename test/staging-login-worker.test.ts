@@ -27,6 +27,30 @@ describe('staging login Worker', () => {
       { method: 'POST' }), env);
     expect(response.status).toBe(503);
     expect(env.ASSETS.fetch).not.toHaveBeenCalled();
+    const onboarding = await worker.fetch(new Request('https://test.workers.dev/api/candidates/onboarding',
+      { method: 'POST' }), env);
+    expect(onboarding.status).toBe(503);
+  });
+
+  it('isolates onboarding and plan requests to their dedicated API origin', async () => {
+    const env = { ...assets(), AWS_API_ORIGIN: 'https://billing.example.com',
+      ONBOARDING_API_ORIGIN: 'https://candidate.example.com' };
+    const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
+      new Response('{"status":"inactive"}', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    try {
+      for (const path of ['/api/candidates/onboarding', '/api/candidates/plan']) {
+        const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
+          method: 'POST', headers: { origin: 'https://test.workers.dev',
+            authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
+        }), env);
+        expect(response.status).toBe(200);
+      }
+      expect(upstream.mock.calls.map(call => String(call[0]))).toEqual([
+        'https://candidate.example.com/api/candidates/onboarding',
+        'https://candidate.example.com/api/candidates/plan',
+      ]);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('forwards only a bounded authenticated checkout request to configured AWS API', async () => {

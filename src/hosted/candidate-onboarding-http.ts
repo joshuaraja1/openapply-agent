@@ -1,5 +1,6 @@
 import { saveCandidateOnboarding, type OnboardingDeps } from "./candidate-onboarding.js";
 import type { VerifySubject } from "./checkout-http.js";
+import { requireHostedAccess } from "./entitlement.js";
 
 const MAX_BODY_BYTES = 7_500_000;
 
@@ -27,13 +28,16 @@ async function boundedJson(request: Request): Promise<unknown> {
  * access, enqueues an application, or tries to extract facts from the uploads. */
 export async function handleCandidateOnboardingHttp(request: Request, deps: OnboardingDeps & {
   appOrigin: string; verifySubject: VerifySubject;
+  loadEntitlements(subjectId: string): Promise<readonly unknown[]>;
 }): Promise<Response> {
   const respond = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), {
     status, headers: { "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store", "referrer-policy": "no-referrer",
       "content-security-policy": "default-src 'none'" },
   });
-  if (new URL(request.url).pathname !== "/api/candidates/onboarding") return respond(404, { error: "Not found" });
+  const path = new URL(request.url).pathname;
+  const planRequest = path === "/api/candidates/plan";
+  if (!planRequest && path !== "/api/candidates/onboarding") return respond(404, { error: "Not found" });
   if (request.method !== "POST") return respond(405, { error: "Method not allowed" });
   if (request.headers.get("origin") !== deps.appOrigin) return respond(403, { error: "Origin not allowed" });
   const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
@@ -42,6 +46,20 @@ export async function handleCandidateOnboardingHttp(request: Request, deps: Onbo
   let subjectId: string;
   try { subjectId = await deps.verifySubject(match[1]!); }
   catch { return respond(401, { error: "Authentication required" }); }
+  if (planRequest) {
+    try {
+      const records = await deps.loadEntitlements(subjectId);
+      try {
+        const access = requireHostedAccess(subjectId, records);
+        return respond(200, { status: "active", plan: access.kind, accessUntil: access.accessUntil });
+      } catch (error) {
+        if (error instanceof Error && error.message === "Hosted access unavailable") {
+          return respond(200, { status: "inactive" });
+        }
+        throw error;
+      }
+    } catch { return respond(503, { error: "Plan status is temporarily unavailable" }); }
+  }
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) {
     return respond(415, { error: "JSON request required" });
   }

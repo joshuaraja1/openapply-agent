@@ -77,4 +77,11 @@ describe("candidate onboarding", () => {
     await saveCandidateOnboarding("sub-1", input, test.deps);
     await expect(saveCandidateOnboarding("sub-2", input, test.deps)).rejects.toThrow("unavailable");
   });
+
+  it("rejects a changed retry under the same idempotency ID", async () => {
+    const test = fixture();
+    await saveCandidateOnboarding("sub-1", input, test.deps);
+    await expect(saveCandidateOnboarding("sub-1", { ...input, targetRoles: ["Data scientist"] },
+      test.deps)).rejects.toThrow("different content");
+  });
 });

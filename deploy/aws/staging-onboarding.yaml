@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Optional isolated staging candidate onboarding; disabled by default.
+
+Parameters:
+  EnableOnboarding:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  AppOrigin:
+    Type: String
+    AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+  CognitoIssuer:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoJwksUrl:
+    Type: String
+  RunLedgerTableName:
+    Type: String
+  EntitlementTableName:
+    Type: String
+  PrivateArtifactBucketName:
+    Type: String
+
+Conditions:
+  OnboardingEnabled: !Equals [!Ref EnableOnboarding, 'true']
+
+Resources:
+  CandidateDataKey:
+    Type: AWS::KMS::Key
+    Condition: OnboardingEnabled
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: OpenApply staging candidate artifact envelope encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  OnboardingRole:
+    Type: AWS::IAM::Role
+    Condition: OnboardingEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CandidateOnboardingOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:ConditionCheckItem]
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+              - Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !GetAtt CandidateDataKey.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+
+  OnboardingFunction:
+    Type: AWS::Lambda::Function
+    Condition: OnboardingEnabled
+    Properties:
+      FunctionName: openapply-staging-onboarding
+      Runtime: nodejs22.x
+      Handler: aws-onboarding-lambda.handler
+      Role: !GetAtt OnboardingRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          ONBOARDING_ENABLED: 'true'
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          CANDIDATE_KMS_KEY_ARN: !GetAtt CandidateDataKey.Arn
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  OnboardingApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: OnboardingEnabled
+    Properties:
+      Name: openapply-staging-onboarding
+      ProtocolType: HTTP
+
+  OnboardingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OnboardingFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  OnboardingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/onboarding'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
+  PlanStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/plan'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
+  OnboardingStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 3
+        ThrottlingRateLimit: 1
+
+  OnboardingInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: OnboardingEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/onboarding'
+
+  PlanStatusInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: OnboardingEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/plan'
+
+Outputs:
+  OnboardingApiOrigin:
+    Condition: OnboardingEnabled
+    Value: !GetAtt OnboardingApi.ApiEndpoint
+  CandidateDataKeyArn:
+    Condition: OnboardingEnabled
+    Value: !GetAtt CandidateDataKey.Arn

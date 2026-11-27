@@ -51,6 +51,7 @@
     "build:hosted-lambda": "esbuild src/hosted/aws-billing-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-billing-lambda.cjs",
     "staging:login:build": "npm run build && node scripts/build-staging-login.mjs",
     "build:run-creator-lambda": "esbuild src/hosted/aws-run-creator-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-run-creator-lambda.cjs",
+    "build:onboarding-lambda": "esbuild src/hosted/aws-onboarding-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-onboarding-lambda.cjs",
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
     "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
     "distribution:release-gate-smoke": "node --test scripts/verify-release-bundle.test.mjs",
