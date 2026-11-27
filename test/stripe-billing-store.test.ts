@@ -63,6 +63,25 @@ describe("DynamoDB billing state", () => {
       .toBe("2026-11-26T20:02:00.000Z#evt_1");
   });
 
+  it("quarantines a poison event under its lease and removes it from pending GSI", async () => {
+    const commands: UpdateCommand[] = [];
+    const store = storeWith(async command => {
+      if (command instanceof GetCommand) return { Item: { status: "processing",
+        leaseToken: "lease", customerId: "cus_unbound",
+        createdAt: "2026-11-26T19:00:00.000Z" } };
+      if (command instanceof UpdateCommand) { commands.push(command); return {}; }
+      throw new Error("unexpected command");
+    });
+    expect(await store.claimedEventCreatedAt("evt_poison", "lease", "cus_unbound"))
+      .toBe("2026-11-26T19:00:00.000Z");
+    await store.quarantineUnbound("evt_poison", "lease", "cus_unbound");
+    expect(commands[0]?.input.UpdateExpression).toContain("REMOVE gsi1pk, gsi1sk");
+    expect(commands[0]?.input.ConditionExpression)
+      .toContain("leaseToken=:token AND customerId=:customerId");
+    expect(commands[0]?.input.ExpressionAttributeValues?.[":reason"])
+      .toBe("customer-binding-unavailable");
+  });
+
   it("accepts an opaque OIDC subject only when both customer bindings agree", async () => {
     const subjectId = "auth0|user@example.com";
     const store = storeWith(async command => {

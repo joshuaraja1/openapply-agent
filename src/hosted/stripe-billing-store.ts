@@ -156,6 +156,32 @@ export class DynamoBillingStore {
         ":due": due, ":sort": `${due}#${eventId}`, ":token": token } }));
   }
 
+  /** Read the claimed event from the base table, not the eventually consistent GSI. */
+  async claimedEventCreatedAt(eventId: string, token: string, customerId: string): Promise<string> {
+    validId(eventId, "evt"); validId(customerId, "cus");
+    const row = await this.get(eventKey(eventId), "RECONCILE");
+    if (row?.status !== "processing" || row.leaseToken !== token
+      || row.customerId !== customerId || typeof row.createdAt !== "string"
+      || !Number.isFinite(Date.parse(row.createdAt))) {
+      throw new Error("Claimed Stripe event is invalid");
+    }
+    return row.createdAt;
+  }
+
+  /** Preserve the signed event and its reason for operator review without
+   * leaving it at the front of the pending GSI forever. */
+  async quarantineUnbound(eventId: string, token: string, customerId: string): Promise<void> {
+    validId(eventId, "evt"); validId(customerId, "cus");
+    await this.db.send(new UpdateCommand({ TableName: this.tableName,
+      Key: { pk: eventKey(eventId), sk: "RECONCILE" },
+      UpdateExpression: "SET #status=:quarantined, quarantinedAt=:now, quarantineReason=:reason REMOVE gsi1pk, gsi1sk, leaseToken, leaseUntil",
+      ConditionExpression: "leaseToken=:token AND customerId=:customerId AND #status=:processing",
+      ExpressionAttributeNames: { "#status": "status" },
+      ExpressionAttributeValues: { ":quarantined": "quarantined", ":processing": "processing",
+        ":token": token, ":customerId": customerId, ":now": this.now().toISOString(),
+        ":reason": "customer-binding-unavailable" } }));
+  }
+
   /** Serialize all provider reads and entitlement writes for one Customer. */
   async claimCustomer(customerId: string, leaseMs = 600_000): Promise<string | undefined> {
     validId(customerId, "cus");
