@@ -77,6 +77,15 @@ describe("hosted checkout HTTP boundary", () => {
     expect(deps.reserve).toHaveBeenCalledWith("google-oauth2|123", "semester");
   });
 
+  it("rejects C1 controls in a signed subject before billing", async () => {
+    const { token, verifier } = await signedToken("candidate\u0085id");
+    const deps = services();
+    const response = await handleCheckoutHttp(request(token, { plan: "monthly" }),
+      { ...deps, config, verifySubject: verifier });
+    expect(response.status).toBe(401);
+    expect(deps.reserve).not.toHaveBeenCalled();
+  });
+
   it("rejects untrusted Origin before calling Stripe", async () => {
     const { token, verifier } = await signedToken();
     const deps = services();
