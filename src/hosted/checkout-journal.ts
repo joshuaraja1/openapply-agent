@@ -10,7 +10,7 @@ type Row = Record<string, unknown>;
 const subjectKey = (subjectId: string) => `SUBJECT#${subjectId}`;
 const customerKey = (customerId: string) => `CUSTOMER#${customerId}`;
 const requestKey = (requestId: string) => `REQUEST#${requestId}`;
-const checkoutKey = (plan: HostedPlan) => `CHECKOUT#${plan}`;
+const checkoutKey = "CHECKOUT";
 
 function validSubject(subjectId: string): void {
   if (!subjectId || subjectId.length > 160 || /[\u0000-\u001f\u007f]/.test(subjectId)) {
@@ -126,7 +126,7 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
     await this.assertNoPaidAccess(subjectId);
     const customerId = await this.ensureCustomer(subjectId);
     const pk = subjectKey(subjectId);
-    const sk = checkoutKey(plan);
+    const sk = checkoutKey;
     const existing = await this.get(pk, sk);
     if (existing) {
       const open = reservation(existing);
@@ -160,7 +160,8 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
     } catch (error) {
       if (!isConditionFailure(error)) throw error;
       const winner = reservation(await this.get(pk, sk));
-      if (!winner || winner.subjectId !== subjectId || winner.customerId !== customerId) throw error;
+      if (!winner || winner.subjectId !== subjectId || winner.customerId !== customerId
+        || winner.plan !== plan) throw error;
       return winner;
     }
   }
@@ -182,7 +183,7 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
       throw new Error("Unknown checkout request");
     }
     const pk = subjectKey(map.subjectId);
-    const sk = checkoutKey(map.plan);
+    const sk = checkoutKey;
     try {
       await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: { pk, sk },
         UpdateExpression: "SET #session=:session",
@@ -201,8 +202,8 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
    * A lost Stripe response or a completed payment is not terminal evidence. */
   async closeReservation(subjectId: string, plan: HostedPlan, requestId: string): Promise<void> {
     validSubject(subjectId);
-    const current = reservation(await this.get(subjectKey(subjectId), checkoutKey(plan)));
-    if (!current || current.requestId !== requestId || !current.session) {
+    const current = reservation(await this.get(subjectKey(subjectId), checkoutKey));
+    if (!current || current.plan !== plan || current.requestId !== requestId || !current.session) {
       throw new Error("Recorded checkout session required for reconciliation");
     }
     const remote = await this.stripe.checkout.sessions.retrieve(current.session.sessionId);
@@ -211,7 +212,7 @@ export class DynamoCheckoutJournal implements CheckoutPorts {
       throw new Error("Stripe has not confirmed this checkout expired");
     }
     await this.db.send(new UpdateCommand({ TableName: this.tableName,
-      Key: { pk: subjectKey(subjectId), sk: checkoutKey(plan) },
+      Key: { pk: subjectKey(subjectId), sk: checkoutKey },
       UpdateExpression: "SET #status=:closed",
       ConditionExpression: "requestId=:requestId AND #status=:open",
       ExpressionAttributeNames: { "#status": "status" },

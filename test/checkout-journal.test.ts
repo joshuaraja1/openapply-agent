@@ -137,6 +137,22 @@ describe("durable checkout journal", () => {
       .toBe("google-oauth2|123");
   });
 
+  it("prevents simultaneous monthly and semester checkout attempts", async () => {
+    const { journal } = fixture();
+    const monthly = await journal().reserve("candidate-1", "monthly");
+    await expect(journal().reserve("candidate-1", "semester"))
+      .rejects.toThrow("binding changed");
+    expect((await journal().reserve("candidate-1", "monthly")).requestId)
+      .toBe(monthly.requestId);
+    const racing = fixture();
+    const results = await Promise.allSettled([
+      racing.journal().reserve("candidate-1", "monthly"),
+      racing.journal().reserve("candidate-1", "semester"),
+    ]);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+  });
+
   it("does not close a completed or unrecorded checkout", async () => {
     const { journal, retrieve } = fixture();
     const first = await journal().reserve("candidate-1", "monthly");

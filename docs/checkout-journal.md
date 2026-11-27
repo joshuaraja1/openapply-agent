@@ -10,7 +10,7 @@ to this table. Store the Stripe key outside DynamoDB in a secret manager.
 | Customer claim | `SUBJECT#<sub>` | `CUSTOMER_CLAIM` | Stable Stripe Customer idempotency key after a crash |
 | Customer binding | `SUBJECT#<sub>` | `CUSTOMER` | One Customer per authenticated subject |
 | Reverse binding | `CUSTOMER#<cus>` | `SUBJECT` | Resolve signed billing events to one subject |
-| Checkout attempt | `SUBJECT#<sub>` | `CHECKOUT#<plan>` | Open or explicitly closed reservation and session |
+| Checkout attempt | `SUBJECT#<sub>` | `CHECKOUT` | One open reservation per subject, regardless of plan |
 | Attempt lookup | `REQUEST#<requestId>` | `CHECKOUT` | Resolve `recordSession` after a restart |
 | Entitlement | `SUBJECT#<sub>` | `ENTITLEMENT#<kind>#<sourceId>` | Read by the queue gate; written only after verified billing reconciliation |
 | Billing event | `BILLING_EVENT#<eventId>` | `RECONCILE` | Webhook deduplication and retry record |
@@ -20,7 +20,8 @@ authoritative entitlement store before reserving a Checkout. The server derives
 `subjectId` from a verified login; neither subject nor customer IDs may come
 from a browser body. Customer binding and the reverse row are committed in one
 transaction. Reservation and request lookup are also committed together.
-Conditional writes let concurrent requests reuse the same attempt. Customer
+Conditional writes let concurrent same-plan requests reuse the same attempt and
+reject a different plan while one attempt is open. Customer
 metadata includes the durable claim ID so an unresolved claim can be located
 in the Stripe dashboard for reconciliation. The Stripe
 request uses that attempt ID as its idempotency key, so a lost local response
