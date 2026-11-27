@@ -63,6 +63,12 @@ Rules:
       - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
         AssertDescription: Enqueue requires a durable run ledger table.
 
+Rules:
+  DistinctStripeSecrets:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref StripeApiSecretArn, !Ref StripeReplaySecretArn]]
+        AssertDescription: API and replay must use distinct Stripe test secrets.
+
 Resources:
   BillingApiRole:
     Type: AWS::IAM::Role
