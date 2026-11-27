@@ -10,6 +10,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .note { color: #52627b; font-size: .9rem; }
 section { border-top: 1px solid #dce4ef; margin-top: 2rem; padding-top: 1.5rem; }
 form, #setup-review { display: grid; gap: 1rem; }
+fieldset { display: grid; gap: 1rem; min-width: 0; padding: 1rem; border: 1px solid #dce4ef; border-radius: .5rem; }
+legend { font-weight: 700; padding: 0 .35rem; }
+#experience-list, #project-list { display: grid; gap: 1rem; }
 label { display: grid; gap: .35rem; font-weight: 600; }
 input:not([type=checkbox]), textarea, select { box-sizing: border-box; width: 100%; padding: .7rem; border: 1px solid #98a7bc; border-radius: .4rem; font: inherit; }
 textarea { min-height: 5rem; resize: vertical; }
