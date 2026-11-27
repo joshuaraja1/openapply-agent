@@ -22,11 +22,14 @@ Two trusted writers must be deployed before enabling this route:
   `artifactObjectKey(candidateId, artifactId)` with content type
   `application/vnd.openapply.encrypted+json`, then writes
   `{pk: "CANDIDATE#<uuid>", sk: "PROFILE#<uuid>", status: "verified",
-  candidateId, artifactId, subjectId}`. The writer must check the candidate
-  `DELETED` marker and bind the marker to the authenticated subject.
+  candidateId, artifactId, subjectId, applicationProfileReady: true}` only
+  after the candidate has reviewed the application facts. Legacy profiles
+  without that exact ready marker cannot create a run. The writer must check
+  the candidate `DELETED` marker and bind the marker to the authenticated
+  subject.
 
 Creation checks those rows and object, then transactionally checks the deletion
-marker and current lead/profile rows and writes `RUN#<runId>` plus
+marker, current lead, and profile readiness marker before writing `RUN#<runId>` plus
 `CONSENT#<runId>`. Consent is per run so two queued jobs cannot invalidate each
 other. A repeated ID succeeds only if the committed run and granted consent match;
 otherwise it returns a conflict. Enqueue and browser execution must independently

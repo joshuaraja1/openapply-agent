@@ -13,10 +13,17 @@ export default {
       const plan = url.pathname === '/api/candidates/plan';
       const deletion = url.pathname === '/api/candidates/delete'
         || url.pathname === '/api/candidates/deletion-status';
+      const runCreation = url.pathname === '/api/applications/runs';
+      const enqueue = url.pathname === '/api/applications/enqueue';
       if (deletion && env.CANDIDATE_DELETION_ENABLED !== 'true') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      if ((!onboarding && !plan && !deletion && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
+      if ((runCreation && env.APPLICATION_RUN_CREATION_ENABLED !== 'true')
+        || (enqueue && env.APPLICATION_ENQUEUE_ENABLED !== 'true')) {
+        return new Response('Not found', { status: 404, headers: securityHeaders });
+      }
+      if ((!onboarding && !plan && !deletion && !runCreation && !enqueue
+        && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
       const apiOrigin = onboarding || plan || deletion ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
@@ -43,7 +50,7 @@ export default {
           const { done, value } = await reader.read();
           if (done) break;
           size += value.byteLength;
-          if (size > (onboarding ? 7_500_000 : 1024)) {
+          if (size > (onboarding ? 7_500_000 : runCreation ? 2048 : 1024)) {
             await reader.cancel();
             return new Response('Request too large', { status: 413, headers: securityHeaders });
           }

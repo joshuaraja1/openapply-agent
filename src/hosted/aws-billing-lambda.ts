@@ -6,6 +6,9 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import Stripe from "stripe";
 import { handleBillingSchedule, handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 import { createHostedBillingRuntime } from "./billing-runtime.js";
+import { DynamoBillingStore } from "./stripe-billing-store.js";
+import { createOidcSubjectVerifier, type VerifySubject } from "./checkout-http.js";
+import { handleApplicationEnqueueHttp } from "./application-enqueue-http.js";
 import { DynamoHostedRunAdmission, SqsApplicationQueueSender } from "../cloud/aws-enqueue-ports.js";
 import { DynamoApplicationDispatchStore } from "../cloud/aws-durable-dispatch.js";
 
@@ -65,14 +68,16 @@ export function createStagingApplicationQueuePorts(env: Environment,
   const ledger = required(env, "RUN_LEDGER_TABLE_NAME");
   const queueUrl = required(env, "APPLICATION_QUEUE_URL");
   const admission = new DynamoHostedRunAdmission(runDb, ledger);
-  const launcherArn = env.FARGATE_LAUNCHER_ARN?.trim();
-  if (launcherArn && !/^arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:openapply-staging-fargate-launcher$/.test(launcherArn)) {
+  // The browser task no longer consumes shared SQS. Without the exact-run
+  // launcher, an accepted HTTP request would strand the application.
+  const launcherArn = required(env, "FARGATE_LAUNCHER_ARN");
+  if (!/^arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:openapply-staging-fargate-launcher$/.test(launcherArn)) {
     throw new Error("Invalid Fargate launcher ARN");
   }
   return { runRecords: admission, authorization: admission,
     queue: new SqsApplicationQueueSender(queueClient, queueUrl),
-    ...(launcherArn ? { dispatch: new DynamoApplicationDispatchStore(runDb, ledger) } : {}),
-    ...(launcherArn ? { launcher: { async launch(candidateId: string, runId: string) {
+    dispatch: new DynamoApplicationDispatchStore(runDb, ledger),
+    launcher: { async launch(candidateId: string, runId: string) {
       const result = await lambda.send(new InvokeCommand({ FunctionName: launcherArn,
         InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify({ candidateId, runId })) }));
       if (result.StatusCode !== 200 || result.FunctionError || !result.Payload) {
@@ -84,7 +89,7 @@ export function createStagingApplicationQueuePorts(env: Environment,
         throw new Error("Fargate launch capacity unavailable");
       }
       return response.status;
-    } } } : {}),
+    } },
   };
 }
 async function readSecret(arn: string): Promise<string> {
@@ -97,16 +102,51 @@ let runtimePromise: Promise<ReturnType<typeof createHostedBillingRuntime>> | und
 function runtime() {
   runtimePromise ??= (async () => {
     const config = await loadStagingBillingConfig(process.env, readSecret);
-    return createHostedBillingRuntime(config.runtime, db, new Stripe(config.stripeKey),
-      createStagingApplicationQueuePorts(process.env, db, sqs));
+    return createHostedBillingRuntime(config.runtime, db, new Stripe(config.stripeKey));
   })().catch(error => { runtimePromise = undefined; throw error; });
   return runtimePromise;
+}
+
+/** Enqueue reads only the trusted entitlement projection and run ledger. Stripe
+ * secrets are deliberately absent so a billing outage cannot block admission. */
+export function createStagingEnqueueRuntime(env: Environment,
+  runDb: Pick<DynamoDBDocumentClient, "send">,
+  queueClient: Pick<SQSClient, "send">,
+  verifySubject?: VerifySubject) {
+  const ports = createStagingApplicationQueuePorts(env, runDb, queueClient);
+  if (!ports) throw new Error("Application enqueue disabled");
+  const appOrigin = required(env, "APP_ORIGIN");
+  const origin = new URL(appOrigin);
+  if (origin.protocol !== "https:" || origin.pathname !== "/" || origin.search || origin.hash) {
+    throw new Error("Invalid staging app origin");
+  }
+  const subjectVerifier = verifySubject ?? createOidcSubjectVerifier({
+    issuer: required(env, "COGNITO_ISSUER"), audience: required(env, "COGNITO_CLIENT_ID"),
+    jwksUrl: required(env, "COGNITO_JWKS_URL"),
+  });
+  const billing = new DynamoBillingStore(runDb, required(env, "BILLING_TABLE_NAME"),
+    required(env, "ENTITLEMENT_TABLE_NAME"));
+  return {
+    handleRequest: (request: Request) => handleApplicationEnqueueHttp(request, {
+      appOrigin, verifySubject: subjectVerifier, ports: { ...ports, billing },
+    }),
+    processReady: async () => ({ processed: 0, deferred: 0 }),
+  };
+}
+
+let enqueueRuntime: ReturnType<typeof createStagingEnqueueRuntime> | undefined;
+
+/** Keep the application route out of the Stripe initialization path. */
+export function selectStagingHttpRuntime<T>(event: HttpApiEvent,
+  billingRuntime: () => T | Promise<T>, applicationRuntime: () => T | Promise<T>): T | Promise<T> {
+  return event.rawPath === "/api/applications/enqueue" ? applicationRuntime() : billingRuntime();
 }
 
 /** API Gateway HTTP API v2 route handler. No secrets or request body are logged. */
 export async function handler(event: HttpApiEvent) {
   try {
-    const app = await runtime();
+    const app = await selectStagingHttpRuntime(event, runtime,
+      () => enqueueRuntime ??= createStagingEnqueueRuntime(process.env, db, sqs));
     return await handleHttpApiEvent(event, app, required(process.env, "APP_ORIGIN"));
   } catch (error) {
     const tooLarge = error instanceof Error && error.message === "HTTP API body is too large";
