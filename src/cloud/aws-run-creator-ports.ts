@@ -1,7 +1,7 @@
 import { HeadObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { GetCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
-import { artifactObjectKey } from "./candidate-vault.js";
+import { artifactObjectKey, type CandidateVault } from "./candidate-vault.js";
 import { officialJobKey, runConsentKey } from "./durable-journal.js";
 import { RunConflictError, RunInputsUnavailableError,
   type TrustedRunRecord, type VerifiedCandidateProfile, type VerifiedOfficialLead } from "./hosted-run-creator.js";
@@ -23,6 +23,20 @@ const runSchema = z.object({ pk: z.string(), sk: z.string().startsWith("RUN#"),
 const consentSchema = z.object({ pk: z.string(), sk: z.string().startsWith("CONSENT#"),
   runId: uuid, version: z.literal(1), state: z.literal("granted"),
   scope: z.literal("apply-one-job"), policyVersion: z.literal("v1") });
+const lowerUuid = uuid.refine(value => value === value.toLowerCase());
+const documentSchema = z.object({ artifactId: lowerUuid,
+  name: z.string().min(1).max(120).regex(/\.pdf$/i), mimeType: z.literal("application/pdf") });
+const candidateProfileSchema = z.object({
+  version: z.literal(1), provenance: z.literal("candidate-entered-and-reviewed"),
+  candidateId: lowerUuid, masterResume: documentSchema,
+  transcript: documentSchema.optional(),
+  consent: z.object({ storage: z.literal(true), automation: z.literal(true),
+    reviewed: z.literal(true) }),
+});
+const ENCRYPTED_CONTENT_TYPE = "application/vnd.openapply.encrypted+json";
+const MAX_PROFILE_OBJECT_BYTES = 64 * 1024;
+const MAX_PDF_OBJECT_BYTES = 8 * 1024 * 1024;
+const MAX_PDF_BYTES = 5 * 1024 * 1024;
 
 function conditional(error: unknown): boolean {
   const value = error as { name?: string; CancellationReasons?: { Code?: string }[] } | null;
@@ -36,6 +50,7 @@ function conditional(error: unknown): boolean {
 export class DynamoTrustedRunCreator {
   constructor(private readonly db: Pick<DynamoDBDocumentClient, "send">,
     private readonly s3: Pick<S3Client, "send">,
+    private readonly vault: Pick<CandidateVault, "read">,
     private readonly table: string, private readonly bucket: string) {
     if (!table || !bucket) throw new Error("Run creator storage is required");
   }
@@ -66,16 +81,52 @@ export class DynamoTrustedRunCreator {
     return row;
   }
 
-  async profileObjectExists(candidateId: string, artifactId: string): Promise<boolean> {
+  private async artifactExists(candidateId: string, artifactId: string,
+    maxBytes: number): Promise<boolean> {
     try {
       const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket,
         Key: artifactObjectKey(candidateId, artifactId) }));
-      return result.ContentType === "application/vnd.openapply.encrypted+json";
+      return result.ContentType === ENCRYPTED_CONTENT_TYPE
+        && Number.isSafeInteger(result.ContentLength)
+        && result.ContentLength! > 0 && result.ContentLength! <= maxBytes;
     } catch (error) {
       const name = (error as { name?: string }).name;
       if (name === "NotFound" || name === "NoSuchKey") return false;
       throw error;
     }
+  }
+
+  /** The verified marker is only eligible when its encrypted profile and every
+   * referenced PDF still exist under the same candidate and decrypt correctly. */
+  async profileArtifactsAvailable(candidateId: string, artifactId: string): Promise<boolean> {
+    if (!await this.artifactExists(candidateId, artifactId, MAX_PROFILE_OBJECT_BYTES)) return false;
+    let plaintext: Buffer;
+    try { plaintext = await this.vault.read(candidateId, artifactId); }
+    catch { return false; }
+    let profile: z.infer<typeof candidateProfileSchema>;
+    try {
+      if (plaintext.byteLength > MAX_PROFILE_OBJECT_BYTES) return false;
+      const parsed = candidateProfileSchema.safeParse(JSON.parse(plaintext.toString("utf8")));
+      if (!parsed.success) return false;
+      profile = parsed.data;
+    } catch { return false; }
+    finally { plaintext.fill(0); }
+    if (profile.candidateId !== candidateId
+      || profile.masterResume.artifactId === artifactId
+      || profile.transcript?.artifactId === artifactId
+      || profile.masterResume.artifactId === profile.transcript?.artifactId) return false;
+    const documents = [profile.masterResume, ...(profile.transcript ? [profile.transcript] : [])];
+    for (const document of documents) {
+      if (!await this.artifactExists(candidateId, document.artifactId, MAX_PDF_OBJECT_BYTES)) return false;
+      let pdf: Buffer;
+      try { pdf = await this.vault.read(candidateId, document.artifactId); }
+      catch { return false; }
+      try {
+        if (pdf.byteLength < 8 || pdf.byteLength > MAX_PDF_BYTES
+          || pdf.subarray(0, 5).toString("ascii") !== "%PDF-") return false;
+      } finally { pdf.fill(0); }
+    }
+    return true;
   }
 
   async createOrGet(record: TrustedRunRecord, lead: VerifiedOfficialLead,

@@ -56,6 +56,9 @@ Parameters:
   PrivateArtifactBucketName:
     Type: String
     Default: ''
+  CandidateDataKeyArn:
+    Type: String
+    Default: ''
   RunLedgerTableName:
     Type: String
     Default: ''
@@ -83,6 +86,8 @@ Rules:
         AssertDescription: Run creation requires its separate Lambda package.
       - Assert: !Not [!Equals [!Ref PrivateArtifactBucketName, '']]
         AssertDescription: Run creation requires a private artifact bucket.
+      - Assert: !Not [!Equals [!Ref CandidateDataKeyArn, '']]
+        AssertDescription: Run creation requires the candidate artifact KMS key ARN.
   DistinctStripeSecrets:
     Assertions:
       - Assert: !Not [!Equals [!Ref StripeApiSecretArn, !Ref StripeReplaySecretArn]]
@@ -118,6 +123,9 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref CandidateDataKeyArn
 
   RunCreatorFunction:
     Type: AWS::Lambda::Function
@@ -141,6 +149,7 @@ Resources:
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
           PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+          CANDIDATE_KMS_KEY_ARN: !Ref CandidateDataKeyArn
 
   RunCreatorIntegration:
     Type: AWS::ApiGatewayV2::Integration
