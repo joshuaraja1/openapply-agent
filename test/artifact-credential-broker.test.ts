@@ -23,12 +23,14 @@ function fixture() {
   const billing = { loadEntitlements: vi.fn(async () => [{ kind: "free-grant", subjectId,
     grantId: "beta", approvedBy: "admin", startsAt: "2026-11-25T00:00:00.000Z",
     endsAt: "2026-12-01T00:00:00.000Z", revokedAt: null }]) };
+  const grantFence = { reserve: vi.fn(async () => {}) };
   const send = vi.fn(async (command: AssumeRoleCommand) => {
     expect(command).toBeInstanceOf(AssumeRoleCommand);
     return { Credentials: { AccessKeyId: "ASIATEST", SecretAccessKey: "secret",
       SessionToken: "session", Expiration: new Date((nowEpoch + 900) * 1000) } };
   });
-  return { admission, billing, sts: { send } as unknown as Pick<STSClient, "send">, send };
+  return { admission, billing, grantFence,
+    sts: { send } as unknown as Pick<STSClient, "send">, send };
 }
 
 describe("candidate-scoped artifact credentials", () => {
@@ -47,6 +49,7 @@ describe("candidate-scoped artifact credentials", () => {
     expect(grant).toMatchObject({ candidateId, runId, leaseToken, accessKeyId: "ASIATEST" });
     expect(ports.admission.hasArtifactGrantEligibility).toHaveBeenCalledWith(candidateId, runId, leaseToken, nowEpoch);
     expect(ports.billing.loadEntitlements).toHaveBeenCalledWith(subjectId);
+    expect(ports.grantFence.reserve).toHaveBeenCalledWith(candidateId, nowEpoch);
     const command = ports.send.mock.calls[0]?.[0] as AssumeRoleCommand;
     expect(command.input.DurationSeconds).toBe(900);
     const policy = JSON.parse(command.input.Policy!);
@@ -76,6 +79,11 @@ describe("candidate-scoped artifact credentials", () => {
     racing.admission.hasArtifactGrantEligibility.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     await expect(issueCandidateArtifactCredentials(token, leaseToken, secret, nowEpoch, config, racing)).rejects.toThrow();
     expect(racing.send).not.toHaveBeenCalled();
+    const tombstoned = fixture();
+    tombstoned.grantFence.reserve.mockRejectedValueOnce(new Error("tombstoned"));
+    await expect(issueCandidateArtifactCredentials(token, leaseToken, secret,
+      nowEpoch, config, tombstoned)).rejects.toThrow("tombstoned");
+    expect(tombstoned.send).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe configuration before STS", () => {
@@ -92,7 +100,7 @@ describe("candidate-scoped artifact credentials", () => {
     const send = vi.fn(async (command: InvokeCommand) => {
       expect(command).toBeInstanceOf(InvokeCommand);
       expect(command.input.InvocationType).toBe("RequestResponse");
-      expect(JSON.parse(Buffer.from(command.input.Payload!).toString("utf8")))
+      expect(JSON.parse(new TextDecoder().decode(command.input.Payload as Uint8Array)))
         .toEqual({ capability: "capability", leaseToken });
       return { StatusCode: 200, Payload: Buffer.from(JSON.stringify(grant)) };
     });

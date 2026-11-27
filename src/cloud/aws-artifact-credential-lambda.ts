@@ -5,6 +5,7 @@ import { STSClient } from "@aws-sdk/client-sts";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
 import { issueCandidateArtifactCredentials } from "./artifact-credential-broker.js";
+import { DynamoArtifactGrantFence } from "./aws-artifact-grant-fence.js";
 
 const env = process.env;
 const required = ["ARTIFACT_SIGNING_SECRET_ARN", "DATA_ROLE_ARN", "ARTIFACT_BUCKET",
@@ -37,6 +38,7 @@ export async function handler(event: unknown) {
         kmsKeyArn: env.ARTIFACT_KMS_KEY_ARN!,
       }, {
         admission: new DynamoHostedRunAdmission(dynamo, env.RUN_LEDGER_TABLE_NAME!),
+        grantFence: new DynamoArtifactGrantFence(dynamo, env.RUN_LEDGER_TABLE_NAME!),
         billing: new DynamoCandidatePlanStatus(dynamo, env.ENTITLEMENT_TABLE_NAME!),
         sts: new STSClient({}),
       });

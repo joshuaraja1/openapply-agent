@@ -31,6 +31,14 @@ candidate/run before reading AWS state and requests credentials only after
 lease acquisition. A receipt write obtains a fresh broker grant; a confirmed,
 uncertain, expired, or released lease cannot obtain another grant.
 
+Before STS, the broker transactionally checks that no deletion tombstone exists
+and writes an immutable `GRANT#<uuid>` ledger row under the candidate partition,
+with `expiresAt` set 960 seconds after reservation. The 60-second margin covers
+the Lambda/STS interval and clock skew beyond the 900-second STS lifetime.
+Deletion must inspect these rows with strongly consistent reads and stay pending
+until every row has expired. A transaction failure means no STS call. This
+closes the race between checking consent and recording the outstanding grant.
+
 The template `deploy/aws/artifact-credential-broker.yaml` creates the broker
 role/function, data role, and a managed policy allowing invocation of that
 function. Attach that policy to the eventual Fargate task role **without**
@@ -71,8 +79,10 @@ to CloudFormation. Its `SecretString` is a base64-encoded random 32-byte key.
 An expired capability, expired/released lease, terminal submission, or revoked
 consent/payment prevents a new STS grant.
 Previously issued credentials remain usable until their 15-minute expiry;
-deletion must stop the task, wait for that maximum window or otherwise prove
-the task cannot write, then purge every S3 version. The task must never log
+deletion must stop and confirm every active ECS task stopped, wait until all
+`GRANT#` rows expire, then purge every S3 version. The current PR does not yet
+have the candidate-wide ECS task stop/ack integration, so deployment and a
+public deletion guarantee remain blocked. The task must never log
 capabilities, STS credentials, artifact bytes, or candidate facts. A broker
 failure or expired grant aborts the task and leaves the durable submit journal
 to decide whether reconciliation is needed. The current runtime requests a
@@ -91,8 +101,10 @@ usable for up to 15 minutes after withdrawal, so the route stays disabled.
 3. Confirm the synthetic run and try to obtain a new grant with the old
    capability and lease token; it must fail. Repeat after lease expiry and
    after a stale owner token. Revoke consent and payment, then show renewal
-   fails. Stop the task and
-   complete the versioned-artifact deletion drill in issue #243.
+   fails. Verify a delete tombstone racing with grant reservation permits
+   exactly one outcome: either no grant, or a durable `GRANT#` row that keeps
+   deletion pending through its expiry. Stop and confirm the task has stopped,
+   then complete the versioned-artifact deletion drill in issue #243.
 4. Rotate the signing secret, ensure new capabilities use the new key, and
    invalidate old capabilities within their 30-minute maximum lifetime.
 

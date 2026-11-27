@@ -109,6 +109,7 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
       loadIdentity(candidateId: string, runId: string): Promise<{ subjectId: string }>;
     };
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
+    grantFence: { reserve(candidateId: string, nowEpoch: number): Promise<void> };
     sts: Pick<STSClient, "send">;
   }): Promise<ScopedArtifactCredentials> {
   const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
@@ -127,6 +128,9 @@ export async function issueCandidateArtifactCredentials(token: string, leaseToke
     leaseToken, nowEpoch)) {
     throw new Error("Task artifact access unavailable");
   }
+  // Deletion observes this row before it can purge. A failed reservation must
+  // never result in an STS credential, even if all prior checks succeeded.
+  await ports.grantFence.reserve(claims.candidateId, nowEpoch);
   const result = await ports.sts.send(new AssumeRoleCommand({
     RoleArn: config.dataRoleArn,
     RoleSessionName: `oa-${claims.runId.slice(0, 8)}`,
