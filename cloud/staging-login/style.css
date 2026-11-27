@@ -6,6 +6,7 @@ h1 { margin: .4rem 0 1rem; }
 .actions { display: flex; gap: .75rem; margin: 1.5rem 0; }
 button { padding: .75rem 1rem; border: 0; border-radius: .5rem; background: #2458b1; color: white; font: inherit; cursor: pointer; }
 button[hidden] { display: none; }
+button:disabled { opacity: .55; cursor: not-allowed; }
 .note { color: #52627b; font-size: .9rem; }
 section { border-top: 1px solid #dce4ef; margin-top: 2rem; padding-top: 1.5rem; }
 form, #setup-review { display: grid; gap: 1rem; }

@@ -10,20 +10,33 @@ export function attachCandidateSetup(auth) {
   const edit = document.querySelector('#setup-edit');
   section.hidden = false;
   let pending = null;
+  let planActive = false;
+  save.disabled = true;
 
   async function refreshPlan() {
     const token = auth.getIdToken();
-    if (!token) { planStatus.textContent = 'Plan status: sign in again to check.'; return; }
+    if (!token) {
+      planActive = false; save.disabled = true;
+      planStatus.textContent = 'Plan status: sign in again to check.';
+      return false;
+    }
     try {
       const response = await fetch('/api/candidates/plan', { method: 'POST', cache: 'no-store',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: '{}' });
       if (!response.ok) throw new Error('Plan unavailable');
       const plan = await response.json();
+      planActive = plan.status === 'active';
+      save.disabled = !planActive;
       planStatus.textContent = plan.status === 'active'
         ? `Plan status: ${plan.plan} active until ${new Date(plan.accessUntil).toLocaleDateString()}.`
-        : 'Plan status: no active plan.';
-    } catch { planStatus.textContent = 'Plan status is temporarily unavailable.'; }
+        : 'Plan status: no active plan. Activate a plan or request an approved free grant before saving.';
+      return planActive;
+    } catch {
+      planActive = false; save.disabled = true;
+      planStatus.textContent = 'Plan status is temporarily unavailable.';
+      return false;
+    }
   }
   void refreshPlan();
 
@@ -72,6 +85,10 @@ export function attachCandidateSetup(auth) {
 
   edit.addEventListener('click', () => { review.hidden = true; pending = null; form.querySelector('select').focus(); });
   save.addEventListener('click', async () => {
+    if (!planActive) {
+      status.textContent = 'Activate a plan or request an approved free grant before saving.';
+      return;
+    }
     if (!pending || !['review-confirmed', 'storage-consent', 'automation-consent']
       .every(id => document.getElementById(id).checked)) {
       status.textContent = 'Please review your answers and check all three consent choices.';
@@ -90,8 +107,14 @@ export function attachCandidateSetup(auth) {
       return { name: file.name, base64: btoa(binary) };
     };
     save.disabled = true;
-    status.textContent = 'Saving your private profile…';
+    status.textContent = 'Checking your plan…';
     try {
+      if (!await refreshPlan()) {
+        status.textContent = 'Activate a plan or request an approved free grant before saving.';
+        return;
+      }
+      save.disabled = true;
+      status.textContent = 'Saving your private profile…';
       const body = { ...pending, masterResume: await pdf(pending.resume),
         transcript: await pdf(pending.transcript),
         reviewConfirmed: true, storageConsent: true, automationConsent: true };
@@ -102,6 +125,13 @@ export function attachCandidateSetup(auth) {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (response.status === 403) {
+        planActive = false;
+        save.disabled = true;
+        planStatus.textContent = 'Plan status: no active plan. Activate a plan or request an approved free grant.';
+        status.textContent = 'Your plan is no longer active. Choose a plan above before saving.';
+        return;
+      }
       if (!response.ok) throw new Error('Save failed');
       pending = null;
       form.reset();
@@ -111,7 +141,7 @@ export function attachCandidateSetup(auth) {
       void refreshPlan();
     } catch {
       status.textContent = 'Profile could not be saved. Check your files and try again.';
-      save.disabled = false;
+      save.disabled = !planActive;
     }
   });
 }
