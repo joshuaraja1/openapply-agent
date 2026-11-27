@@ -17,7 +17,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install cfn-lint==1.46.0
-      - run: cfn-lint cloud/aws-control-plane.yaml cloud/aws-browser-smoke.yaml deploy/aws/hosted-billing-table.yaml deploy/aws/hosted-billing-api.yaml deploy/aws/staging-code-bucket.yaml deploy/aws/artifact-credential-broker.yaml deploy/aws/staging-onboarding.yaml deploy/aws/fargate-launcher-staging.yaml deploy/aws/synthetic-queue-task.yaml
+      - run: cfn-lint cloud/aws-control-plane.yaml cloud/aws-browser-smoke.yaml deploy/aws/hosted-billing-table.yaml deploy/aws/hosted-billing-api.yaml deploy/aws/staging-code-bucket.yaml deploy/aws/artifact-credential-broker.yaml deploy/aws/staging-onboarding.yaml
+      # Disabled-by-default task stacks intentionally use empty optional ARNs.
+      # CloudFormation Rules reject those values when either task is enabled.
+      - run: cfn-lint -i W1030 -- deploy/aws/fargate-launcher-staging.yaml deploy/aws/synthetic-queue-task.yaml
 
   hosted-billing-lambda:
     runs-on: ubuntu-latest
