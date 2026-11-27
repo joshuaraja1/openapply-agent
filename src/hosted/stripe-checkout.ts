@@ -25,6 +25,8 @@ export interface CheckoutPorts {
   reserve(subjectId: string, plan: HostedPlan): Promise<CheckoutReservation>;
   /** Atomically attach a session if empty or identical; reject a different ID. */
   recordSession(requestId: string, session: CheckoutSessionRecord): Promise<void>;
+  /** Reopen a reservation only after Stripe confirms its exact session expired. */
+  closeReservation?(subjectId: string, plan: HostedPlan, requestId: string): Promise<void>;
 }
 
 export interface CheckoutConfig {
@@ -83,13 +85,31 @@ export async function createHostedCheckout(
     || price.unit_amount !== configuredPrice.amountCents) {
     throw new Error("Stripe price does not match the configured hosted plan");
   }
-  const reservation = await ports.reserve(subjectId, plan);
+  let reservation = await ports.reserve(subjectId, plan);
+  const nowMs = now.getTime();
   if (reservation.subjectId !== subjectId || reservation.plan !== plan
     || !/^[A-Za-z0-9_-]{1,160}$/.test(reservation.requestId)
     || !/^cus_[A-Za-z0-9]+$/.test(reservation.customerId)) {
     throw new Error("Checkout reservation is not bound to this candidate");
   }
-  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) throw new Error("Invalid Checkout clock");
+  if (reservation.session && Number.isFinite(Date.parse(reservation.session.expiresAt))
+    && Date.parse(reservation.session.expiresAt) <= nowMs) {
+    if (!ports.closeReservation) {
+      throw new Error("expired Checkout requires durable provider reconciliation");
+    }
+    const oldRequestId = reservation.requestId;
+    await ports.closeReservation(subjectId, plan, oldRequestId);
+    reservation = await ports.reserve(subjectId, plan);
+    if (reservation.requestId === oldRequestId) {
+      throw new Error("Checkout journal did not open a fresh reservation");
+    }
+  }
+  if (reservation.subjectId !== subjectId || reservation.plan !== plan
+    || !/^[A-Za-z0-9_-]{1,160}$/.test(reservation.requestId)
+    || !/^cus_[A-Za-z0-9]+$/.test(reservation.customerId)) {
+    throw new Error("Checkout reservation is not bound to this candidate");
+  }
   const createdMs = Date.parse(reservation.createdAt);
   if (!Number.isFinite(nowMs) || !Number.isFinite(createdMs) || createdMs > nowMs + 5 * 60_000) {
     throw new Error("Checkout reservation has an invalid creation time");
