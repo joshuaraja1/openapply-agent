@@ -45,9 +45,14 @@ unauthenticated Checkout returns 401, an unapproved origin returns 403,
 approved preflight returns 204 with the exact staging origin, an invalid
 webhook signature returns 400, and a correctly signed but irrelevant test
 event returns 204. Scheduled replay subsequently ran without an error. These
-tests did not create a paid entitlement or charge a card. The signing secret
-is synthetic and must be replaced by a Stripe endpoint's own secret before
-real webhook delivery.
+tests did not create a paid entitlement or charge a card. The separate
+OpenApply Stripe sandbox now has an active endpoint for all 13 handled billing
+events. Its actual signing secret is in the existing AWS Secrets Manager
+secret. Stripe delivered `customer.subscription.created` and `invoice.paid`
+test fixtures to the API with HTTP 204; each produced one durable journal
+row. After the five-minute binding grace period, both unbound fixtures were
+quarantined and no entitlement was created. These fixtures do not prove a
+paid candidate flow.
 
 Release proof still required: real Cognito ID-token verification, a paid
 test Checkout followed by signed delivery and scheduled entitlement grant,
