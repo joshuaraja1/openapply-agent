@@ -176,6 +176,22 @@ describe("candidate-scoped artifact credentials", () => {
     expect(receipts.putCreateOnly).not.toHaveBeenCalled();
   });
 
+  it("rejects receipt upload when its lease expires during billing latency", async () => {
+    const ports = fixture();
+    const receipts = { putCreateOnly: vi.fn(async () => {}) };
+    const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
+    ports.clock.mockReturnValue(nowEpoch + 121);
+    ports.admission.hasReceiptUploadEligibility.mockImplementation(async (_candidate,
+      _run, _lease, _receipt, checkedEpoch) => checkedEpoch < nowEpoch + 120);
+    await expect(storeEncryptedReceipt(token, leaseToken, receiptId, encryptedReceipt,
+      secret, nowEpoch, config, { ...ports, receipts }))
+      .rejects.toThrow("Receipt upload unavailable");
+    expect(ports.admission.hasReceiptUploadEligibility).toHaveBeenLastCalledWith(
+      candidateId, runId, leaseToken, receiptId, nowEpoch + 121);
+    expect(ports.grantFence.reserve).not.toHaveBeenCalled();
+    expect(receipts.putCreateOnly).not.toHaveBeenCalled();
+  });
+
   it("client accepts only exact broker receipt acknowledgment", async () => {
     const arn = "arn:aws:lambda:us-east-1:123456789012:function:openapply-staging-artifact-broker";
     const send = vi.fn(async (command: InvokeCommand) => {

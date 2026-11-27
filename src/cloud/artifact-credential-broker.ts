@@ -114,7 +114,9 @@ export async function storeEncryptedReceipt(token: string, leaseToken: string,
       loadIdentity(candidateId: string, runId: string): Promise<{ subjectId: string }>;
     };
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
-    grantFence: { reserve(candidateId: string, nowEpoch: number): Promise<void> };
+    grantFence: { reserve(candidateId: string, runId: string,
+      leaseToken: string, nowEpoch: number): Promise<void> };
+    clock: () => number;
     receipts: { putCreateOnly(key: string, body: Uint8Array): Promise<void> };
   }): Promise<{ candidateId: string; runId: string; artifactId: string }> {
   const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
@@ -138,11 +140,13 @@ export async function storeEncryptedReceipt(token: string, leaseToken: string,
   if (!await ports.admission.hasReceiptUploadEligibility(claims.candidateId, claims.runId,
     leaseToken, artifactId, nowEpoch)) throw new Error("Receipt upload unavailable");
   const run = await ports.admission.loadIdentity(claims.candidateId, claims.runId);
-  requireHostedAccess(run.subjectId, await ports.billing.loadEntitlements(run.subjectId),
-    new Date(nowEpoch * 1000));
+  const entitlements = await ports.billing.loadEntitlements(run.subjectId);
+  const finalEpoch = freshEpoch(ports.clock);
+  verifyArtifactRunCapability(token, secret, finalEpoch);
+  requireHostedAccess(run.subjectId, entitlements, new Date(finalEpoch * 1000));
   if (!await ports.admission.hasReceiptUploadEligibility(claims.candidateId, claims.runId,
-    leaseToken, artifactId, nowEpoch)) throw new Error("Receipt upload unavailable");
-  await ports.grantFence.reserve(claims.candidateId, nowEpoch);
+    leaseToken, artifactId, finalEpoch)) throw new Error("Receipt upload unavailable");
+  await ports.grantFence.reserve(claims.candidateId, claims.runId, leaseToken, finalEpoch);
   await ports.receipts.putCreateOnly(receiptObjectKey(claims.candidateId, claims.runId,
     artifactId), body);
   return { candidateId: claims.candidateId, runId: claims.runId, artifactId };
