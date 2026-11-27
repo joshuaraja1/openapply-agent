@@ -94,6 +94,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: node --test scripts/aws-synthetic-drill-preflight.test.mjs
       - name: Check portable package contents
         if: matrix.node == 22
         run: |
