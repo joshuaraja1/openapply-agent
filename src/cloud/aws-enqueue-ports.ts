@@ -3,6 +3,7 @@ import { SendMessageCommand, type SQSClient } from "@aws-sdk/client-sqs";
 import { z } from "zod";
 import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.js";
 import type { CloudRunRecord } from "./queued-run.js";
+import { runConsentKey } from "./durable-journal.js";
 
 const uuid = z.uuid();
 const jobPart = z.string().trim().min(1).max(200);
@@ -15,7 +16,7 @@ const runRow = z.object({
     requisitionId: jobPart }),
 });
 const consentRow = z.object({
-  pk: z.string(), sk: z.literal("CONSENT"), runId: uuid,
+  pk: z.string(), sk: z.string().startsWith("CONSENT#"), runId: uuid,
   version: z.number().int().positive(), state: z.literal("granted"),
 });
 
@@ -67,10 +68,11 @@ export class DynamoHostedRunAdmission {
     const run = await this.readRun(candidateId, runId);
     if (!run) return false;
     const consent = await this.db.send(new GetCommand({ TableName: this.tableName,
-      Key: { pk: key.pk, sk: "CONSENT" }, ConsistentRead: true }));
+      Key: { pk: key.pk, sk: runConsentKey(runId) }, ConsistentRead: true }));
     if (!consent.Item) return false;
     const parsed = consentRow.safeParse(consent.Item);
     return parsed.success && parsed.data.pk === key.pk
+      && parsed.data.sk === runConsentKey(runId)
       && parsed.data.runId.toLowerCase() === uuid.parse(runId).toLowerCase()
       && parsed.data.version === run.consentVersion;
   }

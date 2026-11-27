@@ -14,10 +14,11 @@ const run = { pk, sk: `RUN#${runId}`, subjectId: "subject-a",
   consentVersion: 2, profileArtifactId: "d1718848-6798-4464-b237-28aa7bd71ef9",
   job: { provider: "Greenhouse", employerId: "acme",
     requisitionId: "42" } };
-const consent = { pk, sk: "CONSENT", runId, version: 2, state: "granted" };
+const consentKey = `CONSENT#${runId}`;
+const consent = { pk, sk: consentKey, runId, version: 2, state: "granted" };
 
 function admission(rows: Record<string, unknown> = { [run.sk]: run,
-  CONSENT: consent }) {
+  [consentKey]: consent }) {
   const send = vi.fn(async (command: GetCommand) => {
     expect(command).toBeInstanceOf(GetCommand);
     expect(command.input.TableName).toBe("ledger");
@@ -45,14 +46,14 @@ describe("durable hosted run admission", () => {
       .rejects.toThrow("Run unavailable");
     await expect(admission({ [run.sk]: { ...run, profileArtifactId: undefined } })
       .port.ownsRun(candidateId, runId)).rejects.toThrow();
-    expect(await admission({ [run.sk]: run, CONSENT: { ...consent,
+    expect(await admission({ [run.sk]: run, [consentKey]: { ...consent,
       state: "revoked" } }).port.hasCurrentConsent(candidateId, runId)).toBe(false);
-    expect(await admission({ [run.sk]: run, CONSENT: { ...consent,
+    expect(await admission({ [run.sk]: run, [consentKey]: { ...consent,
       version: 1 } }).port.hasCurrentConsent(candidateId, runId)).toBe(false);
-    expect(await admission({ [run.sk]: run, CONSENT: consent,
+    expect(await admission({ [run.sk]: run, [consentKey]: consent,
       DELETED: { pk, sk: "DELETED" } }).port.hasCurrentConsent(candidateId, runId)).toBe(false);
     await expect(admission({ [run.sk]: { ...run, subjectId: "" },
-      CONSENT: consent }).port.ownsRun(candidateId, runId)).rejects.toThrow();
+      [consentKey]: consent }).port.ownsRun(candidateId, runId)).rejects.toThrow();
   });
 });
 
