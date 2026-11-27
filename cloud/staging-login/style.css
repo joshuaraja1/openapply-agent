@@ -20,3 +20,7 @@ textarea { min-height: 5rem; resize: vertical; }
 .check input { margin-top: .3rem; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #f4f7fb; border-radius: .5rem; font: inherit; }
 .secondary { background: #e4ebf5; color: #14233d; }
+.job-card { padding: 1rem 0; border-top: 1px solid #dce4ef; }
+.job-card h3 { margin: 0 0 .35rem; }
+.job-card p { margin: .25rem 0 .7rem; color: #52627b; }
+.job-card a { color: #2458b1; font-weight: 600; }

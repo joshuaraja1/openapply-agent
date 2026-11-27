@@ -212,6 +212,7 @@ export function attachCandidateSetup(auth) {
       form.hidden = true;
       review.hidden = true;
       status.textContent = 'Your reviewed profile was saved. Application runs are not enabled in this staging preview.';
+      window.dispatchEvent(new Event('openapply:profile-saved'));
       void refreshPlan();
     } catch {
       status.textContent = 'Profile could not be saved. Check your files and try again.';
