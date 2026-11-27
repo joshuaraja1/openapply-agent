@@ -13,7 +13,7 @@ const config: CheckoutConfig = {
 };
 
 async function signedToken(sub = "candidate-1", audience = "openapply-client",
-  expiration = "30m", issuer = "https://auth.openapplyagent.xyz/") {
+  expiration = "30m", issuer = "https://auth.openapplyagent.xyz/", tokenUse = "id") {
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const publicJwk = await exportJWK(publicKey);
   publicJwk.kid = "test-key";
@@ -21,7 +21,7 @@ async function signedToken(sub = "candidate-1", audience = "openapply-client",
     issuer: "https://auth.openapplyagent.xyz/", audience: "openapply-client",
     jwksUrl: "https://auth.openapplyagent.xyz/.well-known/jwks.json",
   }, createLocalJWKSet({ keys: [publicJwk] }));
-  const token = await new SignJWT({}).setProtectedHeader({ alg: "RS256", kid: "test-key" })
+  const token = await new SignJWT({ token_use: tokenUse }).setProtectedHeader({ alg: "RS256", kid: "test-key" })
     .setIssuer(issuer).setAudience(audience)
     .setSubject(sub).setIssuedAt().setExpirationTime(expiration).sign(privateKey);
   return { token, verifier };
@@ -75,6 +75,25 @@ describe("hosted checkout HTTP boundary", () => {
       { ...deps, config, verifySubject: verifier });
     expect(response.status).toBe(200);
     expect(deps.reserve).toHaveBeenCalledWith("google-oauth2|123", "semester");
+  });
+
+  it("rejects C1 controls in a signed subject before billing", async () => {
+    const { token, verifier } = await signedToken("candidate\u0085id");
+    const deps = services();
+    const response = await handleCheckoutHttp(request(token, { plan: "monthly" }),
+      { ...deps, config, verifySubject: verifier });
+    expect(response.status).toBe(401);
+    expect(deps.reserve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed access token even with matching audience", async () => {
+    const { token, verifier } = await signedToken("candidate-1", "openapply-client",
+      "30m", "https://auth.openapplyagent.xyz/", "access");
+    const deps = services();
+    const response = await handleCheckoutHttp(request(token, { plan: "monthly" }),
+      { ...deps, config, verifySubject: verifier });
+    expect(response.status).toBe(401);
+    expect(deps.reserve).not.toHaveBeenCalled();
   });
 
   it("rejects untrusted Origin before calling Stripe", async () => {
