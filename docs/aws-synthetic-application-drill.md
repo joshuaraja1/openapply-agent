@@ -55,6 +55,14 @@ until it is `ACTIVE`. The preflight blocks the drill until both are active.
    broker. The preflight cannot establish this policy boundary. Verify its task definition has
    `OPENAPPLY_CLOUD_SYNTHETIC_ONLY=1` and
    `OPENAPPLY_SUBMISSION_MODE=disabled`.
+   This staging AWS account has a Lambda concurrency quota of 10, and AWS
+   requires at least 10 unreserved executions. Leave the broker and launcher
+   reserved-concurrency parameters at their default `0` (property omitted),
+   then verify `get-function-concurrency` reports no reservation and that
+   CloudWatch `Throttles` stays at zero during the bounded drill. The durable
+   DynamoDB slot and ECS client token still limit browser launches to one.
+   A production account needs an appropriate concurrency quota and capacity
+   plan; staging's shared quota is not evidence of production capacity.
 4. Provision the private egress stack only for the test window. Record its
    subnet ID and use `AssignPublicIp=DISABLED`, the no-ingress security group,
    and an exact image digest. Add a cost alarm before recurring launches.

@@ -192,6 +192,35 @@ describe("bounded Fargate run launch", () => {
     expect(h.row).toBeUndefined();
   });
 
+  it("starts at most one task when two candidates race for the durable slot", async () => {
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cb28a037-a184-4ccc-9c4c-6ec44c496a4d";
+    const rows = new Map<string, Record<string, unknown>>();
+    let slotHeld = false;
+    const store = {
+      reserve: vi.fn(async (row: Record<string, unknown>) => {
+        if (slotHeld) return "busy";
+        slotHeld = true;
+        rows.set(`${row.candidateId}:${row.runId}`, row);
+        return "created";
+      }),
+      read: vi.fn(async (candidate: string, run: string) => rows.get(`${candidate}:${run}`)),
+      markStarted: vi.fn(async () => {}),
+    } as unknown as DynamoFargateLaunchStore;
+    const ecs = { send: vi.fn(async (command: RunTaskCommand) => ({
+      tasks: [{ taskArn: `${taskArn}-${command.input.startedBy}` }],
+    })) } as unknown as Pick<ECSClient, "send">;
+    const ports = { store, ecs, signingKey: Buffer.alloc(32, 7),
+      authorize: async () => true };
+    const results = await Promise.all([
+      launchQueuedFargateRun(candidateId, runId, config, ports, 1_800_000_000),
+      launchQueuedFargateRun(secondCandidate, secondRun, config, ports, 1_800_000_000),
+    ]);
+    expect(results.sort()).toEqual(["capacity_busy", "started"]);
+    expect(ecs.send).toHaveBeenCalledTimes(1);
+    expect((ecs.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBeInstanceOf(RunTaskCommand);
+  });
+
   it("retries an ambiguous ECS response with identical parameters and token", async () => {
     const h = harness();
     const ports = { ...h, signingKey: Buffer.alloc(32, 7), authorize: async () => true };
