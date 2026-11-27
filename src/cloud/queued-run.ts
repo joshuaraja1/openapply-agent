@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { officialJobKey, type OfficialJobIdentity, type SubmissionStatus } from "./durable-journal.js";
+import { requireHostedAccess } from "../hosted/entitlement.js";
 
 export interface CloudRunRecord {
+  /** Trusted billing subject bound to this candidate when the run was created. */
+  subjectId: string;
   /** Version of the candidate's durable, server-side consent grant for this run. */
   consentVersion: number;
   job: OfficialJobIdentity;
@@ -20,6 +23,10 @@ export interface PreparedApplication {
 }
 
 export interface CloudRunPorts {
+  billing: {
+    /** Read current durable entitlements on each call; never trust the SQS body. */
+    loadEntitlements(subjectId: string): Promise<readonly unknown[]>;
+  };
   authorization: {
     /** Ownership remains checkable after consent is revoked, for safe queue cleanup. */
     ownsRun(candidateId: string, runId: string): Promise<boolean>;
@@ -67,9 +74,18 @@ export interface CloudRunPorts {
 }
 
 export type CloudRunOutcome = "confirmed" | "already_confirmed" | "lease_busy" | "unauthorized"
-  | "needs_reconciliation" | "retry";
+  | "needs_reconciliation" | "retry" | "payment_required";
 
 const MAX_RECEIPT_BYTES = 1024 * 1024;
+
+async function hasHostedAccess(subjectId: string, billing: CloudRunPorts["billing"]): Promise<boolean> {
+  const records = await billing.loadEntitlements(subjectId);
+  try { requireHostedAccess(subjectId, records); return true; }
+  catch (error) {
+    if (error instanceof Error && error.message === "Hosted access unavailable") return false;
+    throw error; // Malformed durable state is an infrastructure failure, not a paywall.
+  }
+}
 
 /**
  * Fail-closed bridge between a received SQS message and durable application state.
@@ -97,6 +113,9 @@ export async function handleQueuedApplication(
     }
     if (status === "needs_reconciliation") return "needs_reconciliation";
     if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
+    if (!record.subjectId.trim()) throw new Error("Run has no bound billing subject");
+    try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
+    catch { return "retry"; }
     if (!Number.isSafeInteger(record.consentVersion) || record.consentVersion < 1) {
       throw new Error("Run has no valid durable consent version");
     }
@@ -108,6 +127,8 @@ export async function handleQueuedApplication(
       const prepared = await ports.application.prepare(profile.path, record.job);
       if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
       if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
+      try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
+      catch { return "retry"; }
       const artifactId = await ports.journal.beginSubmission(
         run.candidateId, token, run.runId, record.consentVersion, record.job);
       if (!artifactId) {
@@ -117,6 +138,22 @@ export async function handleQueuedApplication(
           shouldAck = true;
           return "already_confirmed";
         }
+        return "needs_reconciliation";
+      }
+
+      // One final read after the durable intent narrows the window in which a
+      // payment or consent revocation could race with the external Submit.
+      // If it changed, keep the intent uncertain; never try this job again
+      // automatically because a browser click may already be in flight.
+      let stillAuthorized = false;
+      try {
+        stillAuthorized = await ports.authorization.hasCurrentConsent(run.candidateId, run.runId);
+        if (stillAuthorized) {
+          stillAuthorized = await hasHostedAccess(record.subjectId, ports.billing);
+        }
+      } catch { stillAuthorized = false; }
+      if (!stillAuthorized) {
+        await ports.journal.markUncertain(run.candidateId, token, record.job);
         return "needs_reconciliation";
       }
 
