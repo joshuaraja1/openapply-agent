@@ -33,7 +33,8 @@ const requirements = {
   egress: { outputs: ['PrivateSubnetId'], parameters: { EnableBrowserEgress: 'true' } },
 };
 
-export function assessInventory(accountId, expectedAccountId, stacks, taskDefinition) {
+export function assessInventory(accountId, expectedAccountId, stacks, taskDefinition,
+  runLedgerTable) {
   const checks = [];
   checks.push({ gate: 'account', ok: accountId === expectedAccountId,
     detail: accountId === expectedAccountId ? 'expected account' : 'AWS account mismatch' });
@@ -59,6 +60,16 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
           ...disabled.map((name) => `${name} not enabled`)].join(', ')
         : 'ready' });
   }
+  const indexNames = ['gsi1', 'DeletionDueIndex'];
+  const indexes = new Map((runLedgerTable?.GlobalSecondaryIndexes ?? []).map((index) =>
+    [index.IndexName, index.IndexStatus]));
+  const indexProblems = !runLedgerTable ? ['table missing']
+    : [runLedgerTable.TableStatus === 'ACTIVE' ? null : `table ${runLedgerTable.TableStatus}`,
+      ...indexNames.map((name) => indexes.get(name) === 'ACTIVE' ? null
+        : indexes.has(name) ? `${name} ${indexes.get(name)}` : `missing ${name}`)]
+      .filter(Boolean);
+  checks.push({ gate: 'run-ledger-indexes', ok: indexProblems.length === 0,
+    detail: indexProblems.length ? indexProblems.join(', ') : 'both indexes ACTIVE' });
   if (stacks.syntheticTask) {
     const browser = (taskDefinition?.containerDefinitions ?? [])
       .find((item) => item.name === 'browser-worker');
@@ -116,7 +127,8 @@ function awsJson(region, args) {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000 }));
   } catch (error) {
     const stderr = String(error.stderr ?? '');
-    if (stderr.includes('ValidationError') && stderr.includes('does not exist')) return null;
+    if ((stderr.includes('ValidationError') && stderr.includes('does not exist'))
+      || (args[0] === 'dynamodb' && stderr.includes('ResourceNotFoundException'))) return null;
     throw new Error(`AWS read failed for ${args[0]} ${args[1]}: ${stderr.trim() || error.message}`);
   }
 }
@@ -132,7 +144,11 @@ export function collectInventory(region, stackNames = defaultStacks) {
     item.OutputKey === 'TaskDefinitionArn')?.OutputValue;
   const taskDefinition = taskArn ? awsJson(region, ['ecs', 'describe-task-definition',
     '--task-definition', taskArn])?.taskDefinition : null;
-  return { accountId, stacks, taskDefinition };
+  const ledgerName = stacks.controlPlane?.Outputs?.find((item) =>
+    item.OutputKey === 'RunLedgerName')?.OutputValue;
+  const runLedgerTable = ledgerName ? awsJson(region, ['dynamodb', 'describe-table',
+    '--table-name', ledgerName])?.Table : null;
+  return { accountId, stacks, taskDefinition, runLedgerTable };
 }
 
 function main(args) {
@@ -147,7 +163,7 @@ function main(args) {
   }
   const inventory = collectInventory(region);
   const result = assessInventory(inventory.accountId, expectedAccountId,
-    inventory.stacks, inventory.taskDefinition);
+    inventory.stacks, inventory.taskDefinition, inventory.runLedgerTable);
   if (args.includes('--json')) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   else for (const item of result.checks) {
     process.stdout.write(`${item.ok ? 'PASS' : 'BLOCK'} ${item.gate}: ${item.detail}\n`);

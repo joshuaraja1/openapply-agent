@@ -21,7 +21,9 @@ broker, synthetic task definition, launcher, and private egress. It also checks
 that the task definition keeps synthetic-only mode and real submission disabled,
 and that the deployed stack parameters reference the exact reviewed task,
 broker, KMS key, bucket, cluster, execution role, no-ingress security group,
-and private subnet.
+and private subnet. It reads the live DynamoDB run-ledger description and
+requires both `gsi1` and `DeletionDueIndex` to report `ACTIVE`; a completed
+CloudFormation stack alone does not prove index backfill has finished.
 Do not bypass a failed gate by invoking ECS directly.
 
 As of November 27, the control plane, billing, browser smoke, code bucket, and

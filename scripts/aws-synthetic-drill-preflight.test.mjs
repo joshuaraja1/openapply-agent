@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { assessInventory, defaultStacks } from './aws-synthetic-drill-preflight.mjs';
+import { assessInventory as assess, defaultStacks } from './aws-synthetic-drill-preflight.mjs';
+
+function activeLedger() {
+  return { TableStatus: 'ACTIVE', GlobalSecondaryIndexes: [
+    { IndexName: 'gsi1', IndexStatus: 'ACTIVE' },
+    { IndexName: 'DeletionDueIndex', IndexStatus: 'ACTIVE' },
+  ] };
+}
+
+function assessInventory(accountId, expectedAccountId, stacks, task, ledger = activeLedger()) {
+  return assess(accountId, expectedAccountId, stacks, task, ledger);
+}
 
 function readyFixture() {
   const outputs = {
@@ -134,4 +145,33 @@ test('rejects launcher wired to an unreviewed security group or execution role',
   assert.equal(result.inventoryComplete, false);
   assert.match(result.checks.find((check) => check.gate === 'stack-wiring').detail,
     /launcher.EcsExecutionRoleArn.*launcher.EcsSecurityGroupId/);
+});
+
+test('blocks a ledger missing either required index', () => {
+  const { stacks, task } = readyFixture();
+  const ledger = activeLedger();
+  ledger.GlobalSecondaryIndexes.pop();
+  const result = assessInventory('123456789012', '123456789012', stacks, task, ledger);
+  assert.equal(result.inventoryComplete, false);
+  assert.equal(result.checks.find((check) => check.gate === 'run-ledger-indexes').detail,
+    'missing DeletionDueIndex');
+});
+
+test('blocks while Dynamo is backfilling an index despite complete stacks', () => {
+  const { stacks, task } = readyFixture();
+  const ledger = activeLedger();
+  ledger.GlobalSecondaryIndexes[0].IndexStatus = 'CREATING';
+  const result = assessInventory('123456789012', '123456789012', stacks, task, ledger);
+  assert.equal(result.inventoryComplete, false);
+  assert.equal(result.checks.find((check) => check.gate === 'run-ledger-indexes').detail,
+    'gsi1 CREATING');
+});
+
+test('accepts the ledger only after both indexes are ACTIVE', () => {
+  const { stacks, task } = readyFixture();
+  const result = assessInventory('123456789012', '123456789012', stacks, task,
+    activeLedger());
+  assert.equal(result.inventoryComplete, true);
+  assert.equal(result.checks.find((check) => check.gate === 'run-ledger-indexes').ok,
+    true);
 });
