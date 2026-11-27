@@ -2,7 +2,7 @@ import { InvokeCommand, type LambdaClient } from "@aws-sdk/client-lambda";
 import { z } from "zod";
 import type { ScopedArtifactCredentials } from "./artifact-credential-broker.js";
 
-const grantSchema = z.strictObject({ candidateId: z.uuid(), runId: z.uuid(),
+const grantSchema = z.strictObject({ candidateId: z.uuid(), runId: z.uuid(), leaseToken: z.uuid(),
   accessKeyId: z.string().min(8).max(128), secretAccessKey: z.string().min(8).max(256),
   sessionToken: z.string().min(8).max(8192), expiresAt: z.iso.datetime() });
 
@@ -10,7 +10,7 @@ const grantSchema = z.strictObject({ candidateId: z.uuid(), runId: z.uuid(),
  * No bearer capability or STS credential is sent to logs or a queue. */
 export async function requestScopedArtifactCredentials(
   lambda: Pick<LambdaClient, "send">, functionArn: string, capability: string,
-  expected: { candidateId: string; runId: string }, now = new Date(),
+  expected: { candidateId: string; runId: string; leaseToken: string }, now = new Date(),
 ): Promise<ScopedArtifactCredentials> {
   if (!/^arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:openapply-[a-z0-9-]+-artifact-broker$/.test(functionArn)
     || !capability || capability.length > 800) {
@@ -18,7 +18,7 @@ export async function requestScopedArtifactCredentials(
   }
   const result = await lambda.send(new InvokeCommand({ FunctionName: functionArn,
     InvocationType: "RequestResponse",
-    Payload: Buffer.from(JSON.stringify({ capability }), "utf8") }));
+    Payload: Buffer.from(JSON.stringify({ capability, leaseToken: expected.leaseToken }), "utf8") }));
   if (result.StatusCode !== 200 || result.FunctionError || !result.Payload
     || result.Payload.byteLength > 12_000) {
     throw new Error("Scoped artifact credentials unavailable");
@@ -28,7 +28,7 @@ export async function requestScopedArtifactCredentials(
   catch { throw new Error("Scoped artifact credentials unavailable"); }
   const parsed = grantSchema.safeParse(value);
   if (!parsed.success || parsed.data.candidateId !== expected.candidateId
-    || parsed.data.runId !== expected.runId
+    || parsed.data.runId !== expected.runId || parsed.data.leaseToken !== expected.leaseToken
     || Date.parse(parsed.data.expiresAt) <= now.getTime() + 60_000) {
     throw new Error("Scoped artifact credentials unavailable");
   }

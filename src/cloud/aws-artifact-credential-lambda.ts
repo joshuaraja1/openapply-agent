@@ -16,7 +16,9 @@ const required = ["ARTIFACT_SIGNING_SECRET_ARN", "DATA_ROLE_ARN", "ARTIFACT_BUCK
 export async function handler(event: unknown) {
   for (const key of required) if (!env[key]) throw new Error("Artifact broker is not configured");
   const token = (event as { capability?: unknown } | null)?.capability;
-  if (typeof token !== "string" || token.length > 800) {
+  const leaseToken = (event as { leaseToken?: unknown } | null)?.leaseToken;
+  if (typeof token !== "string" || token.length > 800
+    || typeof leaseToken !== "string") {
     throw new Error("Task capability unavailable");
   }
   const secrets = new SecretsManagerClient({});
@@ -29,7 +31,7 @@ export async function handler(event: unknown) {
   }
   try {
     const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-    return await issueCandidateArtifactCredentials(token, secret,
+    return await issueCandidateArtifactCredentials(token, leaseToken, secret,
       Math.floor(Date.now() / 1000), {
         dataRoleArn: env.DATA_ROLE_ARN!, artifactBucket: env.ARTIFACT_BUCKET!,
         kmsKeyArn: env.ARTIFACT_KMS_KEY_ARN!,

@@ -45,6 +45,11 @@ export function artifactObjectKey(candidateId: string, artifactId: string): stri
   return `${candidatePrefix(candidateId)}artifacts/${canonicalId(artifactId)}`;
 }
 
+/** Browser workers may create receipts here but cannot write reviewed inputs. */
+export function receiptObjectKey(candidateId: string, runId: string, artifactId: string): string {
+  return `${candidatePrefix(candidateId)}runs/${canonicalId(runId)}/receipts/${canonicalId(artifactId)}`;
+}
+
 function encryptionContext(candidateId: string, artifactId: string): Record<string, string> {
   return { application: "openapply", version: "1", candidateId, artifactId };
 }
@@ -67,6 +72,17 @@ export class CandidateVault {
   constructor(private readonly keys: DataKeyPort, private readonly objects: ArtifactStorePort) {}
 
   async put(candidateIdInput: string, artifactIdInput: string, plaintext: Uint8Array): Promise<void> {
+    return this.putAtKey(candidateIdInput, artifactIdInput, plaintext, artifactObjectKey);
+  }
+
+  async putReceipt(candidateIdInput: string, runId: string, artifactIdInput: string,
+    plaintext: Uint8Array): Promise<void> {
+    return this.putAtKey(candidateIdInput, artifactIdInput, plaintext,
+      (candidateId, artifactId) => receiptObjectKey(candidateId, runId, artifactId));
+  }
+
+  private async putAtKey(candidateIdInput: string, artifactIdInput: string, plaintext: Uint8Array,
+    objectKey: (candidateId: string, artifactId: string) => string): Promise<void> {
     const candidateId = canonicalId(candidateIdInput);
     const artifactId = canonicalId(artifactIdInput);
     if (plaintext.byteLength > MAX_PLAINTEXT_BYTES) throw new Error("Artifact exceeds the staging size limit");
@@ -89,7 +105,7 @@ export class CandidateVault {
         tag: cipher.getAuthTag().toString("base64"),
         ciphertext: ciphertext.toString("base64"),
       }));
-      await this.objects.putCreateOnly(artifactObjectKey(candidateId, artifactId), body);
+      await this.objects.putCreateOnly(objectKey(candidateId, artifactId), body);
     } finally {
       dataKey.plaintext.fill(0);
     }

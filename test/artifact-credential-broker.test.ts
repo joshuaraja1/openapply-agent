@@ -8,6 +8,7 @@ import { requestScopedArtifactCredentials } from "../src/cloud/aws-artifact-brok
 const candidateId = "00000000-0000-4000-8000-000000000001";
 const otherCandidateId = "00000000-0000-4000-8000-000000000002";
 const runId = "00000000-0000-4000-8000-000000000003";
+const leaseToken = "00000000-0000-4000-8000-000000000005";
 const subjectId = "subject-1";
 const nowEpoch = 1795737600;
 const secret = Buffer.alloc(32, 7);
@@ -17,6 +18,7 @@ const config = { dataRoleArn: "arn:aws:iam::123456789012:role/openapply-artifact
 
 function fixture() {
   const admission = { hasCurrentConsent: vi.fn(async () => true),
+    hasArtifactGrantEligibility: vi.fn(async () => true),
     loadIdentity: vi.fn(async () => ({ subjectId })) };
   const billing = { loadEntitlements: vi.fn(async () => [{ kind: "free-grant", subjectId,
     grantId: "beta", approvedBy: "admin", startsAt: "2026-11-25T00:00:00.000Z",
@@ -41,57 +43,66 @@ describe("candidate-scoped artifact credentials", () => {
   it("issues only an exact-candidate S3 and KMS session policy after durable checks", async () => {
     const ports = fixture();
     const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
-    const grant = await issueCandidateArtifactCredentials(token, secret, nowEpoch, config, ports);
-    expect(grant).toMatchObject({ candidateId, runId, accessKeyId: "ASIATEST" });
-    expect(ports.admission.hasCurrentConsent).toHaveBeenCalledWith(candidateId, runId);
+    const grant = await issueCandidateArtifactCredentials(token, leaseToken, secret, nowEpoch, config, ports);
+    expect(grant).toMatchObject({ candidateId, runId, leaseToken, accessKeyId: "ASIATEST" });
+    expect(ports.admission.hasArtifactGrantEligibility).toHaveBeenCalledWith(candidateId, runId, leaseToken, nowEpoch);
     expect(ports.billing.loadEntitlements).toHaveBeenCalledWith(subjectId);
     const command = ports.send.mock.calls[0]?.[0] as AssumeRoleCommand;
     expect(command.input.DurationSeconds).toBe(900);
     const policy = JSON.parse(command.input.Policy!);
     expect(policy.Statement[0].Resource).toBe(`arn:aws:s3:::openapply-private-test/candidates/${candidateId}/artifacts/*`);
-    expect(policy.Statement[0].Resource).not.toContain(otherCandidateId);
-    expect(policy.Statement[1].Condition.StringEquals["kms:EncryptionContext:candidateId"]).toBe(candidateId);
-    expect(policy.Statement[1].Action).not.toContain("kms:Encrypt");
+    expect(policy.Statement[0].Action).toEqual(["s3:GetObject"]);
+    expect(policy.Statement[1]).toMatchObject({ Action: ["s3:PutObject"],
+      Resource: `arn:aws:s3:::openapply-private-test/candidates/${candidateId}/runs/${runId}/receipts/*` });
+    expect(policy.Statement[1].Resource).not.toContain(otherCandidateId);
+    expect(policy.Statement[2].Condition.StringEquals["kms:EncryptionContext:candidateId"]).toBe(candidateId);
+    expect(policy.Statement[2].Action).not.toContain("kms:Encrypt");
+    expect(JSON.stringify(policy.Statement.filter((statement: { Action: string[] }) =>
+      statement.Action.includes("s3:PutObject")))).not.toContain("/artifacts/*");
     expect(JSON.stringify(policy)).not.toContain("s3:DeleteObject");
   });
 
   it("does not call STS after consent or payment is revoked", async () => {
     const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
     const withdrawn = fixture();
-    withdrawn.admission.hasCurrentConsent.mockResolvedValueOnce(false);
-    await expect(issueCandidateArtifactCredentials(token, secret, nowEpoch, config, withdrawn)).rejects.toThrow();
+    withdrawn.admission.hasArtifactGrantEligibility.mockResolvedValueOnce(false);
+    await expect(issueCandidateArtifactCredentials(token, leaseToken, secret, nowEpoch, config, withdrawn)).rejects.toThrow();
     expect(withdrawn.send).not.toHaveBeenCalled();
     const unpaid = fixture();
     unpaid.billing.loadEntitlements.mockResolvedValueOnce([] as never);
-    await expect(issueCandidateArtifactCredentials(token, secret, nowEpoch, config, unpaid)).rejects.toThrow();
+    await expect(issueCandidateArtifactCredentials(token, leaseToken, secret, nowEpoch, config, unpaid)).rejects.toThrow();
     expect(unpaid.send).not.toHaveBeenCalled();
     const racing = fixture();
-    racing.admission.hasCurrentConsent.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    await expect(issueCandidateArtifactCredentials(token, secret, nowEpoch, config, racing)).rejects.toThrow();
+    racing.admission.hasArtifactGrantEligibility.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(issueCandidateArtifactCredentials(token, leaseToken, secret, nowEpoch, config, racing)).rejects.toThrow();
     expect(racing.send).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe configuration before STS", () => {
-    expect(() => candidateArtifactSessionPolicy(candidateId,
+    expect(() => candidateArtifactSessionPolicy(candidateId, runId,
       { ...config, artifactBucket: "../other" })).toThrow();
-    expect(() => candidateArtifactSessionPolicy(candidateId,
+    expect(() => candidateArtifactSessionPolicy(candidateId, runId,
       { ...config, kmsKeyArn: "*" })).toThrow();
   });
 
   it("accepts only a broker grant bound to the exact queued candidate and run", async () => {
-    const grant = { candidateId, runId, accessKeyId: "ASIATEST0000",
+    const grant = { candidateId, runId, leaseToken, accessKeyId: "ASIATEST0000",
       secretAccessKey: "secretsecret", sessionToken: "sessiontoken",
       expiresAt: new Date((nowEpoch + 900) * 1000).toISOString() };
     const send = vi.fn(async (command: InvokeCommand) => {
       expect(command).toBeInstanceOf(InvokeCommand);
       expect(command.input.InvocationType).toBe("RequestResponse");
+      expect(JSON.parse(Buffer.from(command.input.Payload!).toString("utf8")))
+        .toEqual({ capability: "capability", leaseToken });
       return { StatusCode: 200, Payload: Buffer.from(JSON.stringify(grant)) };
     });
     const lambda = { send } as unknown as Pick<LambdaClient, "send">;
     const arn = "arn:aws:lambda:us-east-1:123456789012:function:openapply-staging-artifact-broker";
     expect(await requestScopedArtifactCredentials(lambda, arn, "capability",
-      { candidateId, runId }, new Date(nowEpoch * 1000))).toEqual(grant);
+      { candidateId, runId, leaseToken }, new Date(nowEpoch * 1000))).toEqual(grant);
     await expect(requestScopedArtifactCredentials(lambda, arn, "capability",
-      { candidateId: otherCandidateId, runId }, new Date(nowEpoch * 1000))).rejects.toThrow();
+      { candidateId: otherCandidateId, runId, leaseToken }, new Date(nowEpoch * 1000))).rejects.toThrow();
+    await expect(requestScopedArtifactCredentials(lambda, arn, "capability",
+      { candidateId, runId, leaseToken: otherCandidateId }, new Date(nowEpoch * 1000))).rejects.toThrow();
   });
 });

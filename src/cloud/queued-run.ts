@@ -53,11 +53,13 @@ export interface CloudRunPorts {
     loadProfileArtifactId(candidateId: string, runId: string): Promise<string>;
   };
   vault: {
-    restoreToPrivateTemp(candidateId: string, artifactId: string): Promise<{
+    restoreToPrivateTemp(candidateId: string, runId: string, leaseToken: string,
+      artifactId: string): Promise<{
       path: string; cleanup(): Promise<void>;
     }>;
     /** The production vault must reject a duplicate artifact ID. */
-    put(candidateId: string, artifactId: string, bytes: Uint8Array): Promise<void>;
+    put(candidateId: string, runId: string, leaseToken: string, artifactId: string,
+      bytes: Uint8Array): Promise<void>;
   };
   application: {
     /** No real browser implementation is registered by this staging module. */
@@ -121,7 +123,8 @@ export async function handleQueuedApplication(
     }
 
     const profileArtifactId = await ports.runRecords.loadProfileArtifactId(run.candidateId, run.runId);
-    const profile = await ports.vault.restoreToPrivateTemp(run.candidateId, profileArtifactId);
+    const profile = await ports.vault.restoreToPrivateTemp(run.candidateId, run.runId,
+      token, profileArtifactId);
     cleanupComplete = false;
     try {
       const prepared = await ports.application.prepare(profile.path, record.job);
@@ -173,7 +176,7 @@ export async function handleQueuedApplication(
       }
 
       const sha256 = createHash("sha256").update(receipt.evidence).digest("hex");
-      await ports.vault.put(run.candidateId, artifactId, receipt.evidence);
+      await ports.vault.put(run.candidateId, run.runId, token, artifactId, receipt.evidence);
       if (!await ports.journal.confirmAfterVerification(run.candidateId, token, record.job,
         { artifactId, sha256 })) return "needs_reconciliation";
       shouldAck = true;

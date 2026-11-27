@@ -14,8 +14,9 @@ deleted and reach the queue's dead-letter queue after its configured retries.
 `createAwsQueuedRunRuntime` connects the handler to strongly consistent
 entitlement and run/consent reads, the DynamoDB submit journal, KMS-wrapped
 candidate artifacts in private S3, and the SQS receiver. It now requires a
-broker-issued candidate/run-scoped STS grant and constructs artifact clients
-from that grant; see `docs/aws-artifact-credential-broker.md`. The trusted run row,
+launcher-minted candidate/run capability. It invokes the broker only after
+acquiring the durable lease and constructs artifact clients from the returned
+short-lived grant; see `docs/aws-artifact-credential-broker.md`. The trusted run row,
 not the SQS body, supplies the subject, job, and profile artifact ID. The vault
 restores plaintext to an owner-only task-local file and removes it after use.
 The runtime requires a separately reviewed browser adapter and an exact-job

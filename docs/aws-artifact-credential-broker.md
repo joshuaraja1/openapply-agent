@@ -16,15 +16,20 @@ broker, never in the task. The launcher and task override are still missing;
 the broker must not be deployed for candidates until they exist and have been
 reviewed.
 
-On each credential request, the broker verifies the capability, checks the
-current strongly consistent run and per-run consent, checks paid/free access
-in the entitlement table, then assumes a dedicated data role for 900 seconds.
-The inline STS session policy permits Get/Put only under that candidate's S3
-artifact prefix and KMS GenerateDataKey/Decrypt only with matching OpenApply
-encryption context. The data role and its session policy intersect. The broker
-returns the temporary credentials through direct Lambda invocation. The
-runtime refuses to use a grant for a different SQS candidate or run. It also
-checks the candidate ID before any vault read or write.
+The worker obtains the journal lease before requesting credentials. On each
+request, it sends the lease token with the capability. The broker verifies the
+capability and strongly consistent run identity, per-run consent, live lease
+owner/run/expiry, and that the job is not confirmed or uncertain. It checks
+paid/free access, repeats the lease/terminal-state check, then assumes a
+dedicated data role for 900 seconds. The inline STS policy permits Get only
+under that candidate's reviewed `artifacts/*` input prefix and Put only under
+that exact run's `runs/<runId>/receipts/*` output prefix. KMS
+GenerateDataKey/Decrypt requires the candidate's OpenApply encryption context.
+The data role and its session policy intersect. The broker returns temporary
+credentials through direct Lambda invocation. The runtime rejects another SQS
+candidate/run before reading AWS state and requests credentials only after
+lease acquisition. A receipt write obtains a fresh broker grant; a confirmed,
+uncertain, expired, or released lease cannot obtain another grant.
 
 The template `deploy/aws/artifact-credential-broker.yaml` creates the broker
 role/function, data role, and a managed policy allowing invocation of that
@@ -37,11 +42,19 @@ to CloudFormation. Its `SecretString` is a base64-encoded random 32-byte key.
 ## Threat model
 
 - A compromised candidate browser task can use its own 15-minute grant to read
-  or write that candidate's artifacts. Its inline policy has no other S3
-  prefix, no S3 listing/deletion, and no KMS operation without that candidate's
-  encryption context. The task role itself has no direct artifact permission.
+  that candidate's reviewed input artifacts and write output under its own
+  run's receipt prefix. It cannot overwrite the verified profile or résumé,
+  list/delete S3 objects, or operate KMS for another candidate. The task role
+  itself has no direct artifact permission. A compromised task with an already
+  issued grant can still replace receipt objects in its run's prefix while
+  that grant is valid; the confirmation digest in the durable ledger detects
+  this on later reads only if consumers verify it. The public deletion and
+  receipt-integrity design must resolve this before enablement.
 - A stolen capability can be replayed only for its encoded candidate and run,
-  before its 30-minute expiry and while consent and access remain active.
+  before its 30-minute expiry and while consent, access, and that run's exact
+  fenced lease remain active. A capability alone cannot renew or acquire a
+  lease; a stolen capability plus the live lease token can obtain a grant
+  until the lease ends or the job becomes terminal.
   Treat it as a secret in ECS overrides and task memory. A task must not expose
   its metadata endpoint or environment to an untrusted browser page.
 - A compromised trusted launcher or broker can mint or grant access across
@@ -55,15 +68,17 @@ to CloudFormation. Its `SecretString` is a base64-encoded random 32-byte key.
 
 ## Revocation and recovery
 
-An expired capability or revoked consent/payment prevents a new STS grant.
+An expired capability, expired/released lease, terminal submission, or revoked
+consent/payment prevents a new STS grant.
 Previously issued credentials remain usable until their 15-minute expiry;
 deletion must stop the task, wait for that maximum window or otherwise prove
 the task cannot write, then purge every S3 version. The task must never log
 capabilities, STS credentials, artifact bytes, or candidate facts. A broker
 failure or expired grant aborts the task and leaves the durable submit journal
-to decide whether reconciliation is needed. The current runtime does not
-refresh grants during a long browser session; the task launcher must cap its
-work below the credential lifetime or add reviewed renewal before enabling it.
+to decide whether reconciliation is needed. The current runtime requests a
+grant for profile read and another for receipt write; it does not refresh a
+grant during a long single S3/KMS operation. Previously issued grants remain
+usable for up to 15 minutes after withdrawal, so the route stays disabled.
 
 ## Required staging proof
 
@@ -71,8 +86,12 @@ work below the credential lifetime or add reviewed renewal before enabling it.
    task role has no S3/KMS access, while the data role has only the intended
    bucket/key ceiling.
 2. Mint two synthetic candidates and verify that one task's temporary
-   credentials cannot Get/Put the other's S3 key or unwrap its KMS data key.
-3. Revoke consent and payment, then show renewal fails. Stop the task and
+   credentials cannot Get the other's S3 input, Put to any input, Put to the
+   other candidate/run's receipt prefix, or unwrap its KMS data key.
+3. Confirm the synthetic run and try to obtain a new grant with the old
+   capability and lease token; it must fail. Repeat after lease expiry and
+   after a stale owner token. Revoke consent and payment, then show renewal
+   fails. Stop the task and
    complete the versioned-artifact deletion drill in issue #243.
 4. Rotate the signing secret, ensure new capabilities use the new key, and
    invalidate old capabilities within their 30-minute maximum lifetime.
