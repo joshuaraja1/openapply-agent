@@ -1,4 +1,5 @@
 import { GetCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
@@ -6,17 +7,46 @@ import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 import { verifyArtifactRunCapability } from "./artifact-credential-broker.js";
 import { DurableApplicationJournal, officialJobKey } from "./durable-journal.js";
 import { requireHostedAccess } from "../hosted/entitlement.js";
+import { verifyTaskTimeOfficialLead, type OfficialPostingFetcher }
+  from "./task-time-official-lead.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const job = z.strictObject({ provider: z.string().trim().min(1).max(200),
   employerId: z.string().trim().min(1).max(200), requisitionId: z.string().trim().min(1).max(200) });
 const syntheticJob = z.strictObject({ provider: z.literal("synthetic"),
   employerId: z.literal("fixture"), requisitionId: z.string().regex(/^[a-zA-Z0-9-]{1,80}$/) });
+const previewLead = z.object({ pk: z.string(), sk: z.literal("VERIFIED"), status: z.literal("open"),
+  leadId: uuid, job, jobKey: z.string().regex(/^JOB#[a-f0-9]{64}$/),
+  canonicalUrl: z.url(), expiresAt: z.number().int().positive(),
+  sourceKey: z.string().regex(/^SOURCE#[a-f0-9]{64}$/),
+  verifiedAt: z.string().datetime(), verifiedAtEpoch: z.number().int().nonnegative(),
+  provenance: z.object({ kind: z.literal("official-ats-api"),
+    provider: z.enum(["greenhouse", "ashby", "lever", "smartrecruiters"]),
+    sourceUrl: z.url(), title: z.string().min(1).max(300),
+    company: z.string().min(1).max(300), location: z.string().nullable().default(null),
+    descriptionText: z.string().min(1).max(100_000),
+    sourcePublishedAt: z.string().nullable() }) });
+const previewProfile = z.object({ pk: z.string(), sk: z.string(),
+  status: z.literal("verified"), candidateId: uuid, artifactId: uuid,
+  subjectId: z.string().min(1).max(160), applicationProfileReady: z.literal(true) });
+
+function leadFingerprint(value: z.output<typeof previewLead>): string {
+  const p = value.provenance;
+  return createHash("sha256").update(JSON.stringify([
+    value.pk, value.sk, value.status, value.leadId,
+    value.job.provider, value.job.employerId, value.job.requisitionId,
+    value.jobKey, value.canonicalUrl, value.expiresAt, value.sourceKey,
+    value.verifiedAt, value.verifiedAtEpoch,
+    p.kind, p.provider, p.sourceUrl, p.title, p.company, p.location,
+    p.descriptionText, p.sourcePublishedAt,
+  ])).digest("hex");
+}
 const request = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("ownsRun") }),
   z.strictObject({ operation: z.literal("hasCurrentConsent") }),
   z.strictObject({ operation: z.literal("loadIdentity") }),
   z.strictObject({ operation: z.literal("loadProfileArtifactId") }),
+  z.strictObject({ operation: z.literal("loadPreviewBinding"), leaseToken: uuid }),
   z.strictObject({ operation: z.literal("loadEntitlements"), subjectId: z.string().trim().min(1).max(128) }),
   z.strictObject({ operation: z.literal("acquireLease") }),
   z.strictObject({ operation: z.literal("renewLease"), leaseToken: uuid }),
@@ -40,7 +70,8 @@ export type RunStateRequest = z.infer<typeof request>;
  * launch capability rather than accepting a caller-supplied partition key. */
 export async function executeRunStateRequest(input: unknown, capability: string,
   secret: Uint8Array, nowEpoch: number, db: DynamoDBDocumentClient,
-  config: { ledgerTable: string; entitlementTable: string }): Promise<unknown> {
+  config: { ledgerTable: string; entitlementTable: string },
+  previewDependencies: { fetchPostings?: OfficialPostingFetcher; clock?: () => number } = {}): Promise<unknown> {
   const command = request.parse(input);
   const scope = verifyArtifactRunCapability(capability, secret, nowEpoch);
   const pk = `CANDIDATE#${scope.candidateId}`;
@@ -68,6 +99,53 @@ export async function executeRunStateRequest(input: unknown, capability: string,
     case "hasCurrentConsent": return admission.hasCurrentConsent(scope.candidateId, scope.runId);
     case "loadIdentity": return run;
     case "loadProfileArtifactId": return admission.loadProfileArtifactId(scope.candidateId, scope.runId);
+    case "loadPreviewBinding": {
+      const binding = await admission.loadPreviewRun(scope.candidateId, scope.runId);
+      const eligible = () => admission.hasArtifactGrantEligibility(scope.candidateId, scope.runId,
+        command.leaseToken, Math.floor((previewDependencies.clock?.() ?? Date.now()) / 1000));
+      if (!await eligible()) throw new Error("Preview run lease unavailable");
+      if ((await journal.readSubmission(scope.candidateId, binding.job)).status !== "not_started") {
+        throw new Error("Preview run has a submission intent");
+      }
+      requireHostedAccess(binding.subjectId, await billing.loadEntitlements(binding.subjectId));
+      const leadKey = { pk: `LEAD#${binding.leadId}`, sk: "VERIFIED" };
+      const profileKey = { pk: `CANDIDATE#${scope.candidateId}`,
+        sk: `PROFILE#${binding.profileArtifactId}` };
+      const readInputs = async () => {
+        const [leadResult, profileResult] = await Promise.all([
+          db.send(new GetCommand({ TableName: config.ledgerTable,
+            Key: leadKey, ConsistentRead: true })),
+          db.send(new GetCommand({ TableName: config.ledgerTable,
+            Key: profileKey, ConsistentRead: true })),
+        ]);
+        const lead = previewLead.parse(leadResult.Item);
+        const profile = previewProfile.parse(profileResult.Item);
+        if (lead.pk !== leadKey.pk || lead.leadId !== binding.leadId
+          || lead.jobKey !== binding.jobKey || officialJobKey(lead.job) !== binding.jobKey
+          || profile.pk !== profileKey.pk || profile.sk !== profileKey.sk
+          || profile.candidateId !== scope.candidateId
+          || profile.artifactId !== binding.profileArtifactId
+          || profile.subjectId !== binding.subjectId) {
+          throw new Error("Preview run inputs changed");
+        }
+        return lead;
+      };
+      const lead = await readInputs();
+      const now = new Date(previewDependencies.clock?.() ?? Date.now());
+      const current = await verifyTaskTimeOfficialLead(lead, binding.job, now,
+        previewDependencies.fetchPostings);
+      const finalEpoch = Math.floor((previewDependencies.clock?.() ?? Date.now()) / 1000);
+      verifyArtifactRunCapability(capability, secret, finalEpoch);
+      const latest = await readInputs();
+      if (leadFingerprint(latest) !== leadFingerprint(lead)
+        || latest.expiresAt <= finalEpoch || !await eligible()
+        || (await journal.readSubmission(scope.candidateId, binding.job)).status !== "not_started") {
+        throw new Error("Preview run changed during official revalidation");
+      }
+      requireHostedAccess(binding.subjectId,
+        await billing.loadEntitlements(binding.subjectId), new Date(finalEpoch * 1000));
+      return { lead: current, profileArtifactId: binding.profileArtifactId };
+    }
     case "loadEntitlements":
       if (command.subjectId !== run.subjectId) throw new Error("Billing subject scope mismatch");
       return billing.loadEntitlements(run.subjectId);

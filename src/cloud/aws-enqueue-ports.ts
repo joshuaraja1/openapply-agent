@@ -12,6 +12,7 @@ const runRow = z.object({
   subjectId: z.string().trim().min(1).max(128),
   consentVersion: z.number().int().positive(),
   profileArtifactId: uuid,
+  leadId: uuid.optional(), jobKey: z.string().regex(/^JOB#[a-f0-9]{64}$/).optional(),
   job: z.object({ provider: jobPart, employerId: jobPart,
     requisitionId: jobPart }),
 });
@@ -65,6 +66,17 @@ export class DynamoHostedRunAdmission {
     const row = await this.readRun(candidateId, runId);
     if (!row) throw new Error("Run unavailable");
     return row.profileArtifactId;
+  }
+
+  /** Preview-only metadata from the immutable trusted run, never an SQS body. */
+  async loadPreviewRun(candidateId: string, runId: string) {
+    const row = await this.readRun(candidateId, runId);
+    if (!row?.leadId || !row.jobKey || row.jobKey !== officialJobKey(row.job)) {
+      throw new Error("Trusted preview run binding unavailable");
+    }
+    return { candidateId: row.candidateId, runId: row.runId,
+      subjectId: row.subjectId, job: row.job, jobKey: row.jobKey,
+      leadId: row.leadId, profileArtifactId: row.profileArtifactId };
   }
 
   async hasCurrentConsent(candidateId: string, runId: string): Promise<boolean> {

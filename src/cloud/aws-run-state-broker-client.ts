@@ -12,6 +12,20 @@ const submission = z.strictObject({ status: z.enum(["not_started", "confirmed", 
   receiptArtifactId: uuid.optional(), receiptSha256: z.string().optional(), runId: uuid.optional() });
 const dispatch = z.strictObject({ body: z.string().min(1).max(1024),
   state: z.enum(["queued", "launched"]) });
+const previewBinding = z.strictObject({
+  profileArtifactId: uuid,
+  lead: z.object({ pk: z.string(), sk: z.literal("VERIFIED"), status: z.literal("open"),
+    leadId: uuid, job, jobKey: z.string().regex(/^JOB#[a-f0-9]{64}$/),
+    canonicalUrl: z.url(), expiresAt: z.number().int().positive(),
+    sourceKey: z.string().regex(/^SOURCE#[a-f0-9]{64}$/),
+    verifiedAt: z.string().datetime(), verifiedAtEpoch: z.number().int().nonnegative(),
+    provenance: z.object({ kind: z.literal("official-ats-api"),
+      provider: z.enum(["greenhouse", "ashby", "lever", "smartrecruiters"]),
+      sourceUrl: z.url(), title: z.string().min(1).max(300),
+      company: z.string().min(1).max(300), location: z.string().nullable().default(null),
+      descriptionText: z.string().min(1).max(100_000),
+      sourcePublishedAt: z.string().nullable() }) }),
+});
 
 /** Only this broker Lambda is callable by the browser task role; no raw Dynamo
  * commands, partition keys, or update expressions cross this RPC boundary. */
@@ -19,6 +33,7 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
   capability: string, scope: { candidateId: string; runId: string }):
   Pick<CloudRunPorts, "billing" | "authorization" | "runRecords" | "journal"> & {
     dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void> };
+    preview: { loadBinding(leaseToken: string): Promise<z.infer<typeof previewBinding>> };
     syntheticAudit: {
       recordFinalClick(candidate: string, token: string, target: z.infer<typeof syntheticJob>): Promise<boolean>;
       readClickAttempts(candidate: string, target: z.infer<typeof syntheticJob>): Promise<number>;
@@ -36,8 +51,9 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
     const result = await lambda.send(new InvokeCommand({ FunctionName: functionArn,
       InvocationType: "RequestResponse", Payload: Buffer.from(JSON.stringify({
         kind: "run-state", capability, request: command }), "utf8") }));
+    const maxPayload = command.operation === "loadPreviewBinding" ? 160_000 : 32_000;
     if (result.StatusCode !== 200 || result.FunctionError || !result.Payload
-      || result.Payload.byteLength > 32_000) throw new Error("Run state broker unavailable");
+      || result.Payload.byteLength > maxPayload) throw new Error("Run state broker unavailable");
     try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.Payload)); }
     catch { throw new Error("Run state broker unavailable"); }
   }
@@ -82,6 +98,10 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
       async read() { return dispatch.parse(await call({ operation: "readDispatch" })); },
       async markCompleted() { await call({ operation: "markDispatchCompleted" }); },
     },
+    preview: { async loadBinding(leaseToken) {
+      return previewBinding.parse(await call({ operation: "loadPreviewBinding",
+        leaseToken: uuid.parse(leaseToken) }));
+    } },
     syntheticAudit: {
       async recordFinalClick(candidate, token, target) { exact(candidate);
         return z.boolean().parse(await call({ operation: "recordSyntheticFinalClick",
