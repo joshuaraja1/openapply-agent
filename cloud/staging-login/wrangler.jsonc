@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "openapply-staging-login",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-11-26",
+  "workers_dev": true,
+  "observability": { "enabled": true, "traces": { "enabled": true } },
+  "assets": {
+    "directory": "../staging-login-dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+}

@@ -16,6 +16,7 @@ const loginDomain = process.env.OPENAPPLY_COGNITO_LOGIN_DOMAIN;
 const appOrigin = process.env.OPENAPPLY_STAGING_ORIGIN ?? 'https://staging.openapplyagent.xyz';
 const configured = issuer && clientId && loginDomain;
 await writeFile(resolve(target, 'config.json'), JSON.stringify(configured
-  ? { issuer, clientId, loginDomain, appOrigin }
-  : { issuer: '', clientId: '', loginDomain: '', appOrigin }) + '\n');
+  ? { issuer, clientId, loginDomain, appOrigin,
+    checkoutEnabled: process.env.OPENAPPLY_STAGING_CHECKOUT_ENABLED === 'true' }
+  : { issuer: '', clientId: '', loginDomain: '', appOrigin, checkoutEnabled: false }) + '\n');
 console.log(`Built staging login site (${configured ? 'configured' : 'setup pending'}).`);

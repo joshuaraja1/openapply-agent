@@ -16,7 +16,11 @@
       <button id="sign-in" hidden>Sign in or create account</button>
       <button id="sign-out" hidden>Sign out</button>
     </div>
-    <p class="note">This is a private test. Applications and payments are unavailable here.</p>
+    <div class="actions" id="checkout-actions" hidden>
+      <button data-plan="monthly">Test $39 monthly checkout</button>
+      <button data-plan="semester">Test $129 semester checkout</button>
+    </div>
+    <p class="note">Private test environment. Checkout uses Stripe test mode; no real card is charged.</p>
   </main>
 </body>
 </html>
