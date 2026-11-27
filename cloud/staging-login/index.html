@@ -51,9 +51,9 @@
         </fieldset>
         <fieldset>
           <legend>Facts you approve for applications</legend>
-          <p class="note">Write exact facts you can stand behind. Do not add demographic answers here; those require a separate choice on each employer form.</p>
+          <p class="note">Write exact facts you can stand behind. For each fact, add the skills it actually used after a |, separated by commas. Example: Built a dashboard | TypeScript, SQL. Review each fact and its tags before saving. Do not add demographic answers here; those require a separate choice on each employer form.</p>
           <label>Skills, one per line<textarea name="skills" maxlength="4000"></textarea></label>
-          <label>Education facts, one per line<textarea name="educationFacts" maxlength="4000" placeholder="BS in Computer Science, Example University, expected May 2027"></textarea></label>
+          <label>Education facts with skill tags, one per line<textarea name="educationFacts" maxlength="4000" placeholder="BS in Computer Science, Example University, expected May 2027 | Python"></textarea></label>
           <div id="experience-list"></div>
           <button id="add-experience" type="button" class="secondary">Add work experience</button>
           <div id="project-list"></div>
@@ -71,7 +71,7 @@
           <label>Employment type<input name="employmentType" required maxlength="300" placeholder="Full-time, internship, contract, or other"></label>
           <label>Start date<input name="start" required maxlength="300"></label>
           <label>End date or Present<input name="end" required maxlength="300"></label>
-          <label>Achievements, one factual statement per line<textarea name="claims" required maxlength="4000"></textarea></label>
+          <label>Achievements with skill tags, one factual statement per line<textarea name="claims" required maxlength="4000" placeholder="Built a dashboard for 3 teams | TypeScript, SQL"></textarea></label>
           <button type="button" class="secondary remove-entry">Remove experience</button>
         </fieldset>
       </template>
@@ -80,7 +80,7 @@
           <legend>Project</legend>
           <label>Project name<input name="name" required maxlength="300"></label>
           <label>Project URL (optional)<input name="url" type="url" inputmode="url"></label>
-          <label>What you built or measured, one factual statement per line<textarea name="claims" required maxlength="4000"></textarea></label>
+          <label>What you built or measured with skill tags, one factual statement per line<textarea name="claims" required maxlength="4000" placeholder="Built a search tool | Python, SQL"></textarea></label>
           <button type="button" class="secondary remove-entry">Remove project</button>
         </fieldset>
       </template>

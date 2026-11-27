@@ -76,7 +76,7 @@ describe("candidate onboarding", () => {
       identity: { fullName: "Avery Example", location: "Chicago", email: "avery@example.test",
         phone: "555-0100" },
       authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: false },
-      skills: ["TypeScript"], education: ["BS Computer Science, Example University, May 2026"],
+      skills: ["TypeScript"], education: [{ claim: "BS Computer Science, Example University, May 2026", skills: ["Python"] }],
       experience: [], projects: [],
     };
     await saveCandidateOnboarding("sub-1", { ...input, applicationFacts }, test.deps);
@@ -99,7 +99,7 @@ describe("candidate onboarding", () => {
       applicationFacts: { identity: { fullName: "Avery Example", location: "Chicago",
         email: "avery@example.test", phone: "555-0100" },
       authorization: { countries: ["United States"], sponsorshipRequiredNowOrFuture: true },
-      skills: [], education: ["BS Computer Science"], experience: [], projects: [] } },
+      skills: [], education: [{ claim: "BS Computer Science", skills: ["Python"] }], experience: [], projects: [] } },
     test.deps)).rejects.toThrow();
     expect(test.markers.has(changedId)).toBe(false);
   });

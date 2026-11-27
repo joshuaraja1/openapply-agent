@@ -41,6 +41,13 @@ export function attachCandidateSetup(auth) {
   void refreshPlan();
 
   const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const taggedFacts = value => lines(value).map(line => {
+    const divider = line.lastIndexOf(' | ');
+    if (divider < 1) return null;
+    const claim = line.slice(0, divider).trim();
+    const skills = line.slice(divider + 3).split(',').map(skill => skill.trim());
+    return claim && skills.length <= 12 && skills.every(Boolean) ? { claim, skills } : null;
+  });
   const invalidate = () => { pending = null; review.hidden = true; };
   const value = (row, name) => row.querySelector(`[name="${name}"]`).value.trim();
   const optionalUrl = (row, name) => {
@@ -50,10 +57,10 @@ export function attachCandidateSetup(auth) {
   const experiences = () => [...form.querySelectorAll('.experience-entry')].map(row => ({
     employer: value(row, 'employer'), title: value(row, 'title'),
     employmentType: value(row, 'employmentType'), start: value(row, 'start'),
-    end: value(row, 'end'), claims: lines(value(row, 'claims')),
+    end: value(row, 'end'), claims: taggedFacts(value(row, 'claims')),
   }));
   const projects = () => [...form.querySelectorAll('.project-entry')].map(row => ({
-    name: value(row, 'name'), ...optionalUrl(row, 'url'), claims: lines(value(row, 'claims')),
+    name: value(row, 'name'), ...optionalUrl(row, 'url'), claims: taggedFacts(value(row, 'claims')),
   }));
   form.addEventListener('input', invalidate);
   for (const kind of ['experience', 'project']) {
@@ -82,7 +89,7 @@ export function attachCandidateSetup(auth) {
     const locations = lines(String(data.get('locations') ?? ''));
     const countries = lines(String(data.get('authorizedCountries') ?? ''));
     const skills = lines(String(data.get('skills') ?? ''));
-    const education = lines(String(data.get('educationFacts') ?? ''));
+    const education = taggedFacts(String(data.get('educationFacts') ?? ''));
     const experience = experiences();
     const projectFacts = projects();
     if (!roles.length || !locations.length || !countries.length
@@ -94,6 +101,11 @@ export function attachCandidateSetup(auth) {
     }
     if (!education.length && !experience.length && !projectFacts.length) {
       status.textContent = 'Enter at least one education, experience, or project fact.';
+      return;
+    }
+    if (education.includes(null) || experience.some(item => item.claims.includes(null))
+      || projectFacts.some(item => item.claims.includes(null))) {
+      status.textContent = 'Each fact needs its own accurate skill tags after a |, separated by commas.';
       return;
     }
     const sponsorshipRequiredNowOrFuture = data.get('sponsorship') === 'yes';
@@ -128,11 +140,11 @@ export function attachCandidateSetup(auth) {
       `Authorized countries: ${pending.workAuthorization}`,
       `Needs sponsorship: ${pending.sponsorshipRequiredNowOrFuture ? 'Yes' : 'No'}`,
       `Skills: ${skills.join('; ') || 'None entered'}`,
-      ...education.map(text => `Education fact: ${text}`),
+      ...education.map(item => `Education fact: ${item.claim} [skills used: ${item.skills.join(', ')}]`),
       ...experience.flatMap(item => [`Experience: ${item.employer} — ${item.title} (${item.employmentType}, ${item.start} to ${item.end})`,
-        ...item.claims.map(text => `  Achievement: ${text}`)]),
+        ...item.claims.map(claim => `  Achievement: ${claim.claim} [skills used: ${claim.skills.join(', ')}]`)]),
       ...projectFacts.flatMap(item => [`Project: ${item.name}${item.url ? ` (${item.url})` : ''}`,
-        ...item.claims.map(text => `  Project fact: ${text}`)]),
+        ...item.claims.map(claim => `  Project fact: ${claim.claim} [skills used: ${claim.skills.join(', ')}]`)]),
       `Master résumé: ${resume.name}`,
       ...(transcript instanceof File && transcript.size ? [`Transcript: ${transcript.name}`] : []),
     ].join('\n');

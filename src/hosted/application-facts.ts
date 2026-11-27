@@ -4,6 +4,7 @@ import { candidateProfileSchema, type CandidateProfile } from "../candidate/sche
 const fact = z.string().trim().min(1).max(300).refine(value => !/\{\{[^{}]*\}\}/.test(value),
   "Resolve placeholders before approving a fact");
 const httpsUrl = z.url().refine(value => new URL(value).protocol === "https:", "Use an HTTPS URL");
+const taggedFact = z.strictObject({ claim: fact, skills: z.array(fact).min(1).max(12) });
 
 /** Exact facts entered by the job seeker. PDF text is never promoted into this schema. */
 export const applicationFactsSchema = z.strictObject({
@@ -16,13 +17,13 @@ export const applicationFactsSchema = z.strictObject({
     sponsorshipRequiredNowOrFuture: z.boolean(),
   }),
   skills: z.array(fact).max(80),
-  education: z.array(fact).max(12),
+  education: z.array(taggedFact).max(12),
   experience: z.array(z.strictObject({
     employer: fact, title: fact, employmentType: fact, start: fact, end: fact,
-    claims: z.array(fact).min(1).max(12),
+    claims: z.array(taggedFact).min(1).max(12),
   })).max(12),
   projects: z.array(z.strictObject({
-    name: fact, url: httpsUrl.optional(), claims: z.array(fact).min(1).max(12),
+    name: fact, url: httpsUrl.optional(), claims: z.array(taggedFact).min(1).max(12),
   })).max(12),
 }).superRefine((input, context) => {
   const count = input.education.length + input.experience.reduce((n, item) => n + item.claims.length, 0)
@@ -35,8 +36,8 @@ export type ApplicationFacts = z.infer<typeof applicationFactsSchema>;
 /** Candidate-reviewed assertions are usable for matching and writing, never treated as third-party verification. */
 export function approvedApplicationProfile(submissionId: string, input: ApplicationFacts): CandidateProfile {
   const facts = applicationFactsSchema.parse(input);
-  const claim = (category: string, index: number, text: string) => ({
-    id: `${submissionId}:${category}:${index}`, claim: text, skills: [], metrics: [],
+  const claim = (category: string, index: number, entered: z.infer<typeof taggedFact>) => ({
+    id: `${submissionId}:${category}:${index}`, claim: entered.claim, skills: entered.skills, metrics: [],
     evidence: [{ source: "candidate-reviewed-intake",
       uri: `urn:openapply:onboarding:${submissionId}#${category}-${index}` }],
     status: "user-confirmed" as const,
@@ -45,14 +46,14 @@ export function approvedApplicationProfile(submissionId: string, input: Applicat
   return candidateProfileSchema.parse({
     version: 1, identity: facts.identity, authorization: facts.authorization,
     skills: { general: facts.skills },
-    education: facts.education.map((text, index) => claim("education", index, text)),
+    education: facts.education.map((entered, index) => claim("education", index, entered)),
     experience: facts.experience.map((item, index) => ({
       employer: item.employer, title: item.title, employmentType: item.employmentType,
       start: item.start, end: item.end,
-      claims: item.claims.map((text, claimIndex) => claim(`experience-${index}`, claimIndex, text)),
+      claims: item.claims.map((entered, claimIndex) => claim(`experience-${index}`, claimIndex, entered)),
     })),
     projects: facts.projects.map((item, index) => ({ name: item.name, url: item.url,
-      claims: item.claims.map((text, claimIndex) => claim(`project-${index}`, claimIndex, text)) })),
+      claims: item.claims.map((entered, claimIndex) => claim(`project-${index}`, claimIndex, entered)) })),
     quarantinedClaims: [],
   });
 }

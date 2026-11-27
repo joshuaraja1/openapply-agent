@@ -30,14 +30,22 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("staging application 
         graduationOrExperience: "May 2026", fullName: "Avery Example",
         applicationEmail: "avery@example.test", phone: "555-0100",
         currentLocation: "Chicago", authorizedCountries: "United States",
-        educationFacts: "BS Computer Science, Example University" })) {
+        educationFacts: "BS Computer Science, Example University | Python" })) {
         await page.locator(`[name="${name}"]`).fill(value);
       }
       await page.locator('[name="sponsorship"]').selectOption("no");
       await page.locator('[name="masterResume"]').setInputFiles({ name: "resume.pdf",
         mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.7\ntest") });
+      await page.getByRole("button", { name: "Add project" }).click();
+      await page.locator('.project-entry [name="name"]').fill('Search project');
+      await page.locator('.project-entry [name="claims"]').fill('Built a search tool');
+      await page.getByRole("button", { name: "Review my answers" }).click();
+      expect(await page.locator('#setup-status').textContent()).toContain('Each fact needs its own accurate skill tags');
+      expect(await page.locator('#setup-review').isVisible()).toBe(false);
+      await page.locator('.project-entry [name="claims"]').fill('Built a search tool | TypeScript, SQL');
       await page.getByRole("button", { name: "Review my answers" }).click();
       expect(await page.locator("#setup-summary").textContent()).toContain("Needs sponsorship: No");
+      expect(await page.locator("#setup-summary").textContent()).toContain("Built a search tool [skills used: TypeScript, SQL]");
       for (const id of ["review-confirmed", "storage-consent", "automation-consent"]) {
         await page.locator(`#${id}`).check();
       }
@@ -47,7 +55,8 @@ describe.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")("staging application 
       expect(submitted).toMatchObject({ sponsorshipRequiredNowOrFuture: false,
         applicationFacts: { authorization: { countries: ["United States"],
           sponsorshipRequiredNowOrFuture: false },
-          education: ["BS Computer Science, Example University"] } });
+          education: [{ claim: "BS Computer Science, Example University", skills: ["Python"] }],
+          projects: [{ name: 'Search project', claims: [{ claim: 'Built a search tool', skills: ['TypeScript', 'SQL'] }] }] } });
     } finally { await browser.close(); }
   });
 });
