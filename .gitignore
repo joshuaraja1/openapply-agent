@@ -1,5 +1,6 @@
 node_modules/
 dist/
+cloud/staging-login-dist/
 runtime-package-lock.json
 coverage/
 .env
