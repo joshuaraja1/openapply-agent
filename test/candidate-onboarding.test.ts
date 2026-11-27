@@ -12,6 +12,7 @@ const input = { version: 1, submissionId, careerStage: "new-graduate", targetRol
 function fixture() {
   const objects = new Map<string, Buffer>();
   const markers = new Map<string, { status: string; subjectId: string; digest: string }>();
+  const uploads = new Set<string>();
   let deleted = false;
   const deps: OnboardingDeps = {
     candidateIdForSubject: () => candidateId,
@@ -28,6 +29,14 @@ function fixture() {
     },
     markers: {
       async isDeleted() { return deleted; },
+      async beginUpload(_candidate, artifactId) {
+        if (deleted || uploads.has(artifactId)) throw new Error("Upload unavailable");
+        uploads.add(artifactId);
+        return artifactId;
+      },
+      async endUpload(_candidate, artifactId, leaseId) {
+        if (leaseId !== artifactId || !uploads.delete(artifactId)) throw new Error("Unknown upload");
+      },
       async get(_candidate, artifactId) { return markers.get(artifactId) ?? null; },
       async createPending(_candidate, artifactId, subjectId, digest) {
         if (deleted || markers.has(artifactId)) throw new Error("Marker exists or deleted");
@@ -40,7 +49,7 @@ function fixture() {
       },
     },
   };
-  return { deps, objects, markers, setDeleted(value: boolean) { deleted = value; } };
+  return { deps, objects, markers, uploads, setDeleted(value: boolean) { deleted = value; } };
 }
 
 describe("candidate onboarding", () => {
@@ -55,6 +64,7 @@ describe("candidate onboarding", () => {
     expect(test.objects.get(profile.masterResume.artifactId)!.toString()).toBe("%PDF-1.7\nexample");
     expect(await saveCandidateOnboarding("sub-1", input, test.deps)).toEqual({ candidateId, artifactId: submissionId });
     expect(test.objects.size).toBe(2);
+    expect(test.uploads.size).toBe(0);
   });
 
   it("rejects unconsented or malformed uploads without creating a marker", async () => {
@@ -70,6 +80,20 @@ describe("candidate onboarding", () => {
     test.setDeleted(true);
     await expect(saveCandidateOnboarding("sub-1", input, test.deps)).rejects.toThrow("unavailable");
     expect(test.objects.size).toBe(0);
+  });
+
+  it("releases its upload lease and leaves no verified marker if deletion starts mid-upload", async () => {
+    const test = fixture();
+    const originalPut = test.deps.vault.put.bind(test.deps.vault);
+    let writes = 0;
+    test.deps.vault.put = async (...args) => {
+      await originalPut(...args);
+      if (++writes === 1) test.setDeleted(true);
+    };
+    await expect(saveCandidateOnboarding("sub-1", input, test.deps)).rejects.toThrow("unavailable");
+    expect(test.markers.get(submissionId)?.status).toBe("pending");
+    expect(test.uploads.size).toBe(0);
+    expect(test.objects.size).toBeGreaterThan(0);
   });
 
   it("does not let a different subject reuse a submission ID", async () => {

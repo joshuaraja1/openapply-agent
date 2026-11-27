@@ -11,10 +11,11 @@ export default {
     if (url.pathname.startsWith('/api/')) {
       const onboarding = url.pathname === '/api/candidates/onboarding';
       const plan = url.pathname === '/api/candidates/plan';
-      if ((!onboarding && !plan && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
+      const deletion = url.pathname === '/api/candidates/delete';
+      if ((!onboarding && !plan && !deletion && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      const apiOrigin = onboarding || plan ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
+      const apiOrigin = onboarding || plan || deletion ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
       if (!apiOrigin) {
         return new Response('API not configured', { status: 503, headers: securityHeaders });
       }

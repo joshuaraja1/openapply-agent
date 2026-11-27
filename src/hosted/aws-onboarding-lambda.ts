@@ -6,8 +6,10 @@ import { candidateIdForSubject } from "../cloud/hosted-run-creator.js";
 import { CandidateVault } from "../cloud/candidate-vault.js";
 import { KmsDataKeys, S3ArtifactStore } from "../cloud/aws-artifact-store.js";
 import { DynamoOnboardingMarkers } from "./aws-onboarding-store.js";
+import { DynamoCandidateDeletionStore } from "./aws-candidate-deletion-store.js";
 import { DynamoCandidatePlanStatus } from "./aws-plan-status.js";
 import { handleCandidateOnboardingHttp } from "./candidate-onboarding-http.js";
+import { handleCandidateDeletionHttp } from "./candidate-deletion-http.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 
@@ -31,11 +33,16 @@ function runtime() {
   const vault = new CandidateVault(new KmsDataKeys(new KMSClient({}), required("CANDIDATE_KMS_KEY_ARN")),
     new S3ArtifactStore(new S3Client({}), required("PRIVATE_ARTIFACT_BUCKET")));
   const markers = new DynamoOnboardingMarkers(db, required("RUN_LEDGER_TABLE_NAME"));
+  const deletion = new DynamoCandidateDeletionStore(db, required("RUN_LEDGER_TABLE_NAME"));
   const plans = new DynamoCandidatePlanStatus(db, required("ENTITLEMENT_TABLE_NAME"));
-  return { handleRequest: (request: Request) => handleCandidateOnboardingHttp(request, {
+  const candidateId = (subject: string) => candidateIdForSubject(issuer, subject);
+  return { handleRequest: (request: Request) => new URL(request.url).pathname === "/api/candidates/delete"
+    ? handleCandidateDeletionHttp(request, { appOrigin, verifySubject, store: deletion, vault,
+      candidateIdForSubject: candidateId })
+    : handleCandidateOnboardingHttp(request, {
     appOrigin, verifySubject, vault, markers,
     loadEntitlements: (subject: string) => plans.loadEntitlements(subject),
-    candidateIdForSubject: (subject: string) => candidateIdForSubject(issuer, subject),
+    candidateIdForSubject: candidateId,
   }), processReady: async () => ({ processed: 0, deferred: 0 }) };
 }
 

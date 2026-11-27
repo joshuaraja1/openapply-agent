@@ -32,14 +32,15 @@ describe('staging login Worker', () => {
     expect(onboarding.status).toBe(503);
   });
 
-  it('isolates onboarding and plan requests to their dedicated API origin', async () => {
+  it('isolates onboarding, plan and deletion requests to their dedicated API origin', async () => {
     const env = { ...assets(), AWS_API_ORIGIN: 'https://billing.example.com',
       ONBOARDING_API_ORIGIN: 'https://candidate.example.com' };
     const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
       new Response('{"status":"inactive"}', { status: 200 }));
     vi.stubGlobal('fetch', upstream);
     try {
-      for (const path of ['/api/candidates/onboarding', '/api/candidates/plan']) {
+      for (const path of ['/api/candidates/onboarding', '/api/candidates/plan',
+        '/api/candidates/delete']) {
         const response = await worker.fetch(new Request(`https://test.workers.dev${path}`, {
           method: 'POST', headers: { origin: 'https://test.workers.dev',
             authorization: 'Bearer a.b.c', 'content-type': 'application/json' }, body: '{}',
@@ -49,6 +50,7 @@ describe('staging login Worker', () => {
       expect(upstream.mock.calls.map(call => String(call[0]))).toEqual([
         'https://candidate.example.com/api/candidates/onboarding',
         'https://candidate.example.com/api/candidates/plan',
+        'https://candidate.example.com/api/candidates/delete',
       ]);
     } finally { vi.unstubAllGlobals(); }
   });
