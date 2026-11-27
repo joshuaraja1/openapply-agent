@@ -2,8 +2,18 @@
   "name": "openapply-agent",
   "version": "0.1.0",
   "description": "A privacy-first, human-in-the-loop job discovery and application workflow.",
-  "bin": { "openapply": "dist/src/product-cli.js" },
-  "files": ["dist/src", "templates", "examples", "docs", "README.md", "LICENSE", "runtime-package-lock.json"],
+  "bin": {
+    "openapply": "dist/src/product-cli.js"
+  },
+  "files": [
+    "dist/src",
+    "templates",
+    "examples",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "runtime-package-lock.json"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -38,6 +48,12 @@
     "resume:render": "tsx src/resume/cli.ts",
     "resume:review": "tsx src/resume/review-cli.ts",
     "build": "tsc -p tsconfig.json",
+    "build:hosted-lambda": "esbuild src/hosted/aws-billing-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-billing-lambda.cjs",
+    "staging:login:build": "npm run build && node scripts/build-staging-login.mjs",
+    "build:run-creator-lambda": "esbuild src/hosted/aws-run-creator-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-run-creator-lambda.cjs",
+    "build:onboarding-lambda": "esbuild src/hosted/aws-onboarding-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-onboarding-lambda.cjs",
+    "build:artifact-broker-lambda": "esbuild src/cloud/aws-artifact-credential-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-artifact-credential-lambda.cjs",
+    "build:fargate-launcher-lambda": "esbuild src/cloud/aws-fargate-launcher-lambda.ts --bundle --platform=node --target=node22 --format=cjs --packages=bundle --outfile=dist-hosted/aws-fargate-launcher-lambda.cjs",
     "distribution:smoke": "node --test scripts/assert-package.test.mjs && node scripts/smoke-portable-package.mjs",
     "distribution:staging-smoke": "node --test scripts/staging-user-install.test.mjs",
     "distribution:release-gate-smoke": "node --test scripts/verify-release-bundle.test.mjs",
@@ -54,19 +70,31 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && node --test scripts/stripe-sandbox-smoke.test.mjs && npm run build"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1178.0",
+    "@aws-sdk/client-ecs": "^3.1178.0",
+    "@aws-sdk/client-kms": "^3.1178.0",
+    "@aws-sdk/client-lambda": "^3.1178.0",
+    "@aws-sdk/client-s3": "^3.1178.0",
+    "@aws-sdk/client-secrets-manager": "^3.1178.0",
+    "@aws-sdk/client-sqs": "^3.1178.0",
+    "@aws-sdk/client-sts": "^3.1178.0",
+    "@aws-sdk/lib-dynamodb": "^3.1178.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@napi-rs/canvas": "^1.2.0",
     "@napi-rs/keyring": "^2.1.2",
     "htmlparser2": "^12.0.0",
+    "jose": "^6.2.18",
     "pdfjs-dist": "^6.5.438",
     "playwright": "^1.65.1",
+    "stripe": "^23.2.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "esbuild": "^0.28.2",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",

@@ -1,0 +1,427 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Optional isolated staging candidate onboarding; disabled by default.
+
+Parameters:
+  EnableOnboarding:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EnableCandidateDeletion:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EnableDeletionRetry:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EnableDeletionEcsStop:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EcsClusterArn:
+    Type: String
+    Default: ''
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  AppOrigin:
+    Type: String
+    AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+  CognitoIssuer:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoJwksUrl:
+    Type: String
+  RunLedgerTableName:
+    Type: String
+  EntitlementTableName:
+    Type: String
+  PrivateArtifactBucketName:
+    Type: String
+
+Conditions:
+  OnboardingEnabled: !Equals [!Ref EnableOnboarding, 'true']
+  DeletionEnabled: !And
+    - !Condition OnboardingEnabled
+    - !Equals [!Ref EnableCandidateDeletion, 'true']
+  RetryEnabled: !And
+    - !Condition DeletionEnabled
+    - !Equals [!Ref EnableDeletionRetry, 'true']
+  StopEnabled: !And
+    - !Condition DeletionEnabled
+    - !Equals [!Ref EnableDeletionEcsStop, 'true']
+
+Rules:
+  StopConfiguration:
+    RuleCondition: !Equals [!Ref EnableDeletionEcsStop, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref EnableCandidateDeletion, 'true']
+        AssertDescription: ECS stop requires candidate deletion.
+      - Assert: !Not [!Equals [!Ref EcsClusterArn, '']]
+        AssertDescription: ECS stop requires the staging cluster ARN.
+
+Resources:
+  CandidateDataKey:
+    Type: AWS::KMS::Key
+    Condition: OnboardingEnabled
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: OpenApply staging candidate artifact envelope encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  OnboardingRole:
+    Type: AWS::IAM::Role
+    Condition: OnboardingEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CandidateOnboardingOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem, dynamodb:Query]
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+              - Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !GetAtt CandidateDataKey.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+
+  OnboardingFunction:
+    Type: AWS::Lambda::Function
+    Condition: OnboardingEnabled
+    Properties:
+      FunctionName: openapply-staging-onboarding
+      Runtime: nodejs22.x
+      Handler: aws-onboarding-lambda.handler
+      Role: !GetAtt OnboardingRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: 'false'
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          CANDIDATE_KMS_KEY_ARN: !GetAtt CandidateDataKey.Arn
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  DeletionApiRole:
+    Type: AWS::IAM::Role
+    Condition: DeletionEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  DeletionRetryRole:
+    Type: AWS::IAM::Role
+    Condition: RetryEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  CandidatePurgeRole:
+    Type: AWS::IAM::Role
+    Condition: DeletionEnabled
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt DeletionApiRole.Arn
+                - !If [RetryEnabled, !GetAtt DeletionRetryRole.Arn, !Ref 'AWS::NoValue']
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CandidateVersionPurgeCeiling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucketVersions
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix: 'candidates/*/'
+              - Effect: Allow
+                Action: [s3:DeleteObject, s3:DeleteObjectVersion]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*'
+
+  DeletionLambdaPolicy:
+    Type: AWS::IAM::Policy
+    Condition: DeletionEnabled
+    Properties:
+      PolicyName: CandidateDeletionOnly
+      Roles:
+        - !Ref DeletionApiRole
+        - !If [RetryEnabled, !Ref DeletionRetryRole, !Ref 'AWS::NoValue']
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query]
+            Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !GetAtt CandidatePurgeRole.Arn
+
+  DeletionRetryIndexPolicy:
+    Type: AWS::IAM::Policy
+    Condition: RetryEnabled
+    Properties:
+      PolicyName: CandidateDeletionDueIndex
+      Roles: [!Ref DeletionRetryRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}/index/DeletionDueIndex'
+
+  DeletionEcsStopPolicy:
+    Type: AWS::IAM::Policy
+    Condition: StopEnabled
+    Properties:
+      PolicyName: CandidateDeletionStopTasks
+      Roles:
+        - !Ref DeletionApiRole
+        - !If [RetryEnabled, !Ref DeletionRetryRole, !Ref 'AWS::NoValue']
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [ecs:DescribeTasks, ecs:StopTask]
+            Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/*'
+            Condition:
+              ArnEquals:
+                ecs:cluster: !Ref EcsClusterArn
+
+  DeletionFunction:
+    Type: AWS::Lambda::Function
+    Condition: DeletionEnabled
+    DependsOn: DeletionLambdaPolicy
+    Properties:
+      FunctionName: openapply-staging-candidate-deletion
+      Runtime: nodejs22.x
+      Handler: aws-onboarding-lambda.deletionHandler
+      Role: !GetAtt DeletionApiRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: 'true'
+          FARGATE_DELETION_STOP_ENABLED: !If [StopEnabled, 'true', 'false']
+          ECS_CLUSTER_ARN: !Ref EcsClusterArn
+          CANDIDATE_PURGE_ROLE_ARN: !GetAtt CandidatePurgeRole.Arn
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          CANDIDATE_KMS_KEY_ARN: !GetAtt CandidateDataKey.Arn
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  OnboardingApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: OnboardingEnabled
+    Properties:
+      Name: openapply-staging-onboarding
+      ProtocolType: HTTP
+
+  OnboardingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt OnboardingFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  DeletionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: DeletionEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt DeletionFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  OnboardingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/onboarding'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
+  PlanStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/plan'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
+  CandidateDeletionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: DeletionEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/delete'
+      Target: !Sub 'integrations/${DeletionIntegration}'
+
+  CandidateDeletionStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: DeletionEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'POST /api/candidates/deletion-status'
+      Target: !Sub 'integrations/${DeletionIntegration}'
+
+  DeletionRetryFunction:
+    Type: AWS::Lambda::Function
+    Condition: RetryEnabled
+    DependsOn: [DeletionRetryIndexPolicy, DeletionLambdaPolicy]
+    Properties:
+      FunctionName: openapply-staging-deletion-retry
+      Runtime: nodejs22.x
+      Handler: aws-onboarding-lambda.retryHandler
+      Role: !GetAtt DeletionRetryRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          ONBOARDING_ENABLED: 'true'
+          CANDIDATE_DELETION_ENABLED: 'true'
+          FARGATE_DELETION_STOP_ENABLED: !If [StopEnabled, 'true', 'false']
+          ECS_CLUSTER_ARN: !Ref EcsClusterArn
+          CANDIDATE_PURGE_ROLE_ARN: !GetAtt CandidatePurgeRole.Arn
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          CANDIDATE_KMS_KEY_ARN: !GetAtt CandidateDataKey.Arn
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  DeletionRetryRule:
+    Type: AWS::Events::Rule
+    Condition: RetryEnabled
+    Properties:
+      ScheduleExpression: 'rate(1 minute)'
+      State: ENABLED
+      Targets:
+        - Id: DeletionRetry
+          Arn: !GetAtt DeletionRetryFunction.Arn
+
+  DeletionRetryInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: RetryEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeletionRetryFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DeletionRetryRule.Arn
+
+  OnboardingStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: OnboardingEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 3
+        ThrottlingRateLimit: 1
+
+  OnboardingInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: OnboardingEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/onboarding'
+
+  PlanStatusInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: OnboardingEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/plan'
+
+  CandidateDeletionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeletionEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeletionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/delete'
+
+  CandidateDeletionStatusInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeletionEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DeletionFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/deletion-status'
+
+Outputs:
+  OnboardingApiOrigin:
+    Condition: OnboardingEnabled
+    Value: !GetAtt OnboardingApi.ApiEndpoint
+  CandidateDataKeyArn:
+    Condition: OnboardingEnabled
+    Value: !GetAtt CandidateDataKey.Arn

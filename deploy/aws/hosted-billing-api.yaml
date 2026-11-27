@@ -1,0 +1,478 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Staging-only OpenApply Stripe test billing HTTP and scheduled reconciliation.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  BillingTableName:
+    Type: String
+    Default: openapply-staging-billing
+  EntitlementTableName:
+    Type: String
+    Default: openapply-staging-entitlements
+  StripeApiSecretArn:
+    Type: String
+  StripeReplaySecretArn:
+    Type: String
+  StripeWebhookSecretArn:
+    Type: String
+  WebhookSecretVersion:
+    Type: String
+    Default: bootstrap
+    AllowedPattern: '^[A-Za-z0-9-]{1,128}$'
+  AppOrigin:
+    Type: String
+    AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+  MonthlyPriceId:
+    Type: String
+    AllowedPattern: '^price_[A-Za-z0-9]+$'
+  SemesterPriceId:
+    Type: String
+    AllowedPattern: '^price_[A-Za-z0-9]+$'
+  CognitoIssuer:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoJwksUrl:
+    Type: String
+  ReplayScheduleState:
+    Type: String
+    AllowedValues: [ENABLED, DISABLED]
+    Default: DISABLED
+  EnableApplicationEnqueue:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  EnableApplicationRunCreation:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  RunCreatorCodeKey:
+    Type: String
+    Default: disabled/not-configured.zip
+    MinLength: 1
+  PrivateArtifactBucketName:
+    Type: String
+    Default: ''
+  RunLedgerTableName:
+    Type: String
+    Default: ''
+  ApplicationQueueName:
+    Type: String
+    Default: openapply-staging-application.fifo
+    AllowedPattern: '^openapply-[a-z0-9-]+-application\.fifo$'
+
+  FargateLauncherArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-z-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:openapply-staging-fargate-launcher$'
+
+Conditions:
+  HostedEnqueueEnabled: !Equals [!Ref EnableApplicationEnqueue, 'true']
+  FargateLauncherEnabled: !Not [!Equals [!Ref FargateLauncherArn, '']]
+  HostedRunCreationEnabled: !Equals [!Ref EnableApplicationRunCreation, 'true']
+
+Rules:
+  FargateLauncherConfiguration:
+    RuleCondition: !Not [!Equals [!Ref FargateLauncherArn, '']]
+    Assertions:
+      - Assert: !Equals [!Ref EnableApplicationEnqueue, 'true']
+        AssertDescription: Fargate launcher requires authenticated hosted enqueue.
+  HostedEnqueueConfiguration:
+    RuleCondition: !Equals [!Ref EnableApplicationEnqueue, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
+        AssertDescription: Enqueue requires a durable run ledger table.
+  HostedRunCreationConfiguration:
+    RuleCondition: !Equals [!Ref EnableApplicationRunCreation, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref RunLedgerTableName, '']]
+        AssertDescription: Run creation requires a durable run ledger table.
+      - Assert: !Not [!Equals [!Ref RunCreatorCodeKey, 'disabled/not-configured.zip']]
+        AssertDescription: Run creation requires its separate Lambda package.
+      - Assert: !Not [!Equals [!Ref PrivateArtifactBucketName, '']]
+        AssertDescription: Run creation requires a private artifact bucket.
+  DistinctStripeSecrets:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref StripeApiSecretArn, !Ref StripeReplaySecretArn]]
+        AssertDescription: API and replay must use distinct Stripe test secrets.
+
+Resources:
+  RunCreatorRole:
+    Type: AWS::IAM::Role
+    Condition: HostedRunCreationEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyRunCreation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${PrivateArtifactBucketName}/candidates/*/artifacts/*'
+
+  RunCreatorFunction:
+    Type: AWS::Lambda::Function
+    Condition: HostedRunCreationEnabled
+    Properties:
+      FunctionName: openapply-staging-run-creator
+      Runtime: nodejs22.x
+      Handler: aws-run-creator-lambda.handler
+      Role: !GetAtt RunCreatorRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref RunCreatorCodeKey }
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          RUN_CREATION_ENABLED: 'true'
+          APP_ORIGIN: !Ref AppOrigin
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          PRIVATE_ARTIFACT_BUCKET: !Ref PrivateArtifactBucketName
+
+  RunCreatorIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt RunCreatorFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  RunCreatorRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/applications/runs'
+      Target: !Sub 'integrations/${RunCreatorIntegration}'
+
+  RunCreatorPreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedRunCreationEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/applications/runs'
+      Target: !Sub 'integrations/${RunCreatorIntegration}'
+
+  RunCreatorPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedRunCreationEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RunCreatorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/applications/runs'
+
+  RunCreatorPreflightPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedRunCreationEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref RunCreatorFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/applications/runs'
+
+  BillingApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyBillingSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripeApiSecretArn
+                  - !Ref StripeWebhookSecretArn
+        - PolicyName: OpenApplyApiJournalWrites
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+        - !If
+          - HostedEnqueueEnabled
+          - PolicyName: OpenApplyHostedEnqueue
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: dynamodb:GetItem
+                  Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+                - Effect: Allow
+                  Action: sqs:SendMessage
+                  Resource: !Sub 'arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ApplicationQueueName}'
+          - !Ref AWS::NoValue
+        - !If
+          - FargateLauncherEnabled
+          - PolicyName: OpenApplyInvokeStagingLauncher
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !Ref FargateLauncherArn
+                - Effect: Allow
+                  Action:
+                    - dynamodb:PutItem
+                    - dynamodb:UpdateItem
+                    - dynamodb:ConditionCheckItem
+                  Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+          - !Ref AWS::NoValue
+
+  BillingReplayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyBillingSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripeReplaySecretArn
+                  - !Ref StripeWebhookSecretArn
+        - PolicyName: OpenApplyReconciliationState
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BillingTableName}/index/gsi1'
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+
+  BillingApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: openapply-staging-billing-api
+      Runtime: nodejs22.x
+      Handler: aws-billing-lambda.handler
+      Role: !GetAtt BillingApiRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          STRIPE_MODE: test
+          STRIPE_TEST_SECRET_ARN: !Ref StripeApiSecretArn
+          STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          WEBHOOK_SECRET_VERSION: !Ref WebhookSecretVersion
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          APP_ORIGIN: !Ref AppOrigin
+          MONTHLY_PRICE_ID: !Ref MonthlyPriceId
+          SEMESTER_PRICE_ID: !Ref SemesterPriceId
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+          ENQUEUE_ENABLED: !Ref EnableApplicationEnqueue
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          APPLICATION_QUEUE_URL: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${ApplicationQueueName}'
+          FARGATE_LAUNCHER_ARN: !Ref FargateLauncherArn
+
+  BillingReplayFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: openapply-staging-billing-replay
+      Runtime: nodejs22.x
+      Handler: aws-billing-lambda.scheduledHandler
+      Role: !GetAtt BillingReplayRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          STRIPE_MODE: test
+          STRIPE_TEST_SECRET_ARN: !Ref StripeReplaySecretArn
+          STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          WEBHOOK_SECRET_VERSION: !Ref WebhookSecretVersion
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          APP_ORIGIN: !Ref AppOrigin
+          MONTHLY_PRICE_ID: !Ref MonthlyPriceId
+          SEMESTER_PRICE_ID: !Ref SemesterPriceId
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+
+  BillingHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: openapply-staging-billing
+      ProtocolType: HTTP
+
+  BillingHttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BillingApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  CheckoutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/billing/checkout'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  CheckoutPreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/billing/checkout'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  WebhookRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/billing/stripe-webhook'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  ApplicationEnqueueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedEnqueueEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/applications/enqueue'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  ApplicationEnqueuePreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: HostedEnqueueEnabled
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/applications/enqueue'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  BillingHttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  BillingHttpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/billing/*'
+
+  BillingHttpPreflightPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/billing/checkout'
+
+  ApplicationEnqueuePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedEnqueueEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/applications/enqueue'
+
+  ApplicationEnqueuePreflightPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HostedEnqueueEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/applications/enqueue'
+
+  BillingReplaySchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: openapply-staging-billing-replay
+      ScheduleExpression: rate(1 minute)
+      State: !Ref ReplayScheduleState
+      Targets:
+        - Arn: !GetAtt BillingReplayFunction.Arn
+          Id: BillingReplay
+
+  BillingReplayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingReplayFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BillingReplaySchedule.Arn
+
+Outputs:
+  BillingApiUrl:
+    Value: !GetAtt BillingHttpApi.ApiEndpoint
+  BillingReplayRule:
+    Value: !Ref BillingReplaySchedule

@@ -61,12 +61,24 @@ export async function runApplicationQueue(
       }
       if (typeof claimResult !== "boolean") releaseClaimBeforeBrowser = claimResult.releaseBeforeBrowser;
     }
-    const reservation = await quota.reserve(runDate, job.id, cap);
+    let reservation: Awaited<ReturnType<DailyQuota["reserve"]>>;
+    try {
+      reservation = await quota.reserve(runDate, job.id, cap);
+    } catch (error) {
+      // No browser work or quota reservation happened. A storage error must
+      // not strand a claim this run created before the reservation attempt.
+      await releaseClaimBeforeBrowser?.();
+      throw error;
+    }
     if (reservation === "full") {
+      await releaseClaimBeforeBrowser?.();
       outcomes.push({ jobId: job.id, status: "cap-reached" });
       break;
     }
     if (reservation === "duplicate") {
+      // A different runner may own this job's reservation and already be in
+      // the browser. Retain the canonical claim to prevent another board ID
+      // from entering while that attempt is in flight.
       outcomes.push({ jobId: job.id, status: "duplicate" });
       continue;
     }
