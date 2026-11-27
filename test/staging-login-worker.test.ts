@@ -21,6 +21,17 @@ describe('staging login Worker', () => {
     expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
   });
 
+  it('serves return pages without passing the Stripe session ID to assets', async () => {
+    const env = assets();
+    for (const path of ['/billing/success?session_id=cs_test_secret', '/billing/cancel']) {
+      const response = await worker.fetch(new Request(`https://test.workers.dev${path}`), env);
+      expect(await response.text()).toBe('/index.html');
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+    expect(env.ASSETS.fetch).toHaveBeenCalledTimes(2);
+    expect(env.ASSETS.fetch.mock.calls[0]![0].url).toBe('https://test.workers.dev/index.html');
+  });
+
   it('denies API routes until a hosted API is wired', async () => {
     const env = assets();
     const response = await worker.fetch(new Request('https://test.workers.dev/api/billing/checkout',
@@ -48,6 +59,33 @@ describe('staging login Worker', () => {
       expect(options.headers).toMatchObject({ authorization: 'Bearer a.b.c', origin: 'https://test.workers.dev' });
       expect((options.headers as Record<string, string>).cookie).toBeUndefined();
       expect(new TextDecoder().decode(options.body as Uint8Array)).toBe('{"plan":"monthly"}');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('forwards authenticated same-origin status without a session ID or request body', async () => {
+    const env = { ...assets(), AWS_API_ORIGIN: 'https://aws-api.example.com' };
+    const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
+      new Response('{"active":false}', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    try {
+      const response = await worker.fetch(new Request('https://test.workers.dev/api/billing/status', {
+        headers: { 'sec-fetch-site': 'same-origin', authorization: 'Bearer a.b.c' },
+      }), env);
+      expect(response.status).toBe(200);
+      const [url, options] = upstream.mock.calls[0]!;
+      expect(String(url)).toBe('https://aws-api.example.com/api/billing/status');
+      expect(options.method).toBe('GET');
+      expect(options.body).toBeUndefined();
+      expect(options.headers).toMatchObject({ authorization: 'Bearer a.b.c', origin: 'https://test.workers.dev' });
+      const forged = await worker.fetch(new Request('https://test.workers.dev/api/billing/status?session_id=cs_test_fake', {
+        headers: { 'sec-fetch-site': 'same-origin', authorization: 'Bearer a.b.c' },
+      }), env);
+      expect(forged.status).toBe(400);
+      const crossSite = await worker.fetch(new Request('https://test.workers.dev/api/billing/status', {
+        headers: { 'sec-fetch-site': 'cross-site', authorization: 'Bearer a.b.c' },
+      }), env);
+      expect(crossSite.status).toBe(403);
+      expect(upstream).toHaveBeenCalledTimes(1);
     } finally { vi.unstubAllGlobals(); }
   });
 
