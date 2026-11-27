@@ -52,9 +52,15 @@ Parameters:
     Type: String
     Default: openapply-staging-application.fifo
     AllowedValues: [openapply-staging-application.fifo]
+  LauncherReservedConcurrentExecutions:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: 0 omits a reservation for accounts with the minimum Lambda concurrency quota; the durable slot still limits browser tasks to one.
 
 Conditions:
   LauncherEnabled: !Equals [!Ref EnableFargateLauncher, 'true']
+  LauncherReservationEnabled: !Not [!Equals [!Ref LauncherReservedConcurrentExecutions, 0]]
 
 Rules:
   EnabledConfiguration:
@@ -154,7 +160,7 @@ Resources:
       Handler: aws-fargate-launcher-lambda.handler
       Role: !GetAtt FargateLauncherRole.Arn
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
-      ReservedConcurrentExecutions: 1
+      ReservedConcurrentExecutions: !If [LauncherReservationEnabled, !Ref LauncherReservedConcurrentExecutions, !Ref 'AWS::NoValue']
       MemorySize: 256
       Timeout: 30
       Environment:
