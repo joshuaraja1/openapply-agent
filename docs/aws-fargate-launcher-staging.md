@@ -10,6 +10,8 @@ The first ECS call uses a deterministic token. An ambiguous response retries wit
 
 Each sweep launches pending runs only up to the configured ceiling. The authenticated enqueue path can also trigger the launcher immediately; parallel invocations compete on conditional Dynamo writes, so they cannot overbook a slot. Lowering the ceiling stops new reservations above the new limit but does not kill existing tasks; the sweep still monitors them. Scale the ceiling gradually after measuring queue age, task start failures, Fargate spend, and the rate of paused or uncertain applications. Cloudflare Workers scale the HTTP control plane; they do not host Chromium. This pool is a bounded staging implementation, not a verified production autoscaler.
 
+Before raising a deployment from the legacy one-slot launcher, wait for all old tasks to reach `STOPPED` and for `SLOT#0` to clear. Legacy reservations did not create `ACTIVE_TASK` locks. New reservations create that lock in the same transaction as the slot and run row.
+
 The index scan is bounded to four pages per tick and skips malformed rows while logging only their count. The broker capability is never put in the dispatch row's body, a URL, or a log.
 
 ## Consent withdrawal and deletion

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { DescribeTasksCommand, ListTasksCommand, RunTaskCommand, StopTaskCommand, type ECSClient } from "@aws-sdk/client-ecs";
-import { GetCommand, QueryCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, TransactWriteCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { DynamoFargateLaunchStore, launchQueuedFargateRun, stopCandidateFargateTask,
   stopFargateRun, sweepFargateSlot,
   type FargateLaunchConfig } from "../src/cloud/fargate-launcher.js";
@@ -88,28 +88,27 @@ function harness() {
 describe("bounded Fargate run launch", () => {
   it("reserves separate durable slots for concurrent seekers and stops at the configured ceiling", async () => {
     const occupied = new Set<number>();
+    const activeCandidates = new Set<string>();
     const rows = new Map<string, Record<string, unknown>>();
-    const db = { send: vi.fn(async (command: GetCommand | QueryCommand | TransactWriteCommand) => {
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
       if (command instanceof GetCommand) {
         const key = command.input.Key as { pk: string; sk: string };
         return { Item: rows.get(`${key.pk}:${key.sk}`) };
-      }
-      if (command instanceof QueryCommand) {
-        const pk = command.input.ExpressionAttributeValues?.[":pk"];
-        return { Items: [...rows.values()].filter(row => row.pk === pk
-          && String(row.sk).startsWith("TASK#")) };
       }
       const items = command.input.TransactItems ?? [];
       const slot = items[2]?.Put?.Item as { pk: string; sk: string } | undefined;
       if (!slot) throw new Error("Missing slot reservation");
       const index = Number(slot.sk.slice("SLOT#".length));
-      if (occupied.has(index)) {
+      const row = items[1]?.Put?.Item as Record<string, unknown>;
+      if (occupied.has(index) || activeCandidates.has(String(row.candidateId))) {
         const error = new Error("slot occupied");
         error.name = "TransactionCanceledException";
         throw error;
       }
       occupied.add(index);
-      const row = items[1]?.Put?.Item as Record<string, unknown>;
+      expect(items[3]?.Put?.Item).toMatchObject({
+        pk: row.pk, sk: "ACTIVE_TASK", runId: row.runId });
+      activeCandidates.add(String(row.candidateId));
       rows.set(`${row.pk}:${row.sk}`, row);
       return {};
     }) };

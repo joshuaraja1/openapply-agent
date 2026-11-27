@@ -138,13 +138,6 @@ export class DynamoFargateLaunchStore {
       throw new Error("Invalid Fargate capacity");
     }
     const existing = await this.read(row.candidateId, row.runId);
-    // Also fence pre-migration task rows that have no ACTIVE_TASK record.
-    if (maxConcurrentTasks > 1) {
-      const candidateTasks = await this.listCandidateTasks(row.candidateId);
-      if (candidateTasks.some(task => task.runId !== row.runId && task.state !== "stopped")) {
-        return "busy";
-      }
-    }
     if (existing?.state === "stopped") {
       if (existing.generation >= 2) return "existing";
       const generation = existing.generation + 1;
