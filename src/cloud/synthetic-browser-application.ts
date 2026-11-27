@@ -57,8 +57,14 @@ function only(snapshot: BrowserSnapshot, name: string): string {
  * host. It proves browser ownership and submit-intent sequencing without
  * reaching an employer or exposing a candidate profile to a third party. */
 export class SyntheticBrowserApplication implements ApplicationPort {
+  constructor(private readonly audit?: {
+    recordFinalClick(candidateId: string, runId: string, leaseToken: string,
+      job: z.infer<typeof fixtureJob>): Promise<boolean>;
+    afterFinalClick?(job: z.infer<typeof fixtureJob>): void;
+  }) {}
+
   async prepare(profilePath: string, jobInput: OfficialJobIdentity,
-    candidateId: string): Promise<PreparedApplication> {
+    candidateId: string, context?: { runId: string; leaseToken: string }): Promise<PreparedApplication> {
     const job = fixtureJob.parse(jobInput);
     const file = await stat(profilePath);
     if (!file.isFile() || file.size > 64 * 1024) throw new Error("Reviewed profile is unavailable");
@@ -85,6 +91,7 @@ export class SyntheticBrowserApplication implements ApplicationPort {
       snapshot = await browser.act(only(snapshot, "Sponsorship required"), "select",
         profile.sponsorshipRequiredNowOrFuture ? "Yes" : "No");
       const finalClick = await browser.prepareFinalClick(only(snapshot, "Submit application"));
+      const thisAudit = this.audit;
       let used = false;
       let closed = false;
       const close = async () => {
@@ -100,7 +107,17 @@ export class SyntheticBrowserApplication implements ApplicationPort {
           if (await finalClick.page.locator("#confirmation").innerText()) {
             throw new Error("Synthetic receipt appeared before final click");
           }
+          if (process.env.OPENAPPLY_CLOUD_TASK_MODE === "synthetic" && !thisAudit) {
+            throw new Error("Cloud synthetic final click requires a durable audit");
+          }
+          if (thisAudit) {
+            if (!context || !await thisAudit.recordFinalClick(candidateId, context.runId,
+              context.leaseToken, job)) {
+              throw new Error("Synthetic final click audit denied");
+            }
+          }
           await finalClick.click();
+          thisAudit?.afterFinalClick?.(job);
           const confirmation = finalClick.page.locator("#confirmation");
           await finalClick.page.getByText(`Application received for requisition ${job.requisitionId}`,
             { exact: true }).waitFor({ timeout: 10_000 });

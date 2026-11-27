@@ -24,6 +24,8 @@ export interface PreparedApplication {
   close?(): Promise<void>;
 }
 
+export type SyntheticCheckpoint = "after_intent" | "after_confirmation";
+
 export interface CloudRunPorts {
   billing: {
     /** Read current durable entitlements on each call; never trust the SQS body. */
@@ -65,8 +67,11 @@ export interface CloudRunPorts {
   };
   application: {
     /** No real browser implementation is registered by this staging module. */
-    prepare(profilePath: string, job: OfficialJobIdentity, candidateId: string): Promise<PreparedApplication>;
+    prepare(profilePath: string, job: OfficialJobIdentity, candidateId: string,
+      context?: { runId: string; leaseToken: string }): Promise<PreparedApplication>;
   };
+  /** Only wired by the .invalid synthetic staging task. */
+  syntheticProbe?: { checkpoint(stage: SyntheticCheckpoint, job: OfficialJobIdentity): void };
   receiptVerifier: {
     /** Verify explicit employer confirmation for this exact requisition. */
     verify(receipt: VerifiedReceipt, job: OfficialJobIdentity): Promise<boolean>;
@@ -130,7 +135,8 @@ export async function handleQueuedApplication(
     cleanupComplete = false;
     let browserCleanupComplete = false;
     try {
-      const prepared = await ports.application.prepare(profile.path, record.job, run.candidateId);
+      const prepared = await ports.application.prepare(profile.path, record.job, run.candidateId,
+        { runId: run.runId, leaseToken: token });
       try {
         if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
         if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
@@ -147,6 +153,7 @@ export async function handleQueuedApplication(
           }
           return "needs_reconciliation";
         }
+        ports.syntheticProbe?.checkpoint("after_intent", record.job);
 
         // One final read after the durable intent narrows the window in which a
         // payment or consent revocation could race with the external Submit.
@@ -183,6 +190,7 @@ export async function handleQueuedApplication(
         await ports.vault.put(run.candidateId, run.runId, token, artifactId, receipt.evidence);
         if (!await ports.journal.confirmAfterVerification(run.candidateId, token, record.job,
           { artifactId, sha256 })) return "needs_reconciliation";
+        ports.syntheticProbe?.checkpoint("after_confirmation", record.job);
         shouldAck = true;
         return "confirmed";
       } finally {

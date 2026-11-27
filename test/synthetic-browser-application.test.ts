@@ -64,6 +64,29 @@ describe("synthetic-only cloud browser adapter", () => {
   });
 
   it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
+    "records a broker grant before the final click and crashes at the post-click checkpoint",
+    async () => withProfile(candidateId, async profilePath => {
+      const events: string[] = [];
+      const application = new SyntheticBrowserApplication({
+        async recordFinalClick(candidate, run, token, target) {
+          expect({ candidate, run, token, target }).toEqual({ candidate: candidateId,
+            run: runId, token: artifactId, target: job });
+          events.push("audit");
+          return true;
+        },
+        afterFinalClick() { events.push("after-click"); throw new Error("simulated task exit 86"); },
+      });
+      const prepared = await application.prepare(profilePath, job, candidateId,
+        { runId, leaseToken: artifactId });
+      try {
+        await expect(prepared.submitOnce()).rejects.toThrow("task exit 86");
+        await expect(prepared.submitOnce()).rejects.toThrow("no longer available");
+        expect(events).toEqual(["audit", "after-click"]);
+      } finally { await prepared.close?.(); }
+    }), 45_000,
+  );
+
+  it.skipIf(process.env.OPENAPPLY_BROWSER_E2E !== "1")(
     "uses real owned Chromium only after durable intent and never clicks twice on redelivery",
     async () => withProfile(candidateId, async profilePath => {
       let status: "not_started" | "needs_reconciliation" | "confirmed" = "not_started";

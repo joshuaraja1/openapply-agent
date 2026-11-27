@@ -20,7 +20,7 @@ function message(id = runId): { body: string; receiptHandle: string } {
   };
 }
 
-function harness() {
+function harness(targetJob = job) {
   const events: string[] = [];
   let status: "not_started" | "needs_reconciliation" | "confirmed" = "not_started";
   let busy = false;
@@ -38,7 +38,7 @@ function harness() {
   let revokePaymentAtIntent = false;
   let revokeDuringPrepare = false;
   let consentGranted = true;
-  let clickResult: VerifiedReceipt | null = { evidence, job };
+  let clickResult: VerifiedReceipt | null = { evidence, job: targetJob };
   let clickThrows = false;
   let failsBeforeClick = false;
   let prepareThrows = false;
@@ -84,7 +84,7 @@ function harness() {
     },
     runRecords: {
       async loadIdentity() { events.push("load-identity"); return { subjectId: candidateId,
-        consentVersion: 1, job }; },
+        consentVersion: 1, job: targetJob }; },
       async loadProfileArtifactId() { events.push("load-profile-id"); return runId; },
     },
     vault: {
@@ -391,6 +391,34 @@ describe("cloud queued application bridge", () => {
     expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
     expect(h.events).not.toContain("click");
     expect(h.events).not.toContain("ack");
+  });
+
+  it("holds a synthetic after-intent crash without a click on redelivery", async () => {
+    const h = harness({ provider: "synthetic", employerId: "fixture", requisitionId: "alpha" });
+    h.ports.syntheticProbe = { checkpoint(stage) {
+      if (stage === "after_intent") throw new Error("simulated task exit 86");
+    } };
+    await expect(handleQueuedApplication(message(), h.ports)).rejects.toThrow("task exit 86");
+    expect(h.events).toContain("intent");
+    expect(h.events).not.toContain("click");
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).not.toContain("click");
+  });
+
+  it("repairs a synthetic after-confirmation crash without a second click", async () => {
+    const h = harness({ provider: "synthetic", employerId: "fixture", requisitionId: "beta" });
+    h.ports.syntheticProbe = { checkpoint(stage) {
+      if (stage === "after_confirmation") throw new Error("simulated task exit 86");
+    } };
+    await expect(handleQueuedApplication(message(), h.ports)).rejects.toThrow("task exit 86");
+    expect(h.events).toContain("confirmed");
+    expect(h.events).toContain("click");
+    expect(h.events).not.toContain("ack");
+    h.events.length = 0;
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("already_confirmed");
+    expect(h.events).not.toContain("click");
+    expect(h.events).toContain("ack");
   });
 
   it("rejects discovery messages before acquiring a candidate lease", async () => {

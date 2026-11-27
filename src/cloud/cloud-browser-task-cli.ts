@@ -7,6 +7,8 @@ import { createAwsQueuedRunRuntime, type AwsQueuedRunConfiguration }
 import { SyntheticBrowserApplication, SyntheticReceiptVerifier }
   from "./synthetic-browser-application.js";
 import { runSyntheticBrowserFixture } from "./synthetic-browser-fixture.js";
+import { createBrokeredRunState } from "./aws-run-state-broker-client.js";
+import { syntheticCheckpoint, syntheticCrashStage } from "./synthetic-fault-probe.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -29,18 +31,28 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
   if (mode === "smoke") { await runBrowserSmoke(); return "smoke"; }
   if (mode === "fixture") { await runSyntheticBrowserFixture(); return "fixture"; }
   if (mode !== "synthetic" || process.env.OPENAPPLY_CLOUD_SYNTHETIC_ONLY !== "1"
-    || process.env.OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK !== "1") {
+    || process.env.OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK !== "1"
+    || process.env.OPENAPPLY_SUBMISSION_MODE !== "disabled") {
     throw new Error("Cloud browser task mode is disabled");
   }
+  const crashAt = syntheticCrashStage();
   const config = configuration();
   const region = required("AWS_REGION");
+  const scope = { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
+    runId: required("OPENAPPLY_RUN_ID"), capability: required("OPENAPPLY_RUN_CAPABILITY") };
   const lambda = new LambdaClient({ region });
   try {
-    const runtime = createAwsQueuedRunRuntime({ lambda }, config,
-      { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
-        runId: required("OPENAPPLY_RUN_ID"),
-        capability: required("OPENAPPLY_RUN_CAPABILITY") },
-      new SyntheticBrowserApplication(), new SyntheticReceiptVerifier());
+    const audit = createBrokeredRunState(lambda, config.artifactBrokerArn, scope.capability, scope)
+      .syntheticAudit;
+    const runtime = createAwsQueuedRunRuntime({ lambda }, config, scope,
+      new SyntheticBrowserApplication({
+        async recordFinalClick(candidateId, runId, leaseToken, job) {
+          if (runId !== scope.runId) throw new Error("Synthetic audit run scope mismatch");
+          return audit.recordFinalClick(candidateId, leaseToken, job);
+        },
+        afterFinalClick(job) { syntheticCheckpoint("after_click", job, crashAt); },
+      }), new SyntheticReceiptVerifier(),
+      { checkpoint(stage, job) { syntheticCheckpoint(stage, job, crashAt); } });
     const outcome = await runtime.runExact();
     process.stdout.write(`Cloud synthetic queue task outcome: ${outcome}\n`);
     return outcome;

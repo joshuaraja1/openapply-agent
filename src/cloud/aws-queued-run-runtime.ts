@@ -23,6 +23,7 @@ export function createAwsQueuedRunRuntime(
   scope: { candidateId: string; runId: string; capability: string },
   application: CloudRunPorts["application"],
   receiptVerifier: CloudRunPorts["receiptVerifier"],
+  syntheticProbe?: CloudRunPorts["syntheticProbe"],
 ): { runExact(): Promise<CloudRunOutcome> } {
   if (!config.artifactBucket || !config.artifactKmsKeyArn || !config.artifactBrokerArn) {
     throw new Error("AWS application runtime configuration is incomplete");
@@ -80,6 +81,7 @@ export function createAwsQueuedRunRuntime(
     vault,
     application,
     receiptVerifier,
+    ...(syntheticProbe ? { syntheticProbe } : {}),
     queue: { async acknowledge(receiptHandle) {
       if (receiptHandle !== scope.runId) throw new Error("Dispatch run scope mismatch");
       await state.dispatch.markCompleted();

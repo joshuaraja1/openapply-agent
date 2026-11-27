@@ -135,6 +135,20 @@ test('rejects a task with wrong entrypoint mode or a different task role', () =>
   assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
 });
 
+test('accepts only the three guarded synthetic crash checkpoints', () => {
+  const { stacks, task } = readyFixture();
+  for (const value of ['', 'after_intent', 'after_click', 'after_confirmation']) {
+    task.containerDefinitions[0].environment.push({ name: 'OPENAPPLY_SYNTHETIC_CRASH_AT', value });
+    assert.equal(assessInventory('123456789012', '123456789012', stacks, task)
+      .inventoryComplete, true);
+    task.containerDefinitions[0].environment.pop();
+  }
+  task.containerDefinitions[0].environment.push({ name: 'OPENAPPLY_SYNTHETIC_CRASH_AT',
+    value: 'before-real-submit' });
+  assert.equal(assessInventory('123456789012', '123456789012', stacks, task)
+    .checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
+});
+
 test('rejects launcher wired to an unreviewed security group or execution role', () => {
   const { stacks, task } = readyFixture();
   stacks.launcher.Parameters.find((item) => item.ParameterKey === 'EcsSecurityGroupId')
