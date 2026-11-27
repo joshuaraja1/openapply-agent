@@ -1,6 +1,4 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { LambdaClient } from "@aws-sdk/client-lambda";
-import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runBrowserSmoke } from "./browser-smoke-cli.js";
@@ -18,8 +16,6 @@ function required(name: string): string {
 
 function configuration(): AwsQueuedRunConfiguration {
   return {
-    ledgerTable: required("OPENAPPLY_RUN_LEDGER_TABLE"),
-    entitlementTable: required("OPENAPPLY_ENTITLEMENT_TABLE"),
     artifactBucket: required("OPENAPPLY_ARTIFACT_BUCKET"),
     artifactKmsKeyArn: required("OPENAPPLY_ARTIFACT_KMS_KEY_ARN"),
     artifactBrokerArn: required("OPENAPPLY_ARTIFACT_BROKER_ARN"),
@@ -38,10 +34,9 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
   }
   const config = configuration();
   const region = required("AWS_REGION");
-  const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region }));
   const lambda = new LambdaClient({ region });
   try {
-    const runtime = createAwsQueuedRunRuntime({ dynamo, lambda }, config,
+    const runtime = createAwsQueuedRunRuntime({ lambda }, config,
       { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
         runId: required("OPENAPPLY_RUN_ID"),
         capability: required("OPENAPPLY_RUN_CAPABILITY") },
@@ -50,7 +45,7 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
     process.stdout.write(`Cloud synthetic queue task outcome: ${outcome}\n`);
     return outcome;
   } finally {
-    dynamo.destroy(); lambda.destroy();
+    lambda.destroy();
   }
 }
 
