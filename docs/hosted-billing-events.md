@@ -1,4 +1,4 @@
-# Hosted Stripe event boundary (staging)
+# Hosted Stripe billing events (staging)
 
 This PR supplies testable domain functions, not a deployed billing endpoint.
 
@@ -29,9 +29,23 @@ This PR supplies testable domain functions, not a deployed billing endpoint.
    or arrive out of order. The worker must re-check entitlement before a
    candidate batch and at its final-submit authorization fence.
 
-The current code does not implement the HTTP endpoint, provider API reader,
-customer binding store, guest audit ledger, event ledger, serialized queue, periodic reconciliation,
-or atomic final-submit fence. No live Stripe account or charges are involved.
+The code in this PR implements the HTTP handler, provider API reader, guest audit,
+event ledger, and per-customer serialized replay. A separate composition root
+must connect the route, secret manager, scheduler, checkout journal, and queue
+access check. No production billing route or live charges are involved.
+The sparse `gsi1` pending-event index and staging table are defined in
+`deploy/aws/hosted-billing-table.yaml`; no table scan is used. Semester access
+begins at the paid charge timestamp, lasts four UTC calendar months, and is
+revoked on refund or dispute. `DynamoBillingStore.loadEntitlements` is the
+authoritative queue read; `hasPaidAccess` is the Checkout guard.
+A signed event with a missing Customer binding gets a five-minute grace window
+for the Checkout transaction to commit. After that, the worker records a
+durable quarantine reason and removes it from the pending index. An operator
+must investigate or backfill it if a binding appears later. Quarantine never
+grants access and never blocks later events in the same replay batch.
+An external employer Submit click cannot be atomic with a Stripe webhook.
+The queue must recheck access at its durable submit intent, and a revocation
+may still race with a click already in flight.
 Refund and dispute handling must be mapped from current provider state to
 `paymentReversed`; a user-supplied value is never authoritative. The provider
 reader must prove it returned a complete subscription set; partial pagination

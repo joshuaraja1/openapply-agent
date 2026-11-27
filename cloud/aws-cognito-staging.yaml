@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: OpenApply staging candidate identity. No users or live billing are created by this template.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: staging
+    AllowedPattern: '^[a-z0-9-]{2,24}$'
+  AppOrigin:
+    Type: String
+    Default: 'https://openapplyagent.xyz'
+    AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+
+Resources:
+  CandidateUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub 'openapply-${Environment}-candidates'
+      # Refresh-token rotation requires Essentials or Plus.
+      UserPoolTier: ESSENTIALS
+      DeletionProtection: ACTIVE
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      MfaConfiguration: OPTIONAL
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      UserPoolTags:
+        application: openapply
+        environment: !Ref Environment
+
+  CandidateWebClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'openapply-${Environment}-web'
+      UserPoolId: !Ref CandidateUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Sub '${AppOrigin}/auth/callback'
+      LogoutURLs:
+        - !Sub '${AppOrigin}/'
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      RefreshTokenRotation:
+        Feature: ENABLED
+        RetryGracePeriodSeconds: 10
+
+  CandidateLoginDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 'openapply-${Environment}-${AWS::AccountId}'
+      # Use classic hosted UI until managed-login branding is configured.
+      ManagedLoginVersion: 1
+      UserPoolId: !Ref CandidateUserPool
+
+Outputs:
+  UserPoolId:
+    Value: !Ref CandidateUserPool
+  ClientId:
+    Value: !Ref CandidateWebClient
+  Issuer:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${CandidateUserPool}'
+  JwksUrl:
+    Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${CandidateUserPool}/.well-known/jwks.json'
+  HostedLoginDomain:
+    Value: !Sub 'https://${CandidateLoginDomain}.auth.${AWS::Region}.amazoncognito.com'
+  CallbackUrl:
+    Value: !Sub '${AppOrigin}/auth/callback'
