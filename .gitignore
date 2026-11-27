@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-hosted/
 runtime-package-lock.json
 coverage/
 .env
