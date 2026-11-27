@@ -75,11 +75,11 @@ export class DynamoOnboardingMarkers implements OnboardingMarkerStore {
         ConditionExpression: "attribute_not_exists(pk)" } },
       { Update: { TableName: this.tableName,
         Key: { pk: `CANDIDATE#${candidateId}`, sk: `PROFILE#${artifactId}` },
-        UpdateExpression: "SET #status = :verified, applicationProfileReady = :ready",
+        UpdateExpression: "SET #status = :verified, applicationProfileReady = :ready, verifiedAtEpoch = :now",
         ConditionExpression: "#status = :pending AND subjectId = :subjectId AND candidateId = :candidateId AND artifactId = :artifactId",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: { ":verified": "verified", ":pending": "pending",
-          ":ready": applicationProfileReady,
+          ":ready": applicationProfileReady, ":now": Date.now(),
           ":subjectId": subjectId, ":candidateId": candidateId, ":artifactId": artifactId } } },
     ] }));
   }

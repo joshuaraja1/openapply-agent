@@ -15,6 +15,10 @@ export default {
         || url.pathname === '/api/candidates/deletion-status';
       const runCreation = url.pathname === '/api/applications/runs';
       const enqueue = url.pathname === '/api/applications/enqueue';
+      const jobs = url.pathname === '/api/jobs/matches';
+      if (jobs && env.JOB_DISCOVERY_ENABLED !== 'true') {
+        return new Response('Not found', { status: 404, headers: securityHeaders });
+      }
       if (deletion && env.CANDIDATE_DELETION_ENABLED !== 'true') {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
@@ -22,18 +26,25 @@ export default {
         || (enqueue && env.APPLICATION_ENQUEUE_ENABLED !== 'true')) {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      if ((!onboarding && !plan && !deletion && !runCreation && !enqueue
-        && url.pathname !== '/api/billing/checkout') || request.method !== 'POST') {
+      if ((!onboarding && !plan && !deletion && !runCreation && !enqueue && !jobs
+        && url.pathname !== '/api/billing/checkout') || request.method !== (jobs ? 'GET' : 'POST')) {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      const apiOrigin = onboarding || plan || deletion ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
+      const apiOrigin = onboarding || plan || deletion || jobs ? env.ONBOARDING_API_ORIGIN : env.AWS_API_ORIGIN;
       if (!apiOrigin) {
         return new Response('API not configured', { status: 503, headers: securityHeaders });
       }
-      if (request.headers.get('origin') !== url.origin ||
+      if (!(request.headers.get('origin') === url.origin
+          || (jobs && !request.headers.has('origin')
+            && request.headers.get('sec-fetch-site') === 'same-origin')) ||
           !/^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(request.headers.get('authorization') ?? '') ||
-          !/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') ?? '')) {
+          (!jobs && !/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') ?? ''))) {
         return new Response('Invalid request', { status: 403, headers: securityHeaders });
+      }
+      if (jobs && ([...url.searchParams.keys()].some(key => key !== 'page')
+        || url.searchParams.getAll('page').length > 1
+        || !/^[0-9]$/.test(url.searchParams.get('page') ?? '0'))) {
+        return new Response('Invalid page', { status: 400, headers: securityHeaders });
       }
       let upstream;
       try {
@@ -41,12 +52,13 @@ export default {
         if (upstream.protocol !== 'https:' || upstream.username || upstream.password ||
             upstream.search || upstream.hash || upstream.pathname !== '/') throw new Error('Invalid upstream');
       } catch { return new Response('API not configured', { status: 503, headers: securityHeaders }); }
-      const reader = request.body?.getReader();
-      if (!reader) return new Response('Invalid request', { status: 400, headers: securityHeaders });
+      const reader = jobs ? undefined : request.body?.getReader();
+      if (!jobs && !reader) return new Response('Invalid request', { status: 400, headers: securityHeaders });
       const chunks = [];
       let size = 0;
       try {
         for (;;) {
+          if (!reader) break;
           const { done, value } = await reader.read();
           if (done) break;
           size += value.byteLength;
@@ -56,18 +68,19 @@ export default {
           }
           chunks.push(value);
         }
-      } finally { reader.releaseLock(); }
+      } finally { reader?.releaseLock(); }
       const body = new Uint8Array(size);
       let offset = 0;
       for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
       upstream.pathname = url.pathname;
+      if (jobs) upstream.search = url.search;
       try {
         const response = await fetch(upstream, {
-          method: 'POST', body, redirect: 'manual',
+          method: jobs ? 'GET' : 'POST', ...(jobs ? {} : { body }), redirect: 'manual',
           signal: AbortSignal.timeout(onboarding ? 60_000 : deletion ? 65_000 : 10_000),
           headers: {
             'authorization': request.headers.get('authorization'),
-            'content-type': request.headers.get('content-type'),
+            ...(jobs ? {} : { 'content-type': request.headers.get('content-type') }),
             'origin': url.origin,
           },
         });

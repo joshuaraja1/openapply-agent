@@ -10,6 +10,29 @@ function assets() {
 }
 
 describe('staging login Worker', () => {
+  it('keeps job discovery off by default and forwards only bounded signed-in pages', async () => {
+    const env = { ...assets(), ONBOARDING_API_ORIGIN: 'https://candidate.example.com',
+      JOB_DISCOVERY_ENABLED: 'true' };
+    const upstream = vi.fn(async (_url: URL, _options: RequestInit) =>
+      new Response('{"jobs":[],"nextPage":null}', { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    try {
+      const headers = { authorization: 'Bearer a.b.c', 'sec-fetch-site': 'same-origin' };
+      const disabled = await worker.fetch(new Request('https://test.workers.dev/api/jobs/matches', { headers }),
+        { ...env, JOB_DISCOVERY_ENABLED: 'false' });
+      expect(disabled.status).toBe(404);
+      const response = await worker.fetch(new Request('https://test.workers.dev/api/jobs/matches?page=2', { headers }), env);
+      expect(response.status).toBe(200);
+      expect(String(upstream.mock.calls[0]?.[0])).toBe('https://candidate.example.com/api/jobs/matches?page=2');
+      expect((upstream.mock.calls[0]?.[1] as RequestInit).method).toBe('GET');
+      expect((await worker.fetch(new Request('https://test.workers.dev/api/jobs/matches?leadId=other',
+        { headers }), env)).status).toBe(400);
+      expect((await worker.fetch(new Request('https://test.workers.dev/api/jobs/matches', {
+        headers: { ...headers, 'sec-fetch-site': 'cross-site' },
+      }), env)).status).toBe(403);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('serves exact callback without passing the authorization code to assets', async () => {
     const env = assets();
     const response = await worker.fetch(new Request('https://test.workers.dev/auth/callback?code=secret&state=abc'), env);

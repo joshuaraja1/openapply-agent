@@ -17,6 +17,8 @@ import { retryCandidateDeletions } from "./candidate-deletion.js";
 import { DynamoFargateLaunchStore, stopCandidateFargateTask } from "../cloud/fargate-launcher.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
+import { AwsJobDiscoveryPorts } from "./aws-job-discovery-ports.js";
+import { handleJobDiscoveryHttp } from "./job-discovery.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -53,11 +55,19 @@ function runtime() {
   const deletionDeps = { appOrigin, verifySubject, store: deletion, vault: deletionVault,
     candidateIdForSubject: candidateId,
     ...(stopCandidateTasks ? { stopCandidateTasks } : {}) };
+  const jobDiscovery = process.env.JOB_DISCOVERY_ENABLED === "true"
+    ? { appOrigin, issuer, verifySubject,
+      candidateIdForSubject, ports: new AwsJobDiscoveryPorts(db, vault,
+        required("RUN_LEDGER_TABLE_NAME"), required("OFFICIAL_SOURCES_JSON")) }
+    : undefined;
   return { handleRequest: async (request: Request) => ["/api/candidates/delete",
     "/api/candidates/deletion-status"].includes(new URL(request.url).pathname)
     ? process.env.CANDIDATE_DELETION_ENABLED === "true"
       ? handleCandidateDeletionHttp(request, deletionDeps)
       : new Response("", { status: 404, headers: { "cache-control": "no-store" } })
+    : new URL(request.url).pathname === "/api/jobs/matches"
+      ? jobDiscovery ? handleJobDiscoveryHttp(request, jobDiscovery)
+        : new Response("", { status: 404, headers: { "cache-control": "no-store" } })
     : handleCandidateOnboardingHttp(request, {
     appOrigin, verifySubject, vault, markers,
     loadEntitlements: (subject: string) => plans.loadEntitlements(subject),

@@ -6,6 +6,14 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+  EnableJobDiscovery:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+  OfficialSourcesJson:
+    Type: String
+    Default: ''
+    Description: Operator-configured official ATS sources; at most four with 50 jobs each.
   EnableCandidateDeletion:
     Type: String
     AllowedValues: ['true', 'false']
@@ -43,6 +51,9 @@ Parameters:
 
 Conditions:
   OnboardingEnabled: !Equals [!Ref EnableOnboarding, 'true']
+  JobDiscoveryEnabled: !And
+    - !Condition OnboardingEnabled
+    - !Equals [!Ref EnableJobDiscovery, 'true']
   DeletionEnabled: !And
     - !Condition OnboardingEnabled
     - !Equals [!Ref EnableCandidateDeletion, 'true']
@@ -54,6 +65,13 @@ Conditions:
     - !Equals [!Ref EnableDeletionEcsStop, 'true']
 
 Rules:
+  JobDiscoveryConfiguration:
+    RuleCondition: !Equals [!Ref EnableJobDiscovery, 'true']
+    Assertions:
+      - Assert: !Equals [!Ref EnableOnboarding, 'true']
+        AssertDescription: Job discovery requires onboarding.
+      - Assert: !Not [!Equals [!Ref OfficialSourcesJson, '']]
+        AssertDescription: Reviewed official sources are required.
   StopConfiguration:
     RuleCondition: !Equals [!Ref EnableDeletionEcsStop, 'true']
     Assertions:
@@ -125,6 +143,8 @@ Resources:
       Environment:
         Variables:
           ONBOARDING_ENABLED: 'true'
+          JOB_DISCOVERY_ENABLED: !If [JobDiscoveryEnabled, 'true', 'false']
+          OFFICIAL_SOURCES_JSON: !Ref OfficialSourcesJson
           CANDIDATE_DELETION_ENABLED: 'false'
           APP_ORIGIN: !Ref AppOrigin
           COGNITO_ISSUER: !Ref CognitoIssuer
@@ -308,6 +328,14 @@ Resources:
       RouteKey: 'POST /api/candidates/plan'
       Target: !Sub 'integrations/${OnboardingIntegration}'
 
+  JobDiscoveryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: JobDiscoveryEnabled
+    Properties:
+      ApiId: !Ref OnboardingApi
+      RouteKey: 'GET /api/jobs/matches'
+      Target: !Sub 'integrations/${OnboardingIntegration}'
+
   CandidateDeletionRoute:
     Type: AWS::ApiGatewayV2::Route
     Condition: DeletionEnabled
@@ -399,6 +427,15 @@ Resources:
       FunctionName: !Ref OnboardingFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/POST/api/candidates/plan'
+
+  JobDiscoveryInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: JobDiscoveryEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnboardingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${OnboardingApi}/*/GET/api/jobs/matches'
 
   CandidateDeletionInvokePermission:
     Type: AWS::Lambda::Permission
