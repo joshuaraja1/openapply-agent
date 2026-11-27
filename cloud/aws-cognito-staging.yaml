@@ -9,6 +9,13 @@ Parameters:
   AppOrigin:
     Type: String
     AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+  PreviousAppOrigin:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^https://[a-zA-Z0-9.-]+$'
+
+Conditions:
+  HasPreviousAppOrigin: !Not [!Equals [!Ref PreviousAppOrigin, '']]
 
 Resources:
   CandidateUserPool:
@@ -55,8 +62,10 @@ Resources:
       SupportedIdentityProviders: [COGNITO]
       CallbackURLs:
         - !Sub '${AppOrigin}/auth/callback'
+        - !If [HasPreviousAppOrigin, !Sub '${PreviousAppOrigin}/auth/callback', !Ref 'AWS::NoValue']
       LogoutURLs:
         - !Sub '${AppOrigin}/'
+        - !If [HasPreviousAppOrigin, !Sub '${PreviousAppOrigin}/', !Ref 'AWS::NoValue']
       AccessTokenValidity: 1
       IdTokenValidity: 1
       RefreshTokenValidity: 30

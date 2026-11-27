@@ -5,24 +5,27 @@ Cognito callback. It does not run applications. It is useful before Cognito exis
 without pool outputs, it displays “Sign-in is not configured yet.”
 
 Build with `npm run staging:login:build`. This produces
-`cloud/staging-login-dist`, including both `/` and `/auth/callback` routes. The
-output is a Cloudflare Pages static directory. Deploy it to an OpenApply-only
-Pages project, bind `staging.openapplyagent.xyz`, and verify both routes serve
-HTTPS from that project before executing the Cognito CloudFormation change set.
-The `_headers` file sets no-store, no-referrer, and a restrictive CSP. The
-`_redirects` file rewrites the callback path without dropping its query string.
+`cloud/staging-login-dist`, including both `/` and `/auth/callback` routes.
+The staging deployment uses the `openapply-staging-login` Worker, with
+`staging.openapplyagent.xyz` declared as its custom domain in Wrangler. Verify
+HTTPS and the callback path on that hostname before changing Cognito.
+The `_headers` file sets no-store, no-referrer, and a restrictive CSP for
+static hosting; the Worker sets those headers and rewrites the callback path.
 
-If Pages/domain permissions are unavailable, deploy the same assets as a
-Worker at a controlled HTTPS `workers.dev` origin:
+Deploy the Worker with the project's pinned Wrangler version. Keep the
+dashboard-managed `AWS_API_ORIGIN` variable when deploying:
 
 ```sh
 npm run staging:login:build
-npx wrangler deploy --config cloud/staging-login/wrangler.jsonc
+npx wrangler deploy --config cloud/staging-login/wrangler.jsonc --keep-vars
 ```
 
-The Worker rewrites `/auth/callback` and sets security headers itself. Use its
-returned origin for Cognito's `AppOrigin` parameter and the build variable
-`OPENAPPLY_STAGING_ORIGIN`. Verify the exact callback over HTTPS first.
+The Worker also has a `workers.dev` URL for rollback. Set Cognito's `AppOrigin`
+and the build variable `OPENAPPLY_STAGING_ORIGIN` to the same verified custom
+hostname. During a callback migration, set `PreviousAppOrigin` to the old
+`workers.dev` origin so in-flight sign-ins can finish; remove it after the
+custom-host flow is verified. Do not change only the Worker config or only
+Cognito: those must agree on the exact callback URL.
 
 After Cognito deploys, rebuild with its public outputs in these environment
 variables and redeploy the same directory:
@@ -55,10 +58,14 @@ controlled HTTPS route is live and tested.
 
 ## Same-origin API contract
 
-The Worker proxies only `POST /api/billing/checkout` when `AWS_API_ORIGIN` is
+The Worker proxies `POST /api/billing/checkout` and
+`GET /api/billing/status` when `AWS_API_ORIGIN` is
 configured; otherwise it returns 503. The trusted upstream origin comes from
 server configuration, never the request. It preserves only Authorization,
 Content-Type, Origin, and a body bounded to 1 KiB; uses a 10-second timeout;
 blocks redirects; strips cookies; and returns no-store. The AWS API verifies
 the JWT and applies billing and candidate authorization; the Worker grants no
 access. Other `/api/*` paths return 404 until separately implemented.
+The AWS billing stack's `AppOrigin` must equal the public Worker hostname; a
+callback migration that updates only Cognito and the Worker will leave billing
+status and Checkout unavailable.
