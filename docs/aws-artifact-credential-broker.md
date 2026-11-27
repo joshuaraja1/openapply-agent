@@ -57,7 +57,7 @@ to CloudFormation. Its `SecretString` is a base64-encoded random 32-byte key.
   issued grant can still replace receipt objects in its run's prefix while
   that grant is valid; the confirmation digest in the durable ledger detects
   this on later reads only if consumers verify it. The public deletion and
-  receipt-integrity design must resolve this before enablement.
+  receipt-integrity design in issue #250 must resolve this before enablement.
 - A stolen capability can be replayed only for its encoded candidate and run,
   before its 30-minute expiry and while consent, access, and that run's exact
   fenced lease remain active. A capability alone cannot renew or acquire a
