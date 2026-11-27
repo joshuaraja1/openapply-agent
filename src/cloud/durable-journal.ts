@@ -13,7 +13,8 @@ const officialJobSchema = z.strictObject({
 
 export type OfficialJobIdentity = z.input<typeof officialJobSchema>;
 export type SubmissionStatus = "not_started" | "needs_reconciliation" | "confirmed";
-export type SubmissionRecord = { status: SubmissionStatus; receiptArtifactId?: string };
+export type SubmissionRecord = { status: SubmissionStatus; receiptArtifactId?: string;
+  receiptSha256?: string; runId?: string };
 
 function consentEpoch(version: number): number {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("Consent version must be a positive integer");
@@ -275,8 +276,15 @@ export class DurableApplicationJournal {
     }));
     if (!result.Item) return { status: "not_started" };
     const artifactId = uuid.parse(result.Item.receiptArtifactId);
-    return { status: result.Item.state === "confirmed" ? "confirmed" : "needs_reconciliation",
-      receiptArtifactId: artifactId };
+    if (result.Item.state === "confirmed") {
+      const digest = result.Item.receiptSha256;
+      if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) {
+        throw new Error("Confirmed receipt digest unavailable");
+      }
+      return { status: "confirmed", receiptArtifactId: artifactId,
+        receiptSha256: digest, runId: uuid.parse(result.Item.runId) };
+    }
+    return { status: "needs_reconciliation", receiptArtifactId: artifactId };
   }
 
   async submissionStatus(candidateId: string, job: OfficialJobIdentity): Promise<SubmissionStatus> {

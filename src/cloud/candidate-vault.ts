@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -112,9 +112,29 @@ export class CandidateVault {
   }
 
   async read(candidateIdInput: string, artifactIdInput: string): Promise<Buffer> {
+    return this.readAtKey(candidateIdInput, artifactIdInput, artifactObjectKey);
+  }
+
+  /** For trusted receipt display/export readers: compare plaintext with the
+   * confirmed durable journal digest before exposing it to a candidate. */
+  async readReceiptVerified(candidateId: string, runId: string, artifactId: string,
+    confirmedSha256: string): Promise<Buffer> {
+    if (!/^[a-f0-9]{64}$/.test(confirmedSha256)) throw new Error("Confirmed receipt digest unavailable");
+    const plaintext = await this.readAtKey(candidateId, artifactId,
+      (id, receiptId) => receiptObjectKey(id, runId, receiptId));
+    const actual = createHash("sha256").update(plaintext).digest();
+    if (!timingSafeEqual(actual, Buffer.from(confirmedSha256, "hex"))) {
+      plaintext.fill(0);
+      throw new Error("Confirmed receipt digest mismatch");
+    }
+    return plaintext;
+  }
+
+  private async readAtKey(candidateIdInput: string, artifactIdInput: string,
+    objectKey: (candidateId: string, artifactId: string) => string): Promise<Buffer> {
     const candidateId = canonicalId(candidateIdInput);
     const artifactId = canonicalId(artifactIdInput);
-    const bytes = await this.objects.get(artifactObjectKey(candidateId, artifactId));
+    const bytes = await this.objects.get(objectKey(candidateId, artifactId));
     if (bytes.byteLength > MAX_ENVELOPE_BYTES) throw new Error("Encrypted artifact exceeds the staging size limit");
     const envelope = envelopeSchema.parse(JSON.parse(Buffer.from(bytes).toString("utf8")));
     if (envelope.candidateId !== candidateId || envelope.artifactId !== artifactId) {

@@ -178,6 +178,8 @@ describe("durable cloud application journal", () => {
     expect(await journal.confirmAfterVerification(candidateId, next, job,
       { artifactId, sha256: receiptDigest })).toBe(true);
     expect(await journal.submissionStatus(candidateId, job)).toBe("confirmed");
+    expect(await journal.readSubmission(candidateId, job)).toEqual({ status: "confirmed",
+      receiptArtifactId: artifactId, receiptSha256: receiptDigest, runId: firstRun });
     expect(await journal.confirmAfterVerification(candidateId, next, job,
       { artifactId, sha256: receiptDigest })).toBe(false);
     expect(await journal.beginSubmission(candidateId, next, secondRun, 1, job)).toBeNull();
