@@ -16,6 +16,8 @@ export async function enqueueHostedApplication(
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
     queue: { send(message: { body: string; groupId: string;
       deduplicationId: string }): Promise<void> };
+    /** Optional staging hook. Invoked only after SQS accepts the message. */
+    launcher?: { launch(candidateId: string, runId: string): Promise<void> };
   },
   now = new Date(),
 ): Promise<void> {
@@ -34,4 +36,5 @@ export async function enqueueHostedApplication(
   requireHostedAccess(authenticatedSubjectId,
     await ports.billing.loadEntitlements(authenticatedSubjectId), now);
   await ports.queue.send(envelope);
+  await ports.launcher?.launch(candidateId, runId);
 }

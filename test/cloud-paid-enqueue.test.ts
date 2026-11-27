@@ -58,4 +58,18 @@ describe("hosted application enqueue access", () => {
       .rejects.toThrow("not authorized");
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("launches only after SQS accepts the durable message", async () => {
+    const { ports, send } = harness();
+    const launch = vi.fn(async () => {
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+    await enqueueHostedApplication("sub-a", candidateId, runId,
+      { ...ports, launcher: { launch } }, now);
+    expect(launch).toHaveBeenCalledWith(candidateId, runId);
+    send.mockRejectedValueOnce(new Error("SQS unavailable"));
+    await expect(enqueueHostedApplication("sub-a", candidateId, runId,
+      { ...ports, launcher: { launch } }, now)).rejects.toThrow("SQS unavailable");
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
 });

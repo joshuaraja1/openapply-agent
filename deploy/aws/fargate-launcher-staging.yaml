@@ -1,0 +1,181 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Disabled-by-default single-slot staging launcher; task definition must be supplied separately after its browser worker is tested.
+
+Parameters:
+  EnableFargateLauncher:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  CodeBucket:
+    Type: String
+    Default: ''
+  CodeKey:
+    Type: String
+    Default: ''
+  RunLedgerTableName:
+    Type: String
+    Default: openapply-staging-run-ledger
+    AllowedValues: [openapply-staging-run-ledger]
+  EntitlementTableName:
+    Type: String
+    Default: openapply-staging-entitlements
+  ArtifactSigningSecretArn:
+    Type: String
+    Default: ''
+  EcsClusterArn:
+    Type: String
+    Default: ''
+  EcsTaskDefinitionArn:
+    Type: String
+    Default: ''
+  EcsTaskRoleArn:
+    Type: String
+    Default: ''
+  EcsExecutionRoleArn:
+    Type: String
+    Default: ''
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+  EcsSecurityGroupId:
+    Type: String
+    Default: ''
+  EcsContainerName:
+    Type: String
+    Default: browser-worker
+  ApplicationQueueName:
+    Type: String
+    Default: openapply-staging-application.fifo
+    AllowedValues: [openapply-staging-application.fifo]
+
+Conditions:
+  LauncherEnabled: !Equals [!Ref EnableFargateLauncher, 'true']
+
+Rules:
+  EnabledConfiguration:
+    RuleCondition: !Equals [!Ref EnableFargateLauncher, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CodeBucket, '']]
+        AssertDescription: Launcher package bucket is required.
+      - Assert: !Not [!Equals [!Ref CodeKey, '']]
+        AssertDescription: Launcher package key is required.
+      - Assert: !Not [!Equals [!Ref ArtifactSigningSecretArn, '']]
+        AssertDescription: A dedicated broker signing secret is required.
+      - Assert: !Not [!Equals [!Ref EcsClusterArn, '']]
+        AssertDescription: Browser cluster is required.
+      - Assert: !Not [!Equals [!Ref EcsTaskDefinitionArn, '']]
+        AssertDescription: Tested queue worker task definition is required.
+      - Assert: !Not [!Equals [!Ref EcsTaskRoleArn, '']]
+        AssertDescription: Narrow browser task role is required.
+      - Assert: !Not [!Equals [!Ref EcsExecutionRoleArn, '']]
+        AssertDescription: Image pull role is required.
+      - Assert: !Not [!Equals [!Ref EcsSecurityGroupId, '']]
+        AssertDescription: Private browser security group is required.
+
+Resources:
+  FargateLauncherRole:
+    Type: AWS::IAM::Role
+    Condition: LauncherEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OpenApplyLaunchOneBrowser
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem]
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EntitlementTableName}'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ArtifactSigningSecretArn
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref EcsTaskDefinitionArn
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Ref EcsClusterArn
+              - Effect: Allow
+                Action: [ecs:DescribeTasks, ecs:StopTask]
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Ref EcsClusterArn
+              - Effect: Allow
+                Action: ecs:ListTasks
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Ref EcsClusterArn
+              - Effect: Allow
+                Action: ecs:TagResource
+                Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/*'
+                Condition:
+                  StringEquals:
+                    ecs:CreateAction: RunTask
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: [!Ref EcsTaskRoleArn, !Ref EcsExecutionRoleArn]
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+  FargateLauncherFunction:
+    Type: AWS::Lambda::Function
+    Condition: LauncherEnabled
+    Properties:
+      FunctionName: openapply-staging-fargate-launcher
+      Runtime: nodejs22.x
+      Handler: aws-fargate-launcher-lambda.handler
+      Role: !GetAtt FargateLauncherRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      ReservedConcurrentExecutions: 1
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          FARGATE_LAUNCH_ENABLED: 'true'
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+          ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
+          ARTIFACT_SIGNING_SECRET_ARN: !Ref ArtifactSigningSecretArn
+          ECS_CLUSTER_ARN: !Ref EcsClusterArn
+          ECS_TASK_DEFINITION_ARN: !Ref EcsTaskDefinitionArn
+          ECS_TASK_ROLE_ARN: !Ref EcsTaskRoleArn
+          PRIVATE_SUBNET_IDS: !Join [',', !Ref PrivateSubnetIds]
+          ECS_SECURITY_GROUP_ID: !Ref EcsSecurityGroupId
+          ECS_CONTAINER_NAME: !Ref EcsContainerName
+          APPLICATION_QUEUE_URL: !Sub 'https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/${ApplicationQueueName}'
+
+  FargateSweepRule:
+    Type: AWS::Events::Rule
+    Condition: LauncherEnabled
+    Properties:
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: launcher-sweep
+          Arn: !GetAtt FargateLauncherFunction.Arn
+
+  FargateSweepPermission:
+    Type: AWS::Lambda::Permission
+    Condition: LauncherEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FargateLauncherFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt FargateSweepRule.Arn
+
+Outputs:
+  LauncherFunctionArn:
+    Condition: LauncherEnabled
+    Value: !GetAtt FargateLauncherFunction.Arn
