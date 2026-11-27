@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { officialJobKey, type OfficialJobIdentity, type SubmissionStatus } from "./durable-journal.js";
-import { requireHostedAccess } from "../hosted/entitlement.js";
+import { HostedAccessDeniedError, requireHostedAccess } from "../hosted/entitlement.js";
 
 export interface CloudRunRecord {
   /** Trusted billing subject bound to this candidate when the run was created. */
@@ -86,7 +86,7 @@ async function hasHostedAccess(subjectId: string, billing: CloudRunPorts["billin
   const records = await billing.loadEntitlements(subjectId);
   try { requireHostedAccess(subjectId, records); return true; }
   catch (error) {
-    if (error instanceof Error && error.message === "Hosted access unavailable") return false;
+    if (error instanceof HostedAccessDeniedError) return false;
     throw error; // Malformed durable state is an infrastructure failure, not a paywall.
   }
 }
