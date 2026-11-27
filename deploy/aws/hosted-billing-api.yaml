@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Staging-only OpenApply Stripe test billing HTTP and scheduled reconciliation.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  BillingTableName:
+    Type: String
+    Default: openapply-staging-billing
+  BillingAccessPolicyArn:
+    Type: String
+  StripeTestSecretArn:
+    Type: String
+  StripeWebhookSecretArn:
+    Type: String
+  AppOrigin:
+    Type: String
+    AllowedPattern: '^https://[a-zA-Z0-9.-]+$'
+  MonthlyPriceId:
+    Type: String
+    AllowedPattern: '^price_[A-Za-z0-9]+$'
+  SemesterPriceId:
+    Type: String
+    AllowedPattern: '^price_[A-Za-z0-9]+$'
+  CognitoIssuer:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoJwksUrl:
+    Type: String
+
+Resources:
+  BillingLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref BillingAccessPolicyArn
+      Policies:
+        - PolicyName: OpenApplyBillingSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripeTestSecretArn
+                  - !Ref StripeWebhookSecretArn
+
+  BillingApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: openapply-staging-billing-api
+      Runtime: nodejs22.x
+      Handler: aws-billing-lambda.handler
+      Role: !GetAtt BillingLambdaRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          STRIPE_MODE: test
+          STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
+          STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          APP_ORIGIN: !Ref AppOrigin
+          MONTHLY_PRICE_ID: !Ref MonthlyPriceId
+          SEMESTER_PRICE_ID: !Ref SemesterPriceId
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+
+  BillingReplayFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: openapply-staging-billing-replay
+      Runtime: nodejs22.x
+      Handler: aws-billing-lambda.scheduledHandler
+      Role: !GetAtt BillingLambdaRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          STRIPE_MODE: test
+          STRIPE_TEST_SECRET_ARN: !Ref StripeTestSecretArn
+          STRIPE_WEBHOOK_SECRET_ARN: !Ref StripeWebhookSecretArn
+          BILLING_TABLE_NAME: !Ref BillingTableName
+          APP_ORIGIN: !Ref AppOrigin
+          MONTHLY_PRICE_ID: !Ref MonthlyPriceId
+          SEMESTER_PRICE_ID: !Ref SemesterPriceId
+          COGNITO_ISSUER: !Ref CognitoIssuer
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_JWKS_URL: !Ref CognitoJwksUrl
+
+  BillingHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: openapply-staging-billing
+      ProtocolType: HTTP
+
+  BillingHttpIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt BillingApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  CheckoutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/billing/checkout'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  CheckoutPreflightRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'OPTIONS /api/billing/checkout'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  WebhookRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      RouteKey: 'POST /api/billing/stripe-webhook'
+      Target: !Sub 'integrations/${BillingHttpIntegration}'
+
+  BillingHttpStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref BillingHttpApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  BillingHttpPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/POST/api/billing/*'
+
+  BillingHttpPreflightPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingApiFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${BillingHttpApi}/*/OPTIONS/api/billing/checkout'
+
+  BillingReplaySchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: openapply-staging-billing-replay
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt BillingReplayFunction.Arn
+          Id: BillingReplay
+
+  BillingReplayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BillingReplayFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BillingReplaySchedule.Arn
+
+Outputs:
+  BillingApiUrl:
+    Value: !GetAtt BillingHttpApi.ApiEndpoint
+  BillingReplayRule:
+    Value: !Ref BillingReplaySchedule
