@@ -151,8 +151,10 @@ describe("durable checkout journal", () => {
 
   it("accepts an opaque OIDC subject with a provider separator", async () => {
     const { journal } = fixture();
-    expect((await journal().reserve("google-oauth2|123", "monthly")).subjectId)
-      .toBe("google-oauth2|123");
+    expect((await journal().reserve("google-oauth2|user@example.com", "monthly")).subjectId)
+      .toBe("google-oauth2|user@example.com");
+    await expect(journal().reserve("candidate\u0085one", "monthly"))
+      .rejects.toThrow("Invalid authenticated subject");
   });
 
   it("prevents simultaneous monthly and semester checkout attempts", async () => {

@@ -13,7 +13,7 @@ const requestKey = (requestId: string) => `REQUEST#${requestId}`;
 const checkoutKey = "CHECKOUT";
 
 function validSubject(subjectId: string): void {
-  if (!subjectId || subjectId.length > 160 || /[\u0000-\u001f\u007f]/.test(subjectId)) {
+  if (!subjectId || subjectId.length > 160 || /[\u0000-\u001f\u007f-\u009f]/u.test(subjectId)) {
     throw new Error("Invalid authenticated subject");
   }
 }
