@@ -11,7 +11,8 @@ const candidateId = "ec5a592a-a5ea-409f-b21b-0064558c72bb";
 const runId = "e4590bf1-91c4-4a63-9203-a8715a68d8d4";
 const pk = `CANDIDATE#${candidateId}`;
 const run = { pk, sk: `RUN#${runId}`, subjectId: "subject-a",
-  consentVersion: 2, job: { provider: "Greenhouse", employerId: "acme",
+  consentVersion: 2, profileArtifactId: "d1718848-6798-4464-b237-28aa7bd71ef9",
+  job: { provider: "Greenhouse", employerId: "acme",
     requisitionId: "42" } };
 const consent = { pk, sk: "CONSENT", runId, version: 2, state: "granted" };
 
@@ -35,12 +36,15 @@ describe("durable hosted run admission", () => {
     expect(await port.loadIdentity(candidateId, runId)).toEqual({
       subjectId: "subject-a", consentVersion: 2, job: run.job,
     });
+    expect(await port.loadProfileArtifactId(candidateId, runId)).toBe(run.profileArtifactId);
   });
 
   it("fails closed for missing, revoked, stale and deleted records", async () => {
     expect(await admission({}).port.ownsRun(candidateId, runId)).toBe(false);
     await expect(admission({}).port.loadIdentity(candidateId, runId))
       .rejects.toThrow("Run unavailable");
+    await expect(admission({ [run.sk]: { ...run, profileArtifactId: undefined } })
+      .port.ownsRun(candidateId, runId)).rejects.toThrow();
     expect(await admission({ [run.sk]: run, CONSENT: { ...consent,
       state: "revoked" } }).port.hasCurrentConsent(candidateId, runId)).toBe(false);
     expect(await admission({ [run.sk]: run, CONSENT: { ...consent,

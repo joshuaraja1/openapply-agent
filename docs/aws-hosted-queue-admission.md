@@ -15,7 +15,9 @@ route in this stack. With no trusted run record, every request fails closed.
 
 The run creator must write a strongly validated `RUN#<runId>` row under
 `CANDIDATE#<candidateId>` with the Cognito subject, positive consent version,
-and official employer/provider/requisition identity. The authenticated
+and official employer/provider/requisition identity, plus an opaque private
+profile artifact ID. Admission rejects rows missing that artifact pointer.
+The authenticated
 consent service writes the corresponding `CONSENT` row through
 `DurableApplicationJournal.grantConsent`. Admission reads both rows
 consistently and denies a `DELETED` tombstone. The final submission journal

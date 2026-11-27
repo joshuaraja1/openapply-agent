@@ -10,6 +10,7 @@ const runRow = z.object({
   pk: z.string(), sk: z.string(),
   subjectId: z.string().trim().min(1).max(128),
   consentVersion: z.number().int().positive(),
+  profileArtifactId: uuid,
   job: z.object({ provider: jobPart, employerId: jobPart,
     requisitionId: jobPart }),
 });
@@ -50,6 +51,12 @@ export class DynamoHostedRunAdmission {
     if (!row) throw new Error("Run unavailable");
     return { subjectId: row.subjectId, consentVersion: row.consentVersion,
       job: row.job };
+  }
+
+  async loadProfileArtifactId(candidateId: string, runId: string): Promise<string> {
+    const row = await this.readRun(candidateId, runId);
+    if (!row) throw new Error("Run unavailable");
+    return row.profileArtifactId;
   }
 
   async hasCurrentConsent(candidateId: string, runId: string): Promise<boolean> {
