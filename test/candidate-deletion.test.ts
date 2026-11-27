@@ -20,8 +20,8 @@ function fixture() {
         return marker;
       },
       async status() { return marker?.state ?? "none"; },
-      async due(nowEpoch) { return marker?.state === "pending" && marker.notBeforeEpoch <= nowEpoch
-        ? [{ candidateId, subjectId }] : []; },
+      async due(nowEpoch) { return { rows: marker?.state === "pending" && marker.notBeforeEpoch <= nowEpoch
+        ? [{ candidateId, subjectId }] : [], malformed: 0 }; },
       async defer() {},
       async hasActiveWriters() { return active; },
       async claimPurge() { if (claimed) return false; claimed = true; return true; },
@@ -93,11 +93,11 @@ describe("hosted candidate deletion", () => {
     await deleteCandidateAccount(subjectId, test.deps, t0);
     test.purge.mockRejectedValueOnce(new Error("partial S3 deletion"));
     const later = new Date(t0.getTime() + 241_000);
-    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 0, failed: 1 });
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 0, failed: 1, malformed: 0 });
     expect(test.marker()?.state).toBe("pending");
-    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 1, failed: 0 });
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 1, completed: 1, failed: 0, malformed: 0 });
     expect(test.marker()?.state).toBe("complete");
-    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 0, completed: 0, failed: 0 });
+    expect(await retryCandidateDeletions(test.deps, later)).toEqual({ attempted: 0, completed: 0, failed: 0, malformed: 0 });
   });
 
   it("returns authenticated status without exposing identity or starting deletion", async () => {

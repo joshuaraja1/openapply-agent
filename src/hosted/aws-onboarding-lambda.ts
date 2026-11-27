@@ -64,7 +64,9 @@ export async function retryHandler(event: { source?: string; "detail-type"?: str
     throw new Error("Deletion retry is disabled or event is invalid");
   }
   cached ??= runtime();
-  return cached.retryDeletions();
+  const result = await cached.retryDeletions();
+  if (result.malformed) console.error(`Deletion retry deferred ${result.malformed} invalid index rows`);
+  return result;
 }
 
 let cached: ReturnType<typeof runtime> | undefined;

@@ -14,7 +14,9 @@ export interface DeletionRecord {
 export interface CandidateDeletionStore {
   begin(candidateId: string, subjectId: string, notBeforeEpoch: number): Promise<DeletionRecord>;
   status(candidateId: string, subjectId: string): Promise<"none" | "pending" | "complete">;
-  due(nowEpoch: number, limit: number): Promise<Array<{ candidateId: string; subjectId: string }>>;
+  due(nowEpoch: number, limit: number): Promise<{
+    rows: Array<{ candidateId: string; subjectId: string }>; malformed: number;
+  }>;
   defer(candidateId: string, subjectId: string, nextEpoch: number): Promise<void>;
   hasActiveWriters(candidateId: string, nowEpoch: number): Promise<boolean>;
   claimPurge(candidateId: string, subjectId: string, nowEpoch: number, owner: string): Promise<boolean>;
@@ -32,7 +34,8 @@ export async function retryCandidateDeletions(deps: CandidateDeletionDeps, now =
   let attempted = 0;
   let completed = 0;
   let failed = 0;
-  for (const row of await deps.store.due(nowEpoch, 25)) {
+  const due = await deps.store.due(nowEpoch, 25);
+  for (const row of due.rows) {
     attempted++;
     try {
       if (deps.candidateIdForSubject(row.subjectId) !== row.candidateId) {
@@ -46,7 +49,7 @@ export async function retryCandidateDeletions(deps: CandidateDeletionDeps, now =
     try { await deps.store.defer(row.candidateId, row.subjectId, nowEpoch + 60); }
     catch { failed++; }
   }
-  return { attempted, completed, failed };
+  return { attempted, completed, failed, malformed: due.malformed };
 }
 
 export interface CandidateDeletionDeps {

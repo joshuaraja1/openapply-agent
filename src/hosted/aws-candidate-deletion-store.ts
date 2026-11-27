@@ -71,16 +71,47 @@ export class DynamoCandidateDeletionStore implements CandidateDeletionStore {
     return row.state;
   }
 
-  async due(nowEpoch: number, limit: number): Promise<Array<{ candidateId: string; subjectId: string }>> {
-    const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
-      IndexName: "DeletionDueIndex",
-      KeyConditionExpression: "deletionIndexPk = :pending AND deletionDue <= :now",
-      ExpressionAttributeValues: { ":pending": "PENDING", ":now": nowEpoch },
-      Limit: Math.min(Math.max(limit, 1), 25) }));
-    return (result.Items ?? []).flatMap(row => row.sk === "DELETED"
-      && typeof row.candidateId === "string" && typeof row.subjectId === "string"
-      && row.pk === `CANDIDATE#${row.candidateId}` && row.state === "pending"
-      ? [{ candidateId: row.candidateId, subjectId: row.subjectId }] : []);
+  async due(nowEpoch: number, limit: number): Promise<{
+    rows: Array<{ candidateId: string; subjectId: string }>; malformed: number;
+  }> {
+    const rows: Array<{ candidateId: string; subjectId: string }> = [];
+    const malformedKeys: Array<{ pk: string; sk: string }> = [];
+    let cursor: Record<string, unknown> | undefined;
+    const pageSize = Math.min(Math.max(limit, 1), 25);
+    for (let page = 0; page < 4 && rows.length < pageSize; page++) {
+      const result = await this.db.send(new QueryCommand({ TableName: this.tableName,
+        IndexName: "DeletionDueIndex",
+        KeyConditionExpression: "deletionIndexPk = :pending AND deletionDue <= :now",
+        ExpressionAttributeValues: { ":pending": "PENDING", ":now": nowEpoch },
+        Limit: pageSize, ...(cursor ? { ExclusiveStartKey: cursor } : {}) }));
+      for (const row of result.Items ?? []) {
+        if (row.sk === "DELETED" && typeof row.candidateId === "string"
+          && typeof row.subjectId === "string" && row.subjectId.length > 0
+          && row.pk === `CANDIDATE#${row.candidateId}` && row.state === "pending") {
+          if (rows.length < pageSize) rows.push({ candidateId: row.candidateId, subjectId: row.subjectId });
+        } else if (typeof row.pk === "string" && typeof row.sk === "string") {
+          malformedKeys.push({ pk: row.pk, sk: row.sk });
+        } else {
+          // DynamoDB always projects base-table keys into a GSI. If that
+          // invariant fails, surface an error rather than silently skipping.
+          throw new Error("Deletion retry index row has no table key");
+        }
+      }
+      if (!result.LastEvaluatedKey) break;
+      cursor = result.LastEvaluatedKey;
+    }
+    // Preserve malformed rows for repair, but move them out of the immediate
+    // due window. A finite corrupt backlog cannot starve valid deletions.
+    for (const marker of malformedKeys) {
+      try {
+        await this.db.send(new UpdateCommand({ TableName: this.tableName, Key: marker,
+          UpdateExpression: "SET deletionDue = :later, deletionRetryError = :reason",
+          ConditionExpression: "deletionIndexPk = :pending AND deletionDue <= :now",
+          ExpressionAttributeValues: { ":later": nowEpoch + 3600, ":reason": "invalid-marker",
+            ":pending": "PENDING", ":now": nowEpoch } }));
+      } catch (error) { if (!conditional(error)) throw error; }
+    }
+    return { rows, malformed: malformedKeys.length };
   }
 
   async defer(candidateId: string, subjectId: string, nextEpoch: number): Promise<void> {

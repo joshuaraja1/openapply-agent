@@ -26,6 +26,12 @@ prevents two requests from deleting the same candidate concurrently; the claim
 is released after a completed or failed attempt. `200 complete` is returned only after
 the purge and ledger cleanup finish.
 
+The due-index reader pages through at most four bounded pages per tick. An
+indexed row with malformed marker fields is retained and deferred one hour with
+the generic `invalid-marker` reason; a count-only error is emitted for operator
+review. This prevents a finite malformed backlog from permanently occupying
+the first due page while leaving the underlying tombstones available to repair.
+
 The API and Cloudflare route have a separate `EnableCandidateDeletion=false`
 staging default in addition to `EnableOnboarding=false`; the retry rule has its
 own `EnableDeletionRetry=false` default. The sign-in site exposes a deletion

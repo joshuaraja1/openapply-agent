@@ -169,13 +169,47 @@ describe("candidate deletion Dynamo boundary", () => {
     });
     const store = new DynamoCandidateDeletionStore({ send } as unknown as
       Pick<DynamoDBDocumentClient, "send">, "ledger");
-    expect(await store.due(1000, 1000)).toEqual([{ candidateId, subjectId: "sub-1" }]);
+    expect(await store.due(1000, 1000)).toEqual({
+      rows: [{ candidateId, subjectId: "sub-1" }], malformed: 1 });
     await store.defer(candidateId, "sub-1", 1060);
     await store.markComplete(candidateId, "sub-1");
     const query = commands[0] as QueryCommand;
     expect(query.input.IndexName).toBe("DeletionDueIndex");
     expect(query.input.Limit).toBe(25);
-    const completed = commands[2] as UpdateCommand;
+    const completed = commands.filter(command => command instanceof UpdateCommand)
+      .at(-1) as UpdateCommand;
     expect(completed.input.UpdateExpression).toContain("REMOVE deletionIndexPk, deletionDue");
+  });
+
+  it("pages past 25 malformed due rows and defers them without losing a valid retry", async () => {
+    const commands: unknown[] = [];
+    let pages = 0;
+    const send = vi.fn(async (command: unknown) => {
+      commands.push(command);
+      if (!(command instanceof QueryCommand)) return {};
+      if (pages++ === 0) return { Items: Array.from({ length: 25 }, (_, index) => ({
+        pk: `CANDIDATE#bad-${index}`, sk: "DELETED", candidateId: "different",
+        subjectId: "private-subject", state: "pending" })),
+        LastEvaluatedKey: { pk: "CANDIDATE#bad-24", sk: "DELETED",
+          deletionIndexPk: "PENDING", deletionDue: 1000 } };
+      return { Items: [{ pk, sk: "DELETED", candidateId,
+        subjectId: "sub-1", state: "pending" }] };
+    });
+    const store = new DynamoCandidateDeletionStore({ send } as unknown as
+      Pick<DynamoDBDocumentClient, "send">, "ledger");
+    expect(await store.due(1000, 25)).toEqual({
+      rows: [{ candidateId, subjectId: "sub-1" }], malformed: 25 });
+    const queries = commands.filter(command => command instanceof QueryCommand) as QueryCommand[];
+    expect(queries).toHaveLength(2);
+    expect(queries[1]?.input.ExclusiveStartKey).toEqual(queries[0]?.input.ExclusiveStartKey
+      ?? { pk: "CANDIDATE#bad-24", sk: "DELETED", deletionIndexPk: "PENDING", deletionDue: 1000 });
+    const updates = commands.filter(command => command instanceof UpdateCommand) as UpdateCommand[];
+    expect(updates).toHaveLength(25);
+    for (const update of updates) {
+      expect(update.input.UpdateExpression).toContain("deletionDue = :later");
+      expect(update.input.ExpressionAttributeValues).toMatchObject({
+        ":later": 4600, ":reason": "invalid-marker" });
+      expect(JSON.stringify(update.input.ExpressionAttributeValues)).not.toContain("private-subject");
+    }
   });
 });
