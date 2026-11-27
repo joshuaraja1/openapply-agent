@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Optional bounded official ATS lead sync for OpenApply staging. Disabled by default.
+
+Parameters:
+  EnableOfficialLeadSync:
+    Type: String
+    AllowedValues: ['false', 'true']
+    Default: 'false'
+  EnableSchedule:
+    Type: String
+    AllowedValues: ['false', 'true']
+    Default: 'false'
+  CodeBucket:
+    Type: String
+    Default: ''
+  CodeKey:
+    Type: String
+    Default: ''
+  RunLedgerTableName:
+    Type: String
+    Default: openapply-staging-run-ledger
+    AllowedValues: [openapply-staging-run-ledger]
+  OfficialSourcesJson:
+    Type: String
+    Default: ''
+    Description: Operator-controlled JSON config for fixed official API providers only; never a candidate-supplied URL.
+
+Conditions:
+  SyncEnabled: !Equals [!Ref EnableOfficialLeadSync, 'true']
+  ScheduleEnabled: !Equals [!Ref EnableSchedule, 'true']
+
+Rules:
+  EnabledConfiguration:
+    RuleCondition: !Equals [!Ref EnableOfficialLeadSync, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CodeBucket, '']]
+        AssertDescription: Reviewed Lambda code bucket required.
+      - Assert: !Not [!Equals [!Ref CodeKey, '']]
+        AssertDescription: Reviewed Lambda code key required.
+      - Assert: !Not [!Equals [!Ref OfficialSourcesJson, '']]
+        AssertDescription: Operator official source configuration required.
+
+Resources:
+  OfficialLeadSyncRole:
+    Type: AWS::IAM::Role
+    Condition: SyncEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OfficialLeadRowsOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:PutItem,
+                  dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem]
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RunLedgerTableName}'
+                Condition:
+                  ForAllValues:StringLike:
+                    dynamodb:LeadingKeys: ['LEAD#*', 'SOURCE#*']
+                  'Null':
+                    dynamodb:LeadingKeys: 'false'
+
+  OfficialLeadSyncFunction:
+    Type: AWS::Lambda::Function
+    Condition: SyncEnabled
+    Properties:
+      FunctionName: openapply-staging-official-leads
+      Runtime: nodejs22.x
+      Handler: aws-official-lead-sync-lambda.handler
+      Role: !GetAtt OfficialLeadSyncRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      Environment:
+        Variables:
+          OFFICIAL_LEAD_SYNC_ENABLED: 'true'
+          OFFICIAL_SOURCES_JSON: !Ref OfficialSourcesJson
+          RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
+
+  OfficialLeadSyncRule:
+    Type: AWS::Events::Rule
+    Condition: SyncEnabled
+    Properties:
+      Description: Bounded official ATS feed refresh; opt in after source review.
+      ScheduleExpression: rate(5 minutes)
+      State: !If [ScheduleEnabled, ENABLED, DISABLED]
+      Targets:
+        - Arn: !GetAtt OfficialLeadSyncFunction.Arn
+          Id: OfficialLeadSync
+
+  OfficialLeadSyncPermission:
+    Type: AWS::Lambda::Permission
+    Condition: SyncEnabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OfficialLeadSyncFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OfficialLeadSyncRule.Arn
+
+Outputs:
+  OfficialLeadSyncArn:
+    Condition: SyncEnabled
+    Value: !GetAtt OfficialLeadSyncFunction.Arn
+  OfficialLeadSyncRuleName:
+    Condition: SyncEnabled
+    Value: !Ref OfficialLeadSyncRule
