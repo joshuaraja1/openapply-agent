@@ -7,13 +7,22 @@ export interface CheckoutReservation {
   requestId: string;
   subjectId: string;
   customerId: string;
+  createdAt: string;
+  session?: CheckoutSessionRecord;
+}
+
+export interface CheckoutSessionRecord {
+  sessionId: string;
+  url: string;
+  expiresAt: string;
 }
 
 export interface CheckoutPorts {
-  /** Must reject an existing paid plan or another live checkout for this subject. */
+  /** Reuse an open attempt for this subject and plan. Never replace it without
+   * expiring its Stripe session and closing the attempt in durable state. */
   reserve(subjectId: string, plan: HostedPlan): Promise<CheckoutReservation>;
-  /** Reuse the reservation after a retry; never create a second customer binding. */
-  recordSession(requestId: string, sessionId: string): Promise<void>;
+  /** Atomically attach a session if empty or identical; reject a different ID. */
+  recordSession(requestId: string, session: CheckoutSessionRecord): Promise<void>;
 }
 
 export interface CheckoutConfig {
@@ -21,6 +30,17 @@ export interface CheckoutConfig {
   /** The account mode expected by this deployment, independent of caller input. */
   livemode: boolean;
   appOrigin: string;
+}
+
+const MAX_RETRY_AGE_MS = 20 * 60 * 60 * 1000;
+
+function validSession(record: CheckoutSessionRecord, now: number): void {
+  if (!/^cs_[A-Za-z0-9_]+$/.test(record.sessionId)
+    || new URL(record.url).origin !== "https://checkout.stripe.com"
+    || !Number.isFinite(Date.parse(record.expiresAt))
+    || Date.parse(record.expiresAt) <= now) {
+    throw new Error("Stripe checkout session is invalid or expired");
+  }
 }
 
 function appUrl(origin: string, path: string): string {
@@ -37,7 +57,8 @@ export async function createHostedCheckout(
   config: CheckoutConfig,
   stripe: Pick<Stripe, "prices" | "checkout">,
   ports: CheckoutPorts,
-): Promise<{ sessionId: string; url: string }> {
+  now: Date = new Date(),
+): Promise<CheckoutSessionRecord> {
   if (!subjectId.trim() || (plan !== "monthly" && plan !== "semester")) {
     throw new Error("Authenticated candidate and supported plan required");
   }
@@ -52,32 +73,49 @@ export async function createHostedCheckout(
     appUrl(config.appOrigin, "/billing/cancel"),
   ];
   const price = await stripe.prices.retrieve(priceId);
-  const intervalCount = plan === "monthly" ? 1 : 4;
   if (!price.active || price.livemode !== config.livemode || price.currency !== "usd"
-    || price.recurring?.interval !== "month"
-    || (price.recurring.interval_count ?? 1) !== intervalCount
+    || (plan === "monthly"
+      ? price.recurring?.interval !== "month" || (price.recurring.interval_count ?? 1) !== 1
+      : price.type !== "one_time" || price.recurring !== null)
     || price.unit_amount !== configuredPrice.amountCents) {
     throw new Error("Stripe price does not match the configured hosted plan");
   }
   const reservation = await ports.reserve(subjectId, plan);
-  if (reservation.subjectId !== subjectId || !reservation.requestId.trim()
+  if (reservation.subjectId !== subjectId || !/^[A-Za-z0-9_-]{1,160}$/.test(reservation.requestId)
     || !/^cus_[A-Za-z0-9]+$/.test(reservation.customerId)) {
     throw new Error("Checkout reservation is not bound to this candidate");
   }
+  const nowMs = now.getTime();
+  const createdMs = Date.parse(reservation.createdAt);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(createdMs) || createdMs > nowMs + 5 * 60_000) {
+    throw new Error("Checkout reservation has an invalid creation time");
+  }
+  if (reservation.session) {
+    validSession(reservation.session, nowMs);
+    return reservation.session;
+  }
+  // Stripe API v1 may forget an idempotency key after 24 hours. A crash after
+  // Stripe creates the session but before our journal records it must fail
+  // closed rather than create a second session after the key is pruned.
+  if (nowMs - createdMs >= MAX_RETRY_AGE_MS) {
+    throw new Error("Checkout reservation requires reconciliation before retry");
+  }
   const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
+    mode: plan === "monthly" ? "subscription" : "payment",
     customer: reservation.customerId,
     client_reference_id: subjectId,
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: successUrl,
     cancel_url: cancelUrl,
     metadata: { subjectId, plan, requestId: reservation.requestId },
-    subscription_data: { metadata: { subjectId, plan } },
+    ...(plan === "monthly" ? { subscription_data: { metadata: { subjectId, plan } } } : {}),
   }, { idempotencyKey: `openapply-checkout-${reservation.requestId}` });
-  if (!session.id.startsWith("cs_") || !session.url
-    || new URL(session.url).origin !== "https://checkout.stripe.com") {
+  if (!session.url || !session.expires_at) {
     throw new Error("Stripe did not return a hosted checkout session");
   }
-  await ports.recordSession(reservation.requestId, session.id);
-  return { sessionId: session.id, url: session.url };
+  const record = { sessionId: session.id, url: session.url,
+    expiresAt: new Date(session.expires_at * 1000).toISOString() };
+  validSession(record, nowMs);
+  await ports.recordSession(reservation.requestId, record);
+  return record;
 }
