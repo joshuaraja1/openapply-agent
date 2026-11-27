@@ -54,7 +54,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && node --test scripts/stripe-sandbox-smoke.test.mjs && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
