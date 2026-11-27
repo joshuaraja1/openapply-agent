@@ -15,8 +15,10 @@ to this table. Store the Stripe key outside DynamoDB in a secret manager.
 | Entitlement | `SUBJECT#<sub>` | `ENTITLEMENT#<kind>#<sourceId>` | Read by the queue gate; written only after verified billing reconciliation |
 | Billing event | `BILLING_EVENT#<eventId>` | `RECONCILE` | Webhook deduplication and retry record |
 
-The journal's `assertNoPaidAccess` callback is required and must read the
-authoritative entitlement store before reserving a Checkout. The server derives
+The journal's `assertNoPaidAccess` callback is required. The composition root
+must call the billing store's strongly validated `hasPaidAccess(subjectId)` and
+throw when an active paid subscription or semester grant exists. Billing read
+errors must fail closed. A free grant may upgrade to a paid plan. The server derives
 `subjectId` from a verified login; neither subject nor customer IDs may come
 from a browser body. Customer binding and the reverse row are committed in one
 transaction. Reservation and request lookup are also committed together.
