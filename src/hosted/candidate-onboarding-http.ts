@@ -60,6 +60,15 @@ export async function handleCandidateOnboardingHttp(request: Request, deps: Onbo
       }
     } catch { return respond(503, { error: "Plan status is temporarily unavailable" }); }
   }
+  try {
+    requireHostedAccess(subjectId, await deps.loadEntitlements(subjectId));
+  } catch (error) {
+    if (error instanceof Error && error.message === "Hosted access unavailable") {
+      return respond(403, { error: "Active plan required" });
+    }
+    // An unreadable or malformed entitlement must never grant storage access.
+    return respond(503, { error: "Candidate setup is temporarily unavailable" });
+  }
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) {
     return respond(415, { error: "JSON request required" });
   }
