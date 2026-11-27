@@ -26,7 +26,7 @@ const requirements = {
     EnableOnboarding: 'true', EnableCandidateDeletion: 'true',
     EnableDeletionRetry: 'true', EnableDeletionEcsStop: 'true' } },
   broker: { outputs: ['BrokerFunctionArn'] },
-  syntheticTask: { outputs: ['TaskDefinitionArn', 'TaskRoleArn'], parameters: {
+  syntheticTask: { outputs: ['TaskDefinitionArn', 'TaskRoleArn', 'ExecutionRoleArn'], parameters: {
     EnableSyntheticQueueTask: 'true' } },
   launcher: { outputs: ['LauncherFunctionArn'], parameters: {
     EnableFargateLauncher: 'true', DeletionStopGateReady: 'true' } },
@@ -80,8 +80,8 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       && /^[a-f0-9]{64}$/.test(browser.image.slice(`${repository}@sha256:`.length));
     const taskRole = stacks.syntheticTask?.Outputs?.find((item) =>
       item.OutputKey === 'TaskRoleArn')?.OutputValue;
-    const executionRole = stacks.syntheticTask?.Parameters?.find((item) =>
-      item.ParameterKey === 'ExecutionRoleArn')?.ParameterValue;
+    const executionRole = stacks.syntheticTask?.Outputs?.find((item) =>
+      item.OutputKey === 'ExecutionRoleArn')?.OutputValue;
     const safe = taskRole && taskDefinition?.taskRoleArn === taskRole
       && executionRole && taskDefinition?.executionRoleArn === executionRole
       && immutableImage
@@ -105,7 +105,7 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       ['launcher', 'EcsClusterArn', output('browserSmoke', 'ClusterArn')],
       ['launcher', 'EcsTaskDefinitionArn', output('syntheticTask', 'TaskDefinitionArn')],
       ['launcher', 'EcsTaskRoleArn', output('syntheticTask', 'TaskRoleArn')],
-      ['launcher', 'EcsExecutionRoleArn', taskDefinition?.executionRoleArn],
+      ['launcher', 'EcsExecutionRoleArn', output('syntheticTask', 'ExecutionRoleArn')],
       ['launcher', 'EcsSecurityGroupId', output('browserSmoke', 'EgressOnlySecurityGroupId')],
       ['launcher', 'PrivateSubnetIds', output('egress', 'PrivateSubnetId')],
       ['broker', 'ArtifactKmsKeyArn', output('onboarding', 'CandidateDataKeyArn')],

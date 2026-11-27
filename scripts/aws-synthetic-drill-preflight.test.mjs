@@ -20,7 +20,7 @@ function readyFixture() {
     browserSmoke: ['ClusterArn', 'RepositoryUri', 'EgressOnlySecurityGroupId'],
     code: ['CodeBucketName'], cognito: ['Issuer', 'ClientId', 'JwksUrl'],
     onboarding: ['CandidateDataKeyArn'], broker: ['BrokerFunctionArn'],
-    syntheticTask: ['TaskDefinitionArn', 'TaskRoleArn'],
+    syntheticTask: ['TaskDefinitionArn', 'TaskRoleArn', 'ExecutionRoleArn'],
     launcher: ['LauncherFunctionArn'], egress: ['PrivateSubnetId'],
   };
   const parameters = {
@@ -51,6 +51,7 @@ function readyFixture() {
   setOutput('broker', 'BrokerFunctionArn', 'arn:aws:lambda:us-east-1:123456789012:function:broker');
   setOutput('syntheticTask', 'TaskDefinitionArn', 'arn:aws:ecs:us-east-1:123456789012:task-definition/synthetic:1');
   setOutput('syntheticTask', 'TaskRoleArn', 'arn:aws:iam::123456789012:role/synthetic');
+  setOutput('syntheticTask', 'ExecutionRoleArn', 'arn:aws:iam::123456789012:role/execution');
   setOutput('egress', 'PrivateSubnetId', 'subnet-12345678');
   for (const [name, value] of [
     ['EcsClusterArn', stacks.browserSmoke.Outputs.find((item) => item.OutputKey === 'ClusterArn').OutputValue],
@@ -65,7 +66,6 @@ function readyFixture() {
     setParameter(key, 'ArtifactBucketName', 'fixture-bucket');
   }
   setParameter('syntheticTask', 'ArtifactBrokerArn', stacks.broker.Outputs[0].OutputValue);
-  setParameter('syntheticTask', 'ExecutionRoleArn', 'arn:aws:iam::123456789012:role/execution');
   const task = { taskRoleArn: 'arn:aws:iam::123456789012:role/synthetic',
     executionRoleArn: 'arn:aws:iam::123456789012:role/execution',
     containerDefinitions: [{ name: 'browser-worker', environment: [
@@ -130,6 +130,14 @@ test('rejects a task with wrong entrypoint mode or a different task role', () =>
   task.containerDefinitions[0].environment.find((item) =>
     item.name === 'OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK').value = '0';
   task.taskRoleArn = 'arn:aws:iam::123456789012:role/broad';
+  const result = assessInventory('123456789012', '123456789012', stacks, task);
+  assert.equal(result.inventoryComplete, false);
+  assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
+});
+
+test('rejects a task that uses another execution role', () => {
+  const { stacks, task } = readyFixture();
+  task.executionRoleArn = 'arn:aws:iam::123456789012:role/broad-execution';
   const result = assessInventory('123456789012', '123456789012', stacks, task);
   assert.equal(result.inventoryComplete, false);
   assert.equal(result.checks.find((check) => check.gate === 'synthetic-task-mode').ok, false);
