@@ -13,7 +13,9 @@ deleted and reach the queue's dead-letter queue after its configured retries.
 
 `createAwsQueuedRunRuntime` connects the handler to strongly consistent
 entitlement and run/consent reads, the DynamoDB submit journal, KMS-wrapped
-candidate artifacts in private S3, and the SQS receiver. The trusted run row,
+candidate artifacts in private S3, and the SQS receiver. It now requires a
+broker-issued candidate/run-scoped STS grant and constructs artifact clients
+from that grant; see `docs/aws-artifact-credential-broker.md`. The trusted run row,
 not the SQS body, supplies the subject, job, and profile artifact ID. The vault
 restores plaintext to an owner-only task-local file and removes it after use.
 The runtime requires a separately reviewed browser adapter and an exact-job
@@ -23,12 +25,11 @@ receipt verifier; this PR supplies neither, so it cannot submit to a site.
 
 1. Finish hosted profile deletion and consent withdrawal, including worker
    interruption and purge of every S3 version (issue #243).
-2. Review the browser task's IAM boundary. Giving every candidate task direct
-   read access to `candidates/*` would allow a compromised task to request
-   another candidate's ciphertext and KMS decryption. Use tenant-scoped
-   credentials or a trusted broker that authorizes the active lease and exact
-   artifact before returning bytes. Deny public CDP/VNC and task metadata
-   access from untrusted browser pages.
+2. Deploy and test the artifact credential broker. The task role must have no
+   direct S3/KMS access; a 15-minute STS grant must be restricted to one
+   candidate. The trusted launcher, capability distribution, cross-tenant IAM
+   proof, and credential expiry behavior remain untested. Deny public CDP/VNC
+   and task metadata access from untrusted browser pages.
 3. Install an on-demand task launcher and a reviewed provider adapter. Bound
    task lifetime, renew the durable lease during long preparation, and extend
    SQS visibility or reconcile redelivery. Keep real submission disabled until

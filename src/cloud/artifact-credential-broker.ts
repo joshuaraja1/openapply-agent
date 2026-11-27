@@ -1,0 +1,135 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { AssumeRoleCommand, type STSClient } from "@aws-sdk/client-sts";
+import { z } from "zod";
+import { requireHostedAccess } from "../hosted/entitlement.js";
+
+const uuid = z.uuid().refine(value => value === value.toLowerCase());
+const capabilitySchema = z.strictObject({
+  version: z.literal(1), candidateId: uuid, runId: uuid,
+  issuedAt: z.number().int().nonnegative(), expiresAt: z.number().int().positive(),
+  nonce: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
+});
+export type ArtifactRunCapability = z.infer<typeof capabilitySchema>;
+
+function signingKey(value: Uint8Array): Uint8Array {
+  if (value.byteLength < 32) throw new Error("Artifact broker signing key is too short");
+  return value;
+}
+
+/** A trusted task launcher passes this bearer capability in ECS task overrides,
+ * never in SQS, logs, or candidate-visible URLs. */
+export function mintArtifactRunCapability(candidateId: string, runId: string,
+  secret: Uint8Array, nowEpoch: number, lifetimeSeconds = 1800): string {
+  if (!Number.isSafeInteger(nowEpoch) || nowEpoch < 0
+    || !Number.isInteger(lifetimeSeconds) || lifetimeSeconds < 60 || lifetimeSeconds > 1800) {
+    throw new Error("Invalid task capability lifetime");
+  }
+  const claims = capabilitySchema.parse({ version: 1, candidateId, runId,
+    issuedAt: nowEpoch, expiresAt: nowEpoch + lifetimeSeconds,
+    nonce: randomBytes(16).toString("base64url") });
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const signature = createHmac("sha256", signingKey(secret)).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+export function verifyArtifactRunCapability(token: string, secret: Uint8Array,
+  nowEpoch: number): ArtifactRunCapability {
+  if (!Number.isSafeInteger(nowEpoch) || nowEpoch < 0 || token.length > 800) {
+    throw new Error("Task capability unavailable");
+  }
+  const match = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!match) throw new Error("Task capability unavailable");
+  const actual = Buffer.from(match[2]!, "base64url");
+  const expected = createHmac("sha256", signingKey(secret)).update(match[1]!).digest();
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error("Task capability unavailable");
+  }
+  const bytes = Buffer.from(match[1]!, "base64url");
+  if (bytes.toString("base64url") !== match[1] || bytes.length > 512) {
+    throw new Error("Task capability unavailable");
+  }
+  const claims = capabilitySchema.parse(JSON.parse(bytes.toString("utf8")));
+  if (claims.issuedAt > nowEpoch + 30 || claims.expiresAt <= nowEpoch
+    || claims.expiresAt - claims.issuedAt > 1800) {
+    throw new Error("Task capability unavailable");
+  }
+  return claims;
+}
+
+export interface ArtifactBrokerConfiguration {
+  dataRoleArn: string;
+  artifactBucket: string;
+  kmsKeyArn: string;
+}
+
+/** The assumed role has a bucket/key ceiling of its own. This inline session
+ * policy intersects that ceiling and narrows one task to one candidate. */
+export function candidateArtifactSessionPolicy(candidateId: string,
+  config: ArtifactBrokerConfiguration): string {
+  const id = uuid.parse(candidateId);
+  if (!/^[a-z0-9][a-z0-9.-]{2,62}$/.test(config.artifactBucket)
+    || !/^arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:key\/[a-f0-9-]+$/.test(config.kmsKeyArn)) {
+    throw new Error("Artifact broker storage configuration is invalid");
+  }
+  return JSON.stringify({ Version: "2012-10-17", Statement: [
+    { Effect: "Allow", Action: ["s3:GetObject", "s3:PutObject"],
+      Resource: `arn:aws:s3:::${config.artifactBucket}/candidates/${id}/artifacts/*` },
+    { Effect: "Allow", Action: ["kms:Decrypt", "kms:GenerateDataKey"],
+      Resource: config.kmsKeyArn,
+      Condition: { StringEquals: {
+        "kms:EncryptionContext:application": "openapply",
+        "kms:EncryptionContext:version": "1",
+        "kms:EncryptionContext:candidateId": id,
+      }, Null: { "kms:EncryptionContext:artifactId": "false" } } },
+  ] });
+}
+
+export interface ScopedArtifactCredentials {
+  candidateId: string;
+  runId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
+  expiresAt: string;
+}
+
+/** Broker is the only principal allowed to assume the data role. The task
+ * role cannot call S3/KMS directly and cannot mint another candidate's token. */
+export async function issueCandidateArtifactCredentials(token: string,
+  secret: Uint8Array, nowEpoch: number, config: ArtifactBrokerConfiguration,
+  ports: {
+    admission: {
+      hasCurrentConsent(candidateId: string, runId: string): Promise<boolean>;
+      loadIdentity(candidateId: string, runId: string): Promise<{ subjectId: string }>;
+    };
+    billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
+    sts: Pick<STSClient, "send">;
+  }): Promise<ScopedArtifactCredentials> {
+  const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
+  if (!/^arn:aws[a-z-]*:iam::\d{12}:role\/[A-Za-z0-9+=,.@_\/-]+$/.test(config.dataRoleArn)) {
+    throw new Error("Artifact broker role configuration is invalid");
+  }
+  if (!await ports.admission.hasCurrentConsent(claims.candidateId, claims.runId)) {
+    throw new Error("Task artifact access unavailable");
+  }
+  const run = await ports.admission.loadIdentity(claims.candidateId, claims.runId);
+  requireHostedAccess(run.subjectId, await ports.billing.loadEntitlements(run.subjectId),
+    new Date(nowEpoch * 1000));
+  if (!await ports.admission.hasCurrentConsent(claims.candidateId, claims.runId)) {
+    throw new Error("Task artifact access unavailable");
+  }
+  const result = await ports.sts.send(new AssumeRoleCommand({
+    RoleArn: config.dataRoleArn,
+    RoleSessionName: `oa-${claims.runId.slice(0, 8)}`,
+    DurationSeconds: 900,
+    Policy: candidateArtifactSessionPolicy(claims.candidateId, config),
+  }));
+  const credentials = result.Credentials;
+  if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken
+    || !credentials.Expiration || credentials.Expiration.getTime() <= (nowEpoch + 60) * 1000) {
+    throw new Error("Scoped artifact credentials unavailable");
+  }
+  return { candidateId: claims.candidateId, runId: claims.runId,
+    accessKeyId: credentials.AccessKeyId, secretAccessKey: credentials.SecretAccessKey,
+    sessionToken: credentials.SessionToken, expiresAt: credentials.Expiration.toISOString() };
+}
