@@ -66,3 +66,6 @@ Content-Type, Origin, and a body bounded to 1 KiB; uses a 10-second timeout;
 blocks redirects; strips cookies; and returns no-store. The AWS API verifies
 the JWT and applies billing and candidate authorization; the Worker grants no
 access. Other `/api/*` paths return 404 until separately implemented.
+The AWS billing stack's `AppOrigin` must equal the public Worker hostname; a
+callback migration that updates only Cognito and the Worker will leave billing
+status and Checkout unavailable.
