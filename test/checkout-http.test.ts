@@ -68,6 +68,15 @@ describe("hosted checkout HTTP boundary", () => {
     }), expect.objectContaining({ idempotencyKey: "openapply-checkout-req_1" }));
   });
 
+  it("accepts an opaque OIDC subject containing an identity-provider separator", async () => {
+    const { token, verifier } = await signedToken("google-oauth2|123");
+    const deps = services();
+    const response = await handleCheckoutHttp(request(token, { plan: "semester" }),
+      { ...deps, config, verifySubject: verifier });
+    expect(response.status).toBe(200);
+    expect(deps.reserve).toHaveBeenCalledWith("google-oauth2|123", "semester");
+  });
+
   it("rejects untrusted Origin before calling Stripe", async () => {
     const { token, verifier } = await signedToken();
     const deps = services();

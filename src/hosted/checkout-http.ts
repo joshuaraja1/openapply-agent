@@ -39,7 +39,8 @@ export function createOidcSubjectVerifier(config: OidcConfig, keySet?: JWTVerify
       clockTolerance: "30 seconds",
       maxTokenAge: "1 hour",
     });
-    if (!payload.exp || !payload.sub || !/^[A-Za-z0-9._~:-]{1,160}$/.test(payload.sub)) {
+    if (!payload.exp || !payload.sub?.trim() || payload.sub.length > 160
+      || /[\u0000-\u001f\u007f]/.test(payload.sub)) {
       throw new Error("OIDC token lacks a usable subject or expiry");
     }
     return payload.sub;
