@@ -99,16 +99,15 @@ async function sweepHandler(config: FargateLaunchConfig) {
   const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   const store = new DynamoFargateLaunchStore(db, config.ledgerTable);
   const ecs = new ECSClient({});
-  const priorSlot = await store.readActiveSlot();
-  const sweep = await sweepFargateSlot(config, { store, ecs });
-  if (sweep === "stopped" && priorSlot) {
-    await reconcileStoppedDispatch(priorSlot.candidateId, priorSlot.runId, {
+  const sweep = await sweepFargateSlot(config, { store, ecs,
+    async onStopped(candidateId, runId, generation) {
+      await reconcileStoppedDispatch(candidateId, runId, generation, {
       dispatch: new DynamoApplicationDispatchStore(db, config.ledgerTable),
       admission: new DynamoHostedRunAdmission(db, config.ledgerTable),
       journal: new DurableApplicationJournal(db, config.ledgerTable),
-      launch: store,
-    });
-  }
+      });
+    },
+  });
   if (sweep === "waiting" || sweep === "stopping") return { status: sweep };
   const secret = await readSigningKey();
   try {
@@ -126,12 +125,15 @@ async function sweepHandler(config: FargateLaunchConfig) {
 
 /** A stopped browser task cannot be relaunched with its old capability.
  * Repair a confirmed run; hold every other outcome for explicit review. */
-export async function reconcileStoppedDispatch(candidateId: string, runId: string, ports: {
+export async function reconcileStoppedDispatch(candidateId: string, runId: string,
+  generation: number, ports: {
   dispatch: Pick<DynamoApplicationDispatchStore, "read" | "markCompleted" | "markNeedsReconciliation" | "markRetryable">;
   admission: Pick<DynamoHostedRunAdmission, "loadIdentity">;
   journal: Pick<DurableApplicationJournal, "readSubmission">;
-  launch: Pick<DynamoFargateLaunchStore, "read">;
 }): Promise<"absent" | "completed" | "retryable" | "needs_reconciliation"> {
+  if (!Number.isSafeInteger(generation) || generation < 0 || generation > 2) {
+    throw new Error("Invalid stopped launch generation");
+  }
   const row = await ports.dispatch.read(candidateId, runId);
   if (!row) return "absent";
   if (row.state === "completed") return "completed";
@@ -142,9 +144,7 @@ export async function reconcileStoppedDispatch(candidateId: string, runId: strin
     await ports.dispatch.markCompleted(candidateId, runId);
     return "completed";
   }
-  const launched = await ports.launch.read(candidateId, runId);
-  if (submission.status === "not_started" && launched?.state === "stopped"
-    && launched.generation < 2) {
+  if (submission.status === "not_started" && generation < 2) {
     await ports.dispatch.markRetryable(candidateId, runId);
     return "retryable";
   }

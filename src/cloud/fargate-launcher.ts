@@ -139,7 +139,8 @@ export class DynamoFargateLaunchStore {
       } catch (error) {
         const name = (error as { name?: string }).name;
         if (name !== "TransactionCanceledException" && name !== "ConditionalCheckFailedException") throw error;
-        return await this.read(row.candidateId, row.runId) ? "existing" : "busy";
+        const current = await this.read(row.candidateId, row.runId);
+        return current?.state === "stopped" ? "busy" : current ? "existing" : "busy";
       }
     }
     if (existing) return "existing";
@@ -232,7 +233,10 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
   const result = await ports.store.reserve(fresh);
   if (result === "busy") return "capacity_busy";
   const row = await ports.store.read(candidateId, runId);
-  if (!row || row.configHash !== configHash || row.clientToken !== clientToken) {
+  const expectedToken = row?.generation
+    ? createHash("sha256").update(`${candidateId}:${runId}:${row.generation}`).digest("hex")
+    : clientToken;
+  if (!row || row.configHash !== configHash || row.clientToken !== expectedToken) {
     throw new Error("Existing launch configuration differs");
   }
   if (row.state === "stopped") return "already_stopped";
@@ -243,7 +247,7 @@ export async function launchQueuedFargateRun(candidateId: string, runId: string,
   if (!await ports.authorize(candidateId, runId)) throw new Error("Run launch unauthorized");
   const response = await ports.ecs.send(new RunTaskCommand({
     cluster: config.clusterArn, taskDefinition: config.taskDefinitionArn,
-    launchType: "FARGATE", count: 1, clientToken,
+    launchType: "FARGATE", count: 1, clientToken: row.clientToken,
     startedBy: runId,
     enableExecuteCommand: false,
     networkConfiguration: { awsvpcConfiguration: {
@@ -294,7 +298,8 @@ export async function stopFargateRun(candidateId: string, runId: string,
  * stops tasks at the 15-minute staging cost cap, and frees the slot only
  * after ECS confirms STOPPED. Missing/ambiguous ECS state stays fenced. */
 export async function sweepFargateSlot(config: FargateLaunchConfig,
-  ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send"> },
+  ports: { store: DynamoFargateLaunchStore; ecs: Pick<ECSClient, "send">;
+    onStopped?(candidateId: string, runId: string, generation: number): Promise<void> },
   nowEpoch = Math.floor(Date.now() / 1000)): Promise<"idle" | "waiting" | "stopping" | "stopped"> {
   validated(config);
   const slot = await ports.store.readActiveSlot();
@@ -330,6 +335,7 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
           cursor = active.nextToken;
         } while (cursor);
       }
+      await ports.onStopped?.(row.candidateId, row.runId, row.generation);
       await ports.store.markUnlaunched(row);
       return "stopped";
     }
@@ -339,6 +345,7 @@ export async function sweepFargateSlot(config: FargateLaunchConfig,
   const task = result.tasks?.find(item => item.taskArn === row.taskArn);
   if (!task || result.failures?.length) throw new Error("Task state unavailable");
   if (task.lastStatus === "STOPPED") {
+    await ports.onStopped?.(row.candidateId, row.runId, row.generation);
     await ports.store.markStopped(row);
     return "stopped";
   }
