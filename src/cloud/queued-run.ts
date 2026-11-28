@@ -78,6 +78,8 @@ export interface CloudRunPorts {
   handoff?: {
     save(leaseToken: string, state: HostedHandoffState): Promise<void>;
   };
+  dispatch: { readStatus(): Promise<"pending_queue" | "queued" | "launched"
+    | "preview_complete" | "needs_human" | "completed" | "blocked" | "needs_reconciliation"> };
   /** Only wired by the .invalid synthetic staging task. */
   syntheticProbe?: { checkpoint(stage: SyntheticCheckpoint, job: OfficialJobIdentity): void };
   receiptVerifier: {
@@ -116,6 +118,11 @@ export async function handleQueuedApplication(
   const run = decodeCloudRunEnvelope(message.body);
   if (run.kind !== "apply") throw new Error("Discovery messages cannot enter the application handler");
   if (!await ports.authorization.ownsRun(run.candidateId, run.runId)) return "unauthorized";
+  if (await ports.dispatch.readStatus() === "needs_human") {
+    if (!ports.queue.acknowledgeHandoff) throw new Error("Handoff acknowledgment unavailable");
+    await ports.queue.acknowledgeHandoff(message.receiptHandle);
+    return "needs_human";
+  }
   const token = await ports.journal.acquireLease(run.candidateId, run.runId);
   if (!token) return "lease_busy";
 

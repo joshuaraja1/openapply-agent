@@ -31,7 +31,8 @@ export async function createReviewedApplicationRetry(issuer: string, subjectId: 
     loadProfile(candidateId: string, artifactId: string): Promise<VerifiedCandidateProfile | undefined>;
     profileObjectExists(candidateId: string, artifactId: string): Promise<boolean>;
     createOrGet(record: TrustedRunRecord, lead: VerifiedOfficialLead,
-      nowEpoch: number): Promise<"created" | "existing">;
+      nowEpoch: number, reviewedFrom: { blockedRunId: string;
+        oldProfileArtifactId: string }): Promise<"created" | "existing">;
   }, now = new Date()) {
   const input = reviewedRetryInputSchema.parse(inputValue);
   if (input.newRunId === input.blockedRunId) throw new Error("Reviewed retry needs a new run");
@@ -56,5 +57,7 @@ export async function createReviewedApplicationRetry(issuer: string, subjectId: 
     consent: { granted: true, scope: "apply-one-job", policyVersion: "v1" },
   }, { billing: ports.billing, loadLead: async () => lead,
     loadProfile: ports.loadProfile, profileObjectExists: ports.profileObjectExists,
-    createOrGet: ports.createOrGet }, now);
+    createOrGet: (record, verifiedLead, nowEpoch) => ports.createOrGet(record,
+      verifiedLead, nowEpoch, { blockedRunId: input.blockedRunId,
+        oldProfileArtifactId: blocked.profileArtifactId }) }, now);
 }

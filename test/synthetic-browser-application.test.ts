@@ -97,6 +97,7 @@ describe("synthetic-only cloud browser adapter", () => {
       const application = new SyntheticBrowserApplication();
       const verifier = new SyntheticReceiptVerifier();
       const ports: CloudRunPorts = {
+        dispatch: { async readStatus() { return "launched"; } },
         billing: { async loadEntitlements() { return [{ kind: "free-grant", subjectId: candidateId,
           grantId: "synthetic", approvedBy: "staging", startsAt: "2020-01-01T00:00:00Z",
           endsAt: "2099-01-01T00:00:00Z", revokedAt: null }]; } },
@@ -145,6 +146,7 @@ describe("synthetic-only cloud browser adapter", () => {
       const application = new SyntheticBrowserApplication();
       const verifier = new SyntheticReceiptVerifier();
       const ports: CloudRunPorts = {
+        dispatch: { async readStatus() { return "launched"; } },
         billing: { async loadEntitlements() { return paid ? [{ kind: "free-grant",
           subjectId: candidateId, grantId: "synthetic", approvedBy: "staging",
           startsAt: "2020-01-01T00:00:00Z", endsAt: "2099-01-01T00:00:00Z",

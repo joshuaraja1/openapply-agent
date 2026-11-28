@@ -21,6 +21,7 @@ function fixture() {
     formUrl: "https://boards.greenhouse.io/acme/jobs/109", browserState,
     resumeSha256: "a".repeat(64), job });
   const ports: CloudRunPorts = {
+    dispatch: { async readStatus() { return "launched"; } },
     billing: { async loadEntitlements() { return paidAccess ? [paid] : []; } },
     authorization: { async ownsRun() { return true; },
       async hasCurrentConsent() { return consent; } },
@@ -52,6 +53,14 @@ function fixture() {
 }
 
 describe("cloud pre-submit handoff", () => {
+  it("acknowledges a redelivered terminal handoff without opening the browser", async () => {
+    const h = fixture();
+    h.ports.dispatch = { async readStatus() { return "needs_human"; } };
+    expect(await handleQueuedApplication({ body, receiptHandle: "sqs-receipt" }, h.ports))
+      .toBe("needs_human");
+    expect(h.events).toEqual(["ack-handoff"]);
+    expect(h.browserState.every(byte => byte !== 0)).toBe(true);
+  });
   it("saves encrypted handoff before terminal queue acknowledgment, with no submit intent", async () => {
     const h = fixture();
     expect(await handleQueuedApplication({ body, receiptHandle: "sqs-receipt" }, h.ports))

@@ -165,7 +165,7 @@ export async function storeEncryptedHandoff(token: string, leaseToken: string,
       hasHandoffUploadEligibility(candidateId: string, runId: string,
         leaseToken: string, nowEpoch: number): Promise<boolean>;
       loadIdentity(candidateId: string, runId: string): Promise<{
-        subjectId: string; job: OfficialJobIdentity;
+        subjectId: string; job: OfficialJobIdentity; consentVersion: number;
       }>;
     };
     billing: { loadEntitlements(subjectId: string): Promise<readonly unknown[]> };
@@ -174,7 +174,8 @@ export async function storeEncryptedHandoff(token: string, leaseToken: string,
     clock: () => number;
     handoffs: { putCreateOnly(key: string, body: Uint8Array): Promise<void> };
     dispatch: { markHandoffPointer(candidateId: string, runId: string, leaseToken: string,
-      job: OfficialJobIdentity, artifactId: string, sha256: string, nowEpoch: number): Promise<void> };
+      job: OfficialJobIdentity, consentVersion: number, artifactId: string,
+      sha256: string, nowEpoch: number): Promise<void> };
   }): Promise<{ candidateId: string; runId: string; artifactId: string }> {
   const claims = verifyArtifactRunCapability(token, secret, nowEpoch);
   uuid.parse(leaseToken);
@@ -205,7 +206,7 @@ export async function storeEncryptedHandoff(token: string, leaseToken: string,
   await ports.handoffs.putCreateOnly(handoffObjectKey(claims.candidateId, claims.runId,
     artifactId), body);
   await ports.dispatch.markHandoffPointer(claims.candidateId, claims.runId, leaseToken,
-    run.job, artifactId, sha256, freshEpoch(ports.clock));
+    run.job, run.consentVersion, artifactId, sha256, freshEpoch(ports.clock));
   return { candidateId: claims.candidateId, runId: claims.runId, artifactId };
 }
 

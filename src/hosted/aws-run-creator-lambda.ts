@@ -67,7 +67,7 @@ function runtime() {
       },
       loadProfile: (candidateId, artifactId) => runCreator.loadProfile(candidateId, artifactId),
       profileObjectExists: (candidateId, artifactId) => runCreator.profileObjectExists(candidateId, artifactId),
-      createOrGet: (record, lead, now) => runCreator.createOrGet(record, lead, now),
+      createOrGet: (record, lead, now, reviewedFrom) => runCreator.createOrGet(record, lead, now, reviewedFrom),
     },
   });
   return { handleRequest: (request: Request) => new URL(request.url).pathname ===

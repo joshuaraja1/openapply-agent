@@ -37,6 +37,7 @@ function ports() {
   let profileRestores = 0;
   const submitted = new TextEncoder().encode("Synthetic confirmation for requisition 109");
   const value: Omit<CloudRunPorts, "queue"> = {
+    dispatch: { async readStatus() { return "launched"; } },
     billing: { async loadEntitlements() { return [{ kind: "free-grant", subjectId: candidateId,
       grantId: "synthetic", approvedBy: "staging", startsAt: "2020-01-01T00:00:00Z",
       endsAt: "2099-01-01T00:00:00Z", revokedAt: null }]; } },

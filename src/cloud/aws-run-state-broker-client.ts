@@ -33,6 +33,8 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
   capability: string, scope: { candidateId: string; runId: string }):
   Pick<CloudRunPorts, "billing" | "authorization" | "runRecords" | "journal"> & {
     dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void>;
+      readStatus(): Promise<"pending_queue" | "queued" | "launched" | "preview_complete"
+        | "needs_human" | "completed" | "blocked" | "needs_reconciliation">;
       markNeedsHuman(leaseToken: string, target: z.infer<typeof job>): Promise<void> };
     preview: { loadBinding(leaseToken: string): Promise<z.infer<typeof previewBinding>>;
       recordOutcome(leaseToken: string, target: z.infer<typeof job>, outcome: {
@@ -101,6 +103,9 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
     },
     dispatch: {
       async read() { return dispatch.parse(await call({ operation: "readDispatch" })); },
+      async readStatus() { return z.enum(["pending_queue", "queued", "launched",
+        "preview_complete", "needs_human", "completed", "blocked", "needs_reconciliation"])
+        .parse(await call({ operation: "readDispatchStatus" })); },
       async markCompleted() { await call({ operation: "markDispatchCompleted" }); },
       async markNeedsHuman(leaseToken, target) {
         await call({ operation: "markDispatchNeedsHuman", leaseToken: uuid.parse(leaseToken),

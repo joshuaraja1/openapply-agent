@@ -1,6 +1,7 @@
 import { ZodError } from "zod";
 import { createReviewedApplicationRetry } from "../cloud/reviewed-application-retry.js";
 import type { VerifySubject } from "./checkout-http.js";
+import { RunConflictError, RunInputsUnavailableError } from "../cloud/hosted-run-creator.js";
 
 type RetryPorts = Parameters<typeof createReviewedApplicationRetry>[3];
 
@@ -49,6 +50,10 @@ export async function handleReviewedRetryHttp(request: Request, deps: {
       candidateId: result.record.candidateId, consentVersion: 1 });
   } catch (error) {
     if (error instanceof ZodError) return response(400, { error: "Invalid request" });
+    if (error instanceof RunConflictError) return response(409, { error: "Run ID already used" });
+    if (error instanceof RunInputsUnavailableError) {
+      return response(403, { error: "Reviewed retry unavailable" });
+    }
     if (error instanceof Error && (error.message === "Reviewed retry is unavailable"
       || error.message === "Official job changed" || error.message === "Hosted access unavailable")) {
       return response(403, { error: "Reviewed retry unavailable" });
