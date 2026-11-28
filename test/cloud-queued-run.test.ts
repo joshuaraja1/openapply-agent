@@ -149,6 +149,87 @@ function harness(targetJob = job) {
 }
 
 describe("cloud queued application bridge", () => {
+  it("renews the lease while a slow employer form is prepared", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let entered!: () => void;
+      let finish!: () => void;
+      const preparing = new Promise<void>(resolve => { entered = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await preparing;
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(h.events.filter(event => event === "renew")).toHaveLength(3);
+      finish();
+      expect(await run).toBe("confirmed");
+      expect(h.events.indexOf("intent")).toBeLessThan(h.events.indexOf("click"));
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not write submit intent when a timed renewal loses the lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let entered!: () => void;
+      let finish!: () => void;
+      const preparing = new Promise<void>(resolve => { entered = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await preparing;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("retry");
+      expect(h.events).not.toContain("intent");
+      expect(h.events).not.toContain("click");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not confirm or acknowledge when the lease is lost during a final click", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let clicked!: () => void;
+      let finish!: () => void;
+      const clicking = new Promise<void>(resolve => { clicked = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        const prepared = await original(...args);
+        return { ...prepared, async submitOnce() {
+          clicked();
+          await gate;
+          return prepared.submitOnce();
+        } };
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await clicking;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("needs_reconciliation");
+      expect(h.events).toContain("uncertain");
+      expect(h.events).not.toContain("confirmed");
+      expect(h.events).not.toContain("ack");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("requires current paid or granted access before restoring a profile", async () => {
     const h = harness();
     h.setEntitlement([]);
