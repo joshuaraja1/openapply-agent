@@ -34,8 +34,9 @@ function harness() {
     markNeedsReconciliation: vi.fn(async () => { row = { ...row, state: "needs_reconciliation" }; }),
   } as unknown as Pick<DynamoApplicationDispatchStore, "listPending" | "markQueued"
     | "markLaunched" | "markBlocked" | "markNeedsReconciliation">;
-  const launch = vi.fn(async () => launchResult);
+  const launch = vi.fn(async (_candidateId: string, _runId: string) => launchResult);
   return { store, queue, launch, authorize: vi.fn(async () => true),
+    hasAnotherActiveTask: vi.fn(async (_candidateId: string, _runId: string) => false),
     setFailMarkQueued(value: boolean) { failMarkQueued = value; },
     setLaunchResult(value: "started" | "capacity_busy") { launchResult = value; },
     get row() { return row; } };
@@ -152,6 +153,89 @@ describe("durable application outbox dispatch", () => {
     expect(h.row.state).toBe("launched");
     expect(h.queue.send).not.toHaveBeenCalled();
     expect(await dispatchOnePendingApplication(h)).toBe("empty");
+  });
+
+  it("launches a second job seeker when an earlier run's seeker already has a task", async () => {
+    const h = harness();
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const secondEnvelope = encodeCloudRunEnvelope({ version: 1,
+      candidateId: secondCandidate, runId: secondRun,
+      kind: "apply", scheduledAt: "2026-11-26T20:01:00.000Z" });
+    const rows: DurableDispatchRecord[] = [
+      { ...h.row, state: "queued" },
+      { ...h.row, pk: `CANDIDATE#${secondCandidate}`, sk: `DISPATCH#${secondRun}`,
+        candidateId: secondCandidate, runId: secondRun, body: secondEnvelope.body,
+        groupId: secondEnvelope.groupId, deduplicationId: secondEnvelope.deduplicationId,
+        createdAt: "2026-11-26T20:01:00.000Z", state: "queued" },
+    ];
+    h.store.listPending = vi.fn(async () => rows);
+    h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
+    h.launch.mockResolvedValue("started");
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+    expect(h.launch).toHaveBeenCalledOnce();
+    expect(h.launch).toHaveBeenCalledWith(secondCandidate, secondRun);
+    expect(h.store.markLaunched).toHaveBeenCalledWith(secondCandidate, secondRun);
+    expect(h.store.markLaunched).not.toHaveBeenCalledWith(candidateId, runId);
+  });
+
+  it("pages past more than 25 queued runs for one busy seeker", async () => {
+    const h = harness();
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const rowFor = (seekId: string, id: string, minute: number): DurableDispatchRecord => {
+      const createdAt = `2026-11-26T20:${String(minute).padStart(2, "0")}:00.000Z`;
+      const envelope = encodeCloudRunEnvelope({ version: 1, candidateId: seekId,
+        runId: id, kind: "apply", scheduledAt: createdAt });
+      return { pk: `CANDIDATE#${seekId}`, sk: `DISPATCH#${id}`,
+        candidateId: seekId, runId: id, state: "queued", body: envelope.body,
+        groupId: envelope.groupId, deduplicationId: envelope.deduplicationId, createdAt };
+    };
+    const rows = Array.from({ length: 27 }, (_, index) => rowFor(candidateId,
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, index));
+    rows.push(rowFor(secondCandidate, secondRun, 27));
+    const send = vi.fn(async (command: QueryCommand) => {
+      expect(command).toBeInstanceOf(QueryCommand);
+      const offset = command.input.ExclusiveStartKey ? 25 : 0;
+      return { Items: rows.slice(offset, offset + 25),
+        ...(offset === 0 ? { LastEvaluatedKey: { pk: "cursor", sk: "page-1" } } : {}) };
+    });
+    const realStore = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    h.store.listPending = vi.fn(limit => realStore.listPending(limit));
+    h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
+    h.launch.mockResolvedValue("started");
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+    expect(h.store.listPending).toHaveBeenCalledWith(100);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(h.launch).toHaveBeenCalledOnce();
+    expect(h.launch).toHaveBeenCalledWith(secondCandidate, secondRun);
+  });
+
+  it("keeps scanning after a concurrent active-task reservation", async () => {
+    const h = harness();
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const secondEnvelope = encodeCloudRunEnvelope({ version: 1,
+      candidateId: secondCandidate, runId: secondRun,
+      kind: "apply", scheduledAt: "2026-11-26T20:01:00.000Z" });
+    h.store.listPending = vi.fn(async () => [h.row, {
+      ...h.row, pk: `CANDIDATE#${secondCandidate}`, sk: `DISPATCH#${secondRun}`,
+      candidateId: secondCandidate, runId: secondRun, body: secondEnvelope.body,
+      groupId: secondEnvelope.groupId, deduplicationId: secondEnvelope.deduplicationId,
+      createdAt: "2026-11-26T20:01:00.000Z",
+    }]);
+    let firstRead = true;
+    h.hasAnotherActiveTask.mockImplementation(async candidate => {
+      if (candidate !== candidateId) return false;
+      if (firstRead) { firstRead = false; return false; }
+      return true;
+    });
+    h.launch.mockImplementation(async candidate => candidate === candidateId ? "capacity_busy" : "started");
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+    expect(h.launch).toHaveBeenNthCalledWith(1, candidateId, runId);
+    expect(h.launch).toHaveBeenNthCalledWith(2, secondCandidate, secondRun);
   });
 
   it("recovers a crash before marking queued without SQS receive or send", async () => {

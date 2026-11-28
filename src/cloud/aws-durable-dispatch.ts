@@ -154,7 +154,7 @@ export class DynamoApplicationDispatchStore {
   }
 
   async listPending(limit = 25): Promise<DurableDispatchRecord[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new Error("Invalid dispatch limit");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid dispatch limit");
     const rows: DurableDispatchRecord[] = [];
     let cursor: QueryCommandInput["ExclusiveStartKey"];
     let invalid = 0;
@@ -186,15 +186,25 @@ export async function dispatchOnePendingApplication(ports: {
   store: Pick<DynamoApplicationDispatchStore, "listPending" | "markQueued"
     | "markLaunched" | "markBlocked" | "markNeedsReconciliation">;
   authorize(candidateId: string, runId: string): Promise<boolean>;
+  hasAnotherActiveTask(candidateId: string, runId: string): Promise<boolean>;
   launch(candidateId: string, runId: string): Promise<"started" | "capacity_busy" | "already_stopped">;
 }): Promise<"empty" | "started" | "capacity_busy" | "blocked" | "needs_reconciliation"> {
-  const pending = await ports.store.listPending(25);
+  // Four bounded index pages let an active seeker's backlog of more than one
+  // page yield to another seeker without an unbounded scheduled sweep.
+  const pending = await ports.store.listPending(100);
+  let candidateBusy = false;
   for (const row of pending) {
     // The GSI is eventually consistent; a stale row is harmless to skip.
     if (row.state !== "pending_queue" && row.state !== "queued") continue;
     if (!await ports.authorize(row.candidateId, row.runId)) {
       await ports.store.markBlocked(row.candidateId, row.runId);
       return "blocked";
+    }
+    // A job seeker's later run must not hide a different job seeker's run
+    // behind it in the shared index while a browser slot remains free.
+    if (await ports.hasAnotherActiveTask(row.candidateId, row.runId)) {
+      candidateBusy = true;
+      continue;
     }
     if (row.state === "pending_queue") {
       await ports.store.markQueued(row.candidateId, row.runId);
@@ -208,7 +218,13 @@ export async function dispatchOnePendingApplication(ports: {
       await ports.store.markNeedsReconciliation(row.candidateId, row.runId);
       return "needs_reconciliation";
     }
+    // A concurrent launch may acquire this candidate's active-task lock
+    // between the read above and the conditional reservation.
+    if (await ports.hasAnotherActiveTask(row.candidateId, row.runId)) {
+      candidateBusy = true;
+      continue;
+    }
     return "capacity_busy";
   }
-  return "empty";
+  return candidateBusy ? "capacity_busy" : "empty";
 }

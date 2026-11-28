@@ -86,6 +86,22 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("reads the durable per-seeker task lock before dispatching another run", async () => {
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const db = { send: vi.fn(async (command: GetCommand) => {
+      expect(command).toBeInstanceOf(GetCommand);
+      expect(command.input.Key).toEqual({ pk: `CANDIDATE#${candidateId}`, sk: "ACTIVE_TASK" });
+      expect(command.input.ConsistentRead).toBe(true);
+      return { Item: { pk: `CANDIDATE#${candidateId}`, sk: "ACTIVE_TASK",
+        runId, clientToken: "a".repeat(64) } };
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    expect(await store.hasAnotherActiveTask(candidateId, secondRun)).toBe(true);
+    expect(await store.hasAnotherActiveTask(candidateId, runId)).toBe(false);
+  });
+
   it("releases only the matching nonzero slot and job-seeker lock after STOPPED", async () => {
     const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
       candidateId, runId, state: "started" as const, generation: 0,
