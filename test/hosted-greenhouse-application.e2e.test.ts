@@ -60,7 +60,9 @@ const formHtml = (extra = "") => `<!doctype html><html><title>Acme application</
 <label>Resume<input required name="resume" type="file"></label>
 ${extra}<button type="submit">Submit Application</button></form></body></html>`;
 
-async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean } = {}) {
+async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean; errorReceipt?: boolean;
+  xhr?: boolean; crossHost?: boolean; duplicatePost?: boolean; redirect?: boolean;
+  preexistingReceipt?: boolean; delayedButton?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "openapply-greenhouse-fixture-"));
   const work = join(root, "work");
   await mkdir(work, { mode: 0o700 });
@@ -86,12 +88,25 @@ async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean } = 
       expect(route.request().url()).toBe(url);
       if (route.request().method() === "POST") {
         posts++;
-        return { status: 200, headers: { "content-type": "text/html" }, body: Buffer.from(
-          options.wrongReceipt ? "<p>Application received for requisition 999999</p>"
-            : "<p>Application received for requisition 123456</p>") };
+        const success = options.wrongReceipt ? "Application received for requisition 999999"
+          : "Application received for requisition 123456";
+        const body = options.duplicatePost
+          ? `<script>fetch('${url}',{method:'POST'}).catch(()=>{}).finally(()=>{document.body.innerText='${success}'})</script>`
+          : `<p>${success}</p>`;
+        return { status: options.errorReceipt ? 500 : 200,
+          headers: { "content-type": "text/html" }, body: Buffer.from(body) };
       }
+      if (options.redirect) return { status: 302,
+        headers: { location: "https://example.invalid/elsewhere" }, body: Buffer.from("") };
+      const script = options.xhr ? `<script>fetch('${url}',{method:'POST'}).catch(()=>{})</script>`
+        : options.crossHost ? `<script>fetch('https://example.invalid/collect').catch(()=>{})</script>`
+          : options.delayedButton ? `<script>setTimeout(()=>{document.querySelector('button').disabled=false},500)</script>`
+            : "";
+      const extra = `${options.unknown ? '<label>Security clearance level<input required name="clearance"></label>' : ""}
+        ${options.preexistingReceipt ? '<p>Application received for requisition 123456</p>' : ""}${script}`;
       return { status: 200, headers: { "content-type": "text/html" }, body: Buffer.from(formHtml(
-        options.unknown ? '<label>Security clearance level<input required name="clearance"></label>' : "")) };
+        extra).replace(options.delayedButton ? '<button type="submit">' : '__never__',
+          '<button disabled type="submit">')) };
     },
   });
   return { prepare, getPosts: () => posts, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -144,4 +159,57 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
       } finally { await prepared.close?.(); }
     } finally { await f.cleanup(); }
   }, 15_000);
+
+  it("rejects an HTTP error even when its body claims success", async () => {
+    const f = await fixture({ errorReceipt: true });
+    try {
+      const prepared = await f.prepare();
+      try {
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("receipt");
+        expect(f.getPosts()).toBe(1);
+      } finally { await prepared.close?.(); }
+    } finally { await f.cleanup(); }
+  });
+
+  it("checks authorization after a delayed button becomes actionable", async () => {
+    const f = await fixture({ delayedButton: true });
+    try {
+      const prepared = await f.prepare();
+      try {
+        expect(await prepared.submitOnce(async () => false)).toBeNull();
+        expect(f.getPosts()).toBe(0);
+      } finally { await prepared.close?.(); }
+    } finally { await f.cleanup(); }
+  });
+
+  it.each(["xhr", "crossHost", "redirect"] as const)("blocks %s before any final POST",
+    async kind => {
+      const f = await fixture({ [kind]: true });
+      try {
+        await expect(f.prepare()).rejects.toThrow();
+        expect(f.getPosts()).toBe(0);
+      } finally { await f.cleanup(); }
+    });
+
+  it("rejects a pre-existing confirmation before final click", async () => {
+    const f = await fixture({ preexistingReceipt: true });
+    try {
+      const prepared = await f.prepare();
+      try {
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("before final click");
+        expect(f.getPosts()).toBe(0);
+      } finally { await prepared.close?.(); }
+    } finally { await f.cleanup(); }
+  });
+
+  it("rejects a second POST attempt after the guarded final POST", async () => {
+    const f = await fixture({ duplicatePost: true });
+    try {
+      const prepared = await f.prepare();
+      try {
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("receipt");
+        expect(f.getPosts()).toBe(1);
+      } finally { await prepared.close?.(); }
+    } finally { await f.cleanup(); }
+  });
 });

@@ -119,9 +119,12 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
     let blockedWrites = 0;
     let blockedHosts = 0;
     let blockedSockets = 0;
+    let blockedLateGets = 0;
+    let afterInitialNavigation = false;
     let allowFinalPost = false;
     let finalPostUrl: string | undefined;
     let finalPostCount = 0;
+    let finalPostStatus: number | undefined;
     await context.routeWebSocket("**/*", socket => {
       blockedSockets++;
       socket.close({ code: 1008, reason: "Application sockets are disabled" });
@@ -136,6 +139,11 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
         blockedHosts++; await route.abort("blockedbyclient"); return;
       }
       const method = request.method().toUpperCase();
+      if (afterInitialNavigation && ["GET", "HEAD"].includes(method)
+        && !(allowFinalPost && finalPostCount === 1 && sameJobUrl(target.href, job)
+          && !target.search)) {
+        blockedLateGets++; await route.abort("blockedbyclient"); return;
+      }
       if (!["GET", "HEAD"].includes(method)) {
         if (method !== "POST" || !allowFinalPost || target.href !== finalPostUrl
           || !request.isNavigationRequest() || finalPostCount !== 0) {
@@ -144,6 +152,7 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
         finalPostCount++;
       }
       const response = await (dependencies.fetchRequest ?? fetchWithoutRedirect)(route);
+      if (method === "POST" && finalPostCount === 1) finalPostStatus = response.status;
       if (response.status >= 300 && response.status < 400) {
         const next = response.headers.location;
         if (!next || !sameJobUrl(new URL(next, target).href, job)) {
@@ -159,8 +168,7 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
       new Map([[rendered, artifact.pdfSha256]]));
     const initial = await browser.navigate(job.applicationUrl);
     if (!isOriginalRequisition(initial, job)) throw new Error("Employer form changed requisition");
-    const filled = await fillApplicationForm(browser, initial, candidate, rendered,
-      { provider: "greenhouse" });
+    afterInitialNavigation = true;
     const blocked = async (codes: readonly string[], formUrl: string) => {
       const state = new TextEncoder().encode(JSON.stringify(await context.storageState()));
       if (state.byteLength > 512_000) throw new Error("Browser handoff state exceeds the private limit");
@@ -169,10 +177,18 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
         formUrl, browserState: state, resumeSha256: artifact.pdfSha256, job: input.runJob,
       });
     };
+    let filled: Awaited<ReturnType<typeof fillApplicationForm>>;
+    try {
+      filled = await fillApplicationForm(browser, initial, candidate, rendered,
+        { provider: "greenhouse" });
+    } catch {
+      throw await blocked(["form-changed-during-fill"], initial.url);
+    }
     const blockers = [...filled.blockers];
     if (blockedWrites) blockers.push("early-network-write");
     if (blockedHosts) blockers.push("cross-host-or-redirect");
     if (blockedSockets) blockers.push("websocket");
+    if (blockedLateGets) blockers.push("post-navigation-get");
     if (!filled.uploaded) blockers.push("resume-not-uploaded");
     const submitRef = oneSubmit(filled.snapshot);
     if (!submitRef) blockers.push("ambiguous-submit-control");
@@ -205,14 +221,16 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
           input.runJob.requisitionId)) throw new Error("Employer receipt was visible before final click");
         if (finalClick.page.url() !== filled.snapshot.url
           || !sameJobUrl(finalClick.page.url(), job)
-          || blockedWrites || blockedHosts || blockedSockets
+          || blockedWrites || blockedHosts || blockedSockets || blockedLateGets
           || await button.count() !== 1) {
           throw new Error("Employer form changed before final click");
         }
+        // Resolve Playwright actionability before the last authorization check.
+        await button.first().click({ trial: true, timeout: 1_500 });
         if (!await beforeClick()) return null;
         // The queue handler has already written durable submit intent.
         allowFinalPost = true;
-        await finalClick.click();
+        await finalClick.click(1_500);
         try {
           await finalClick.page.waitForFunction((id: string) => {
             const text = document.body?.innerText ?? "";
@@ -223,7 +241,9 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
         } catch { throw new Error("Employer receipt did not identify the requisition"); }
         const text = await finalClick.page.locator("body").innerText();
         if (text.length > MAX_RECEIPT_TEXT || !sameJobUrl(finalClick.page.url(), job)
-          || finalPostCount !== 1 || blockedHosts || blockedSockets) {
+          || finalPostCount !== 1 || finalPostStatus === undefined
+          || finalPostStatus < 200 || finalPostStatus >= 300
+          || blockedWrites || blockedHosts || blockedSockets || blockedLateGets) {
           throw new Error("Employer receipt is unavailable or unbound");
         }
         const confirmation = receiptLine(text, input.runJob.requisitionId);
