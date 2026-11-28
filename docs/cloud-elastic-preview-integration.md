@@ -50,6 +50,12 @@ Staging evidence on November 27:
   read only its own run identity, a cross-subject entitlement read was denied,
   and a deletion tombstone revoked one run without revoking the other. All
   disposable ledger rows were removed.
+- The staging Cloudflare Worker now routes the signed-in deletion control to
+  the separate AWS onboarding API. A disposable Cognito account requested
+  deletion while its Fargate fixture task was `RUNNING`: the UI reported
+  `pending`, and ECS then reached `STOPPED`. After the 240-second safety hold,
+  the one-minute retry marked storage cleanup `complete`, removed the task row,
+  and freed the capacity slot. The authenticated UI reported completion.
 - No launcher Lambda is deployed. There is no running browser task or live
   queue-to-Fargate dispatch. The test did not submit an application.
 
@@ -59,9 +65,7 @@ Deployment order:
 2. Deploy the exact-run broker and verify cross-tenant denial with two test
    identities. Confirm the hosted deletion stop gate waits for ECS `STOPPED`.
 3. Deploy the preview task definition with that image and broker ARN.
-4. Verify the authenticated deletion API against an active disposable task,
-   including a pending response until ECS confirms `STOPPED`.
-5. Deploy the launcher with a ceiling of one. Run a consented, synthetic
+4. Deploy the launcher with a ceiling of one. Run a consented, synthetic
    two-job-seeker backlog and crash drill. Then raise the ceiling gradually.
 
 See [preview task](cloud-preview-task.md) and
