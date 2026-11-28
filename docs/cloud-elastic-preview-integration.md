@@ -33,13 +33,35 @@ receipt and a crash test that proves a restarted task never clicks Submit
 twice. These are gates before autonomous public use, not settings to enable
 for a staging capacity test.
 
+Staging evidence on November 27:
+
+- The combined image was built by the staging CodeBuild project and pushed to
+  ECR by immutable digest
+  `sha256:60440be30b97e86b30a60ed01babb255e17dab44271de0bcf7f11cb1357830e0`.
+- The preview task definition is `openapply-staging-browser-preview:1`. A
+  private-subnet fixture task exited zero after starting Chromium. A separate
+  network probe reached HTTPS and the private artifact broker, which rejected
+  an invalid capability.
+- A disposable active task reached `RUNNING`. The candidate-wide stop function
+  requested ECS stop, then reported `stopped` only after ECS reported `STOPPED`;
+  its durable slot was cleared. This exercised the stop function, not the
+  authenticated deletion API.
+- Two disposable run identities passed live broker checks: each capability
+  read only its own run identity, a cross-subject entitlement read was denied,
+  and a deletion tombstone revoked one run without revoking the other. All
+  disposable ledger rows were removed.
+- No launcher Lambda is deployed. There is no running browser task or live
+  queue-to-Fargate dispatch. The test did not submit an application.
+
 Deployment order:
 
 1. Build the combined browser image and publish it to ECR by immutable digest.
 2. Deploy the exact-run broker and verify cross-tenant denial with two test
    identities. Confirm the hosted deletion stop gate waits for ECS `STOPPED`.
 3. Deploy the preview task definition with that image and broker ARN.
-4. Deploy the launcher with a ceiling of one. Run a consented, synthetic
+4. Verify the authenticated deletion API against an active disposable task,
+   including a pending response until ECS confirms `STOPPED`.
+5. Deploy the launcher with a ceiling of one. Run a consented, synthetic
    two-job-seeker backlog and crash drill. Then raise the ceiling gradually.
 
 See [preview task](cloud-preview-task.md) and
