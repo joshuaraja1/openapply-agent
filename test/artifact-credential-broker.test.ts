@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { AssumeRoleCommand, type STSClient } from "@aws-sdk/client-sts";
 import { InvokeCommand, type LambdaClient } from "@aws-sdk/client-lambda";
 import { candidateArtifactSessionPolicy, issueCandidateArtifactCredentials,
-  mintArtifactRunCapability, storeEncryptedReceipt, verifyArtifactRunCapability } from "../src/cloud/artifact-credential-broker.js";
-import { requestScopedArtifactCredentials, uploadEncryptedReceipt } from "../src/cloud/aws-artifact-broker-client.js";
-import { receiptObjectKey } from "../src/cloud/candidate-vault.js";
+  mintArtifactRunCapability, storeEncryptedHandoff, storeEncryptedReceipt, verifyArtifactRunCapability } from "../src/cloud/artifact-credential-broker.js";
+import { requestScopedArtifactCredentials, uploadEncryptedHandoff, uploadEncryptedReceipt } from "../src/cloud/aws-artifact-broker-client.js";
+import { handoffObjectKey, receiptObjectKey } from "../src/cloud/candidate-vault.js";
 
 const candidateId = "00000000-0000-4000-8000-000000000001";
 const otherCandidateId = "00000000-0000-4000-8000-000000000002";
@@ -17,6 +17,8 @@ const config = { dataRoleArn: "arn:aws:iam::123456789012:role/openapply-artifact
   artifactBucket: "openapply-private-test", kmsKeyArn:
     "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-4000-8000-000000000004" };
 const receiptId = "00000000-0000-4000-8000-000000000006";
+const job = { provider: "greenhouse", employerId: "employer", requisitionId: "role" };
+const digest = "a".repeat(64);
 const encryptedReceipt = Buffer.from(JSON.stringify({ version: 1, candidateId,
   artifactId: receiptId, wrappedKey: Buffer.from("wrapped").toString("base64"),
   nonce: Buffer.alloc(12).toString("base64"), tag: Buffer.alloc(16).toString("base64"),
@@ -28,7 +30,9 @@ function fixture() {
       _leaseToken: string, _checkedEpoch: number) => true),
     hasReceiptUploadEligibility: vi.fn(async (_candidateId: string, _runId: string,
       _leaseToken: string, _artifactId: string, _checkedEpoch: number) => true),
-    loadIdentity: vi.fn(async () => ({ subjectId })) };
+    hasHandoffUploadEligibility: vi.fn(async (_candidateId: string, _runId: string,
+      _leaseToken: string, _checkedEpoch: number) => true),
+    loadIdentity: vi.fn(async () => ({ subjectId, job })) };
   const billing = { loadEntitlements: vi.fn(async () => [{ kind: "free-grant", subjectId,
     grantId: "beta", approvedBy: "admin", startsAt: "2026-11-25T00:00:00.000Z",
     endsAt: "2026-12-01T00:00:00.000Z", revokedAt: null }]) };
@@ -65,7 +69,10 @@ describe("candidate-scoped artifact credentials", () => {
     const command = ports.send.mock.calls[0]?.[0] as AssumeRoleCommand;
     expect(command.input.DurationSeconds).toBe(900);
     const policy = JSON.parse(command.input.Policy!);
-    expect(policy.Statement[0].Resource).toBe(`arn:aws:s3:::openapply-private-test/candidates/${candidateId}/artifacts/*`);
+    expect(policy.Statement[0].Resource).toEqual([
+      `arn:aws:s3:::openapply-private-test/candidates/${candidateId}/artifacts/*`,
+      `arn:aws:s3:::openapply-private-test/candidates/${candidateId}/runs/${runId}/handoffs/*`,
+    ]);
     expect(policy.Statement[0].Action).toEqual(["s3:GetObject"]);
     expect(policy.Statement[1].Condition.StringEquals["kms:EncryptionContext:candidateId"]).toBe(candidateId);
     expect(policy.Statement[1].Action).not.toContain("kms:Encrypt");
@@ -208,5 +215,47 @@ describe("candidate-scoped artifact credentials", () => {
     await expect(uploadEncryptedReceipt(lambda, arn, "capability",
       { candidateId: otherCandidateId, runId, leaseToken, artifactId: receiptId },
       encryptedReceipt)).rejects.toThrow();
+  });
+
+  it("stores an encrypted handoff only before submit intent and for the exact lease", async () => {
+    const ports = fixture();
+    const handoffs = { putCreateOnly: vi.fn(async () => {}) };
+    const dispatch = { markHandoffPointer: vi.fn(async () => {}) };
+    const token = mintArtifactRunCapability(candidateId, runId, secret, nowEpoch);
+    await storeEncryptedHandoff(token, leaseToken, receiptId, digest, encryptedReceipt,
+      secret, nowEpoch, config, { ...ports, handoffs, dispatch });
+    expect(handoffs.putCreateOnly).toHaveBeenCalledWith(
+      handoffObjectKey(candidateId, runId, receiptId), encryptedReceipt);
+    expect(dispatch.markHandoffPointer).toHaveBeenCalledWith(candidateId, runId,
+      leaseToken, job, receiptId, digest, nowEpoch);
+    const blocked = fixture();
+    blocked.admission.hasHandoffUploadEligibility.mockResolvedValue(false);
+    await expect(storeEncryptedHandoff(token, leaseToken, receiptId, digest,
+      encryptedReceipt, secret, nowEpoch, config, { ...blocked, handoffs, dispatch }))
+      .rejects.toThrow("Handoff upload unavailable");
+    expect(handoffs.putCreateOnly).toHaveBeenCalledTimes(1);
+    const interrupted = fixture();
+    const failedWrite = { putCreateOnly: vi.fn(async () => { throw new Error("S3 unavailable"); }) };
+    await expect(storeEncryptedHandoff(token, leaseToken, receiptId, digest,
+      encryptedReceipt, secret, nowEpoch, config,
+      { ...interrupted, handoffs: failedWrite, dispatch })).rejects.toThrow("S3 unavailable");
+    expect(dispatch.markHandoffPointer).toHaveBeenCalledTimes(1);
+  });
+
+  it("client rejects a broker handoff acknowledgment for another run", async () => {
+    const arn = "arn:aws:lambda:us-east-1:123456789012:function:openapply-staging-artifact-broker";
+    const send = vi.fn(async (command: InvokeCommand) => {
+      const payload = JSON.parse(new TextDecoder().decode(command.input.Payload as Uint8Array));
+      expect(payload).toMatchObject({ kind: "handoff-upload", leaseToken,
+        artifactId: receiptId, sha256: digest });
+      return { StatusCode: 200, Payload: Buffer.from(JSON.stringify({ candidateId,
+        runId, artifactId: receiptId })) };
+    });
+    const lambda = { send } as unknown as Pick<LambdaClient, "send">;
+    await uploadEncryptedHandoff(lambda, arn, "capability",
+      { candidateId, runId, leaseToken, artifactId: receiptId, sha256: digest }, encryptedReceipt);
+    await expect(uploadEncryptedHandoff(lambda, arn, "capability",
+      { candidateId, runId: otherCandidateId, leaseToken, artifactId: receiptId,
+        sha256: digest }, encryptedReceipt)).rejects.toThrow();
   });
 });

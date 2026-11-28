@@ -65,6 +65,27 @@ describe("durable application outbox dispatch", () => {
       .rejects.toThrow("Invalid preview outcome");
     expect(send).toHaveBeenCalledOnce();
   });
+  it("links a handoff only with a live lease, absent submit intent and no deletion", async () => {
+    const send = vi.fn(async (command: TransactWriteCommand) => {
+      expect(command).toBeInstanceOf(TransactWriteCommand);
+      const tx = command.input.TransactItems!;
+      expect(tx).toHaveLength(4);
+      expect(tx[0]?.ConditionCheck?.Key?.sk).toBe("DELETED");
+      expect(tx[1]?.ConditionCheck?.Key?.sk).toBe("LEASE");
+      expect(tx[1]?.ConditionCheck?.ConditionExpression).toContain("ownerToken=:token");
+      expect(tx[2]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
+      expect(tx[2]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
+      expect(tx[3]?.Update?.ConditionExpression).toContain("#state=:launched");
+      expect(JSON.stringify(tx)).not.toContain("private browser state");
+      return {};
+    });
+    const store = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markHandoffPointer(candidateId, runId, runId,
+      { provider: "greenhouse", employerId: "example", requisitionId: "123" },
+      runId, "a".repeat(64), 1795838400);
+  });
   it("retries entitlement read failures without blocking a queued run", async () => {
     const h = harness();
     h.authorize.mockImplementationOnce(() => confirmedHostedAccess("sub-a", async () => {
