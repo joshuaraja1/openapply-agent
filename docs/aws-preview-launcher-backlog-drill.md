@@ -18,8 +18,8 @@ Run `node scripts/aws-preview-launcher-preflight.mjs --account-id 205064803661`.
 The script checks the live account, current preview task, immutable image,
 submissions-disabled mode, exact stack links, Cognito issuer, run-ledger indexes,
 and bounded launcher ceiling. A pass establishes structure only. Also confirm
-the ECS cluster has no running disposable tasks and `SLOT#0` is clear before
-changing the ceiling.
+the ECS cluster has no running disposable tasks and both `SLOT#0` and
+`SLOT#1` are clear before changing the ceiling.
 
 ## Deployment and drill sequence
 
@@ -54,7 +54,8 @@ changing the ceiling.
    retry for A1, and eventual A2 progress without displacing B1. Repeat with
    B1 stopped while A remains active. Capture only opaque task/run IDs, sanitized
    dispatch and journal states, slot occupancy, queue age, and CloudWatch
-   errors. For post-intent and post-click crashes, set the one-off
+   errors. Wait for both slots to clear before each task-definition switch.
+   For post-intent and post-click crashes, set the one-off
    `SyntheticCrashAt` task parameter to `after_intent` or `after_click`, update
    the launcher's exact task revision, and rerun the synthetic preflight before
    each disposable run. Require `syntheticClickAttempts <= 1` and
