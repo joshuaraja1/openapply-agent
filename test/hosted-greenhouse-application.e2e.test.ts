@@ -62,7 +62,7 @@ ${extra}<button type="submit">Submit Application</button></form></body></html>`;
 
 async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean; errorReceipt?: boolean;
   xhr?: boolean; crossHost?: boolean; duplicatePost?: boolean; redirect?: boolean;
-  preexistingReceipt?: boolean; delayedButton?: boolean } = {}) {
+  preexistingReceipt?: boolean; delayedButton?: boolean; mismatchedControl?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "openapply-greenhouse-fixture-"));
   const work = join(root, "work");
   await mkdir(work, { mode: 0o700 });
@@ -104,9 +104,14 @@ async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean; err
             : "";
       const extra = `${options.unknown ? '<label>Security clearance level<input required name="clearance"></label>' : ""}
         ${options.preexistingReceipt ? '<p>Application received for requisition 123456</p>' : ""}${script}`;
-      return { status: 200, headers: { "content-type": "text/html" }, body: Buffer.from(formHtml(
-        extra).replace(options.delayedButton ? '<button type="submit">' : '__never__',
-          '<button disabled type="submit">')) };
+      const html = formHtml(extra)
+        .replace(options.delayedButton ? '<button type="submit">' : '__never__',
+          '<button disabled type="submit">')
+        .replace(options.mismatchedControl ? '<button type="submit">' : '__never__',
+          '<button type="button" onclick="this.form.submit()">')
+        .replace(options.mismatchedControl ? '</body>' : '__never__',
+          `<form method="post" action="${url}" hidden><input type="submit"></form></body>`);
+      return { status: 200, headers: { "content-type": "text/html" }, body: Buffer.from(html) };
     },
   });
   return { prepare, getPosts: () => posts, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -132,6 +137,14 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
 
   it("blocks unknown required fields without any POST", async () => {
     const f = await fixture({ unknown: true });
+    try {
+      await expect(f.prepare()).rejects.toBeInstanceOf(HostedSubmissionBlocked);
+      expect(f.getPosts()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it("does not validate a hidden form and click an unrelated custom submit button", async () => {
+    const f = await fixture({ mismatchedControl: true });
     try {
       await expect(f.prepare()).rejects.toBeInstanceOf(HostedSubmissionBlocked);
       expect(f.getPosts()).toBe(0);

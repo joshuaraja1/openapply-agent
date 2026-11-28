@@ -55,8 +55,10 @@ function receiptLine(text: string, requisitionId: string): string | undefined {
 }
 
 function oneSubmit(snapshot: BrowserSnapshot): string | undefined {
-  const controls = snapshot.controls.filter(control => control.type === "submit"
-    || (control.tag === "button" && /^(submit|submit application|send application)$/i.test(control.name)));
+  // Only native submit controls can be tied to the checked HTML form action.
+  // A named custom button may run arbitrary script while an unrelated hidden
+  // submit input satisfies the later form locator.
+  const controls = snapshot.controls.filter(control => control.type === "submit");
   return controls.length === 1 ? controls[0]!.ref : undefined;
 }
 
