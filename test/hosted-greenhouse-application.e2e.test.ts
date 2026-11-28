@@ -60,8 +60,7 @@ const formHtml = (extra = "") => `<!doctype html><html><title>Acme application</
 <label>Resume<input required name="resume" type="file"></label>
 ${extra}<button type="submit">Submit Application</button></form></body></html>`;
 
-async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean;
-  beforeClick?: () => Promise<boolean> } = {}) {
+async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "openapply-greenhouse-fixture-"));
   const work = join(root, "work");
   await mkdir(work, { mode: 0o700 });
@@ -94,7 +93,6 @@ async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean;
       return { status: 200, headers: { "content-type": "text/html" }, body: Buffer.from(formHtml(
         options.unknown ? '<label>Security clearance level<input required name="clearance"></label>' : "")) };
     },
-    beforeClick: options.beforeClick ?? (async () => true),
   });
   return { prepare, getPosts: () => posts, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
@@ -106,12 +104,12 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
       const prepared = await f.prepare();
       try {
         expect(f.getPosts()).toBe(0);
-        const receipt = await prepared.submitOnce();
+        const receipt = await prepared.submitOnce(async () => true);
         expect(receipt).not.toBeNull();
         expect(f.getPosts()).toBe(1);
         expect(await new GreenhouseReceiptVerifier().verify(receipt!, job)).toBe(true);
         expect(officialJobKey(receipt!.job)).toBe(officialJobKey(job));
-        await expect(prepared.submitOnce()).rejects.toThrow("no longer available");
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("no longer available");
         expect(f.getPosts()).toBe(1);
       } finally { await prepared.close?.(); }
     } finally { await f.cleanup(); }
@@ -126,11 +124,11 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
   });
 
   it("blocks the final click after an authorization change", async () => {
-    const f = await fixture({ beforeClick: async () => false });
+    const f = await fixture();
     try {
       const prepared = await f.prepare();
       try {
-        await expect(prepared.submitOnce()).rejects.toThrow("authorization changed");
+        expect(await prepared.submitOnce(async () => false)).toBeNull();
         expect(f.getPosts()).toBe(0);
       } finally { await prepared.close?.(); }
     } finally { await f.cleanup(); }
@@ -141,9 +139,9 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
     try {
       const prepared = await f.prepare();
       try {
-        await expect(prepared.submitOnce()).rejects.toThrow("receipt");
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("receipt");
         expect(f.getPosts()).toBe(1);
       } finally { await prepared.close?.(); }
     } finally { await f.cleanup(); }
-  });
+  }, 15_000);
 });

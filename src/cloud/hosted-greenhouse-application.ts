@@ -16,6 +16,8 @@ import type { OfficialLeadRow } from "./official-lead-sync.js";
 import type { CandidateProfile } from "../candidate/schema.js";
 import type { DiscoveredJob } from "../types.js";
 import type { CloudRunPorts, PreparedApplication, VerifiedReceipt } from "./queued-run.js";
+import { HostedSubmissionBlocked } from "./hosted-submission-blocked.js";
+export { HostedSubmissionBlocked } from "./hosted-submission-blocked.js";
 
 const MAX_PROFILE_BYTES = 512_000;
 const MAX_RECEIPT_TEXT = 8_000;
@@ -24,13 +26,6 @@ const greenhouseReceipt = z.strictObject({
   job: z.strictObject({ provider: z.string(), employerId: z.string(), requisitionId: z.string() }),
   url: z.url(), confirmation: z.string().min(1).max(MAX_RECEIPT_TEXT),
 });
-
-export class HostedSubmissionBlocked extends Error {
-  constructor(readonly codes: readonly string[]) {
-    super("Employer application needs a human handoff");
-    this.name = "HostedSubmissionBlocked";
-  }
-}
 
 export interface GreenhouseApplicationInput extends Omit<HostedPreviewInput, "profileBytes"> {
   /** Restored only through the candidate/run lease-scoped artifact broker. */
@@ -43,8 +38,6 @@ export interface GreenhouseApplicationDependencies {
   launch?: typeof launchBrowser;
   verify?: typeof verifyResumePdf;
   fetchRequest?: (route: Route) => Promise<PreviewFetchedResponse>;
-  /** Broker-backed lease, consent and entitlement check at the click boundary. */
-  beforeClick: () => Promise<boolean>;
   now?: Date;
 }
 
@@ -65,6 +58,16 @@ function oneSubmit(snapshot: BrowserSnapshot): string | undefined {
   const controls = snapshot.controls.filter(control => control.type === "submit"
     || (control.tag === "button" && /^(submit|submit application|send application)$/i.test(control.name)));
   return controls.length === 1 ? controls[0]!.ref : undefined;
+}
+
+function blockerCode(value: string): string {
+  if (value.startsWith("Required field needs an answer:")) return "unknown-required-field";
+  if (value.startsWith("New required field appeared")) return "new-required-field";
+  if (/verification|captcha/i.test(value)) return "human-verification";
+  if (value === "Resume upload control was not found; verify this application step before submission") {
+    return "resume-control-missing";
+  }
+  return /^[a-z-]{1,64}$/.test(value) ? value : "unsupported-form-field";
 }
 
 function sameJobUrl(raw: string, job: DiscoveredJob): boolean {
@@ -158,6 +161,14 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
     if (!isOriginalRequisition(initial, job)) throw new Error("Employer form changed requisition");
     const filled = await fillApplicationForm(browser, initial, candidate, rendered,
       { provider: "greenhouse" });
+    const blocked = async (codes: readonly string[], formUrl: string) => {
+      const state = new TextEncoder().encode(JSON.stringify(await context.storageState()));
+      if (state.byteLength > 512_000) throw new Error("Browser handoff state exceeds the private limit");
+      return new HostedSubmissionBlocked({
+        blockerCodes: [...new Set(codes.map(blockerCode))].slice(0, 20),
+        formUrl, browserState: state, resumeSha256: artifact.pdfSha256, job: input.runJob,
+      });
+    };
     const blockers = [...filled.blockers];
     if (blockedWrites) blockers.push("early-network-write");
     if (blockedHosts) blockers.push("cross-host-or-redirect");
@@ -165,16 +176,16 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
     if (!filled.uploaded) blockers.push("resume-not-uploaded");
     const submitRef = oneSubmit(filled.snapshot);
     if (!submitRef) blockers.push("ambiguous-submit-control");
-    if (blockers.length) throw new HostedSubmissionBlocked(blockers.slice(0, 20));
+    if (blockers.length) throw await blocked(blockers, filled.snapshot.url);
     const finalClick = await browser.prepareFinalClick(submitRef!);
     const button = finalClick.page.locator('button[type="submit"], input[type="submit"]');
-    if (await button.count() !== 1) throw new HostedSubmissionBlocked(["ambiguous-submit-control"]);
+    if (await button.count() !== 1) throw await blocked(["ambiguous-submit-control"], filled.snapshot.url);
     const form = await button.first().evaluate(element => {
       const enclosing = (element as HTMLButtonElement | HTMLInputElement).form;
       return enclosing ? { method: enclosing.method.toLowerCase(), action: enclosing.action } : null;
     });
     if (!form || form.method !== "post" || !sameJobUrl(form.action, job)) {
-      throw new HostedSubmissionBlocked(["unsupported-submit-destination"]);
+      throw await blocked(["unsupported-submit-destination"], filled.snapshot.url);
     }
     finalPostUrl = form.action;
     let used = false;
@@ -187,27 +198,29 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
     };
     returned = true;
     return {
-      async submitOnce(): Promise<VerifiedReceipt> {
+      async submitOnce(beforeClick: () => Promise<boolean>): Promise<VerifiedReceipt | null> {
         if (used || closed) throw new Error("Final click is no longer available");
         used = true;
         if (receiptLine(await finalClick.page.locator("body").innerText(),
           input.runJob.requisitionId)) throw new Error("Employer receipt was visible before final click");
-        if (!await dependencies.beforeClick()) throw new Error("Cloud run authorization changed before final click");
         if (finalClick.page.url() !== filled.snapshot.url
           || !sameJobUrl(finalClick.page.url(), job)
           || blockedWrites || blockedHosts || blockedSockets
           || await button.count() !== 1) {
           throw new Error("Employer form changed before final click");
         }
+        if (!await beforeClick()) return null;
         // The queue handler has already written durable submit intent.
         allowFinalPost = true;
         await finalClick.click();
-        await finalClick.page.waitForFunction((id: string) => {
-          const text = document.body?.innerText ?? "";
-          return text.length < 8_000 && text.split(/\r?\n/).some(line =>
-            /\b(application|applied)\b.{0,100}\b(received|submitted|successful|successfully)\b/i.test(line)
-            && line.includes(id));
-        }, input.runJob.requisitionId, { timeout: 10_000 });
+        try {
+          await finalClick.page.waitForFunction((id: string) => {
+            const text = document.body?.innerText ?? "";
+            return text.length < 8_000 && text.split(/\r?\n/).some(line =>
+              /\b(application|applied)\b.{0,100}\b(received|submitted|successful|successfully)\b/i.test(line)
+              && line.includes(id));
+          }, input.runJob.requisitionId, { timeout: 10_000 });
+        } catch { throw new Error("Employer receipt did not identify the requisition"); }
         const text = await finalClick.page.locator("body").innerText();
         if (text.length > MAX_RECEIPT_TEXT || !sameJobUrl(finalClick.page.url(), job)
           || finalPostCount !== 1 || blockedHosts || blockedSockets) {

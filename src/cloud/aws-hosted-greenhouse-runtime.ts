@@ -1,7 +1,6 @@
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { requireHostedAccess } from "../hosted/entitlement.js";
 import { renderLocalJakePdf } from "../resume/local-tectonic.js";
 import { createAwsQueuedRunRuntime, type AwsQueuedRunConfiguration } from "./aws-queued-run-runtime.js";
 import { createBrokeredRunState } from "./aws-run-state-broker-client.js";
@@ -42,16 +41,6 @@ export async function runAwsHostedGreenhouseApplication(config: AwsGreenhouseCon
           const pdf = await renderLocalJakePdf(source, discovered, candidate, directory,
             { binary: config.tectonicBinary, cacheDirectory: config.tectonicCache });
           return pdf.path;
-        },
-        async beforeClick() {
-          try {
-            if (!await state.journal.renewLease(candidateId, context.leaseToken)
-              || !await state.authorization.hasCurrentConsent(candidateId, scope.runId)) return false;
-            const record = await state.runRecords.loadIdentity(candidateId, scope.runId);
-            if (officialJobKey(record.job) !== officialJobKey(job)) return false;
-            requireHostedAccess(record.subjectId, await state.billing.loadEntitlements(record.subjectId));
-            return true;
-          } catch { return false; }
         },
       });
     },
