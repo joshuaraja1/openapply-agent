@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { describe, expect, it, vi } from "vitest";
 import {
-  artifactObjectKey, receiptObjectKey, CandidateVault, type ArtifactStorePort, type DataKeyPort,
+  artifactObjectKey, handoffObjectKey, receiptObjectKey, CandidateVault, type ArtifactStorePort, type DataKeyPort,
 } from "../src/cloud/candidate-vault.js";
 import { S3ArtifactStore } from "../src/cloud/aws-artifact-store.js";
 
@@ -71,6 +71,22 @@ describe("cloud candidate vault", () => {
     verified.fill(0);
     await expect(vault.readReceiptVerified(alice, bob, profile, "0".repeat(64)))
       .rejects.toThrow("digest mismatch");
+  });
+  it("verifies an encrypted browser checkpoint and purges all versions with the job seeker", async () => {
+    const objects = new FakeObjects();
+    const vault = new CandidateVault(new FakeKeys(), objects);
+    const bytes = Buffer.from("private browser state");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    await vault.putHandoff(alice, bob, resume, bytes);
+    const key = handoffObjectKey(alice, bob, resume);
+    expect(Buffer.from(await objects.get(key)).toString()).not.toContain("private browser state");
+    const restored = await vault.readHandoffVerified(alice, bob, resume, digest);
+    expect(restored).toEqual(bytes);
+    restored.fill(0);
+    await expect(vault.readHandoffVerified(alice, bob, resume, "0".repeat(64)))
+      .rejects.toThrow("Handoff digest mismatch");
+    await vault.deleteCandidate(alice);
+    expect(objects.versions.has(key)).toBe(false);
   });
   it("encrypts artifacts with an authenticated tenant and artifact identity", async () => {
     const keys = new FakeKeys();

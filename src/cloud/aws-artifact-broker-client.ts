@@ -68,3 +68,28 @@ export async function uploadEncryptedReceipt(lambda: Pick<LambdaClient, "send">,
     throw new Error("Receipt upload unavailable");
   }
 }
+
+/** Create-only encrypted browser checkpoint; Lambda returns metadata only. */
+export async function uploadEncryptedHandoff(lambda: Pick<LambdaClient, "send">,
+  functionArn: string, capability: string,
+  expected: { candidateId: string; runId: string; leaseToken: string;
+    artifactId: string; sha256: string }, body: Uint8Array): Promise<void> {
+  validateBrokerArn(functionArn, capability);
+  if (!/^[a-f0-9]{64}$/.test(expected.sha256) || body.byteLength === 0
+    || body.byteLength > 800_000) throw new Error("Handoff envelope is oversized");
+  const result = await lambda.send(new InvokeCommand({ FunctionName: functionArn,
+    InvocationType: "RequestResponse",
+    Payload: Buffer.from(JSON.stringify({ kind: "handoff-upload", capability,
+      leaseToken: expected.leaseToken, artifactId: expected.artifactId,
+      sha256: expected.sha256, bodyBase64: Buffer.from(body).toString("base64") }), "utf8") }));
+  if (result.StatusCode !== 200 || result.FunctionError || !result.Payload
+    || result.Payload.byteLength > 2048) throw new Error("Handoff upload unavailable");
+  let value: unknown;
+  try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.Payload)); }
+  catch { throw new Error("Handoff upload unavailable"); }
+  const parsed = uploadSchema.safeParse(value);
+  if (!parsed.success || parsed.data.candidateId !== expected.candidateId
+    || parsed.data.runId !== expected.runId || parsed.data.artifactId !== expected.artifactId) {
+    throw new Error("Handoff upload unavailable");
+  }
+}

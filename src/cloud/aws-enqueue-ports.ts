@@ -141,6 +141,20 @@ export class DynamoHostedRunAdmission {
       && intent.data.ownerToken === uuid.parse(leaseToken).toLowerCase()
       && intent.data.receiptArtifactId === uuid.parse(artifactId).toLowerCase();
   }
+
+  /** A browser pause is only writable before the irreversible submit intent. */
+  async hasHandoffUploadEligibility(candidateId: string, runId: string,
+    leaseToken: string, nowEpoch: number): Promise<boolean> {
+    if (!await this.hasArtifactGrantEligibility(candidateId, runId, leaseToken, nowEpoch)) {
+      return false;
+    }
+    const key = keys(candidateId, runId);
+    const run = await this.readRun(candidateId, runId);
+    if (!run) return false;
+    const result = await this.db.send(new GetCommand({ TableName: this.tableName,
+      Key: { pk: key.pk, sk: officialJobKey(run.job) }, ConsistentRead: true }));
+    return !result.Item;
+  }
 }
 
 /** SQS FIFO carries opaque IDs only. The durable journal handles redelivery

@@ -2,6 +2,7 @@ import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
   type DynamoDBDocumentClient, type QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.js";
+import { officialJobKey, type OfficialJobIdentity } from "./durable-journal.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const rowSchema = z.object({ pk: z.string(), sk: z.string(),
@@ -133,6 +134,32 @@ export class DynamoApplicationDispatchStore {
       ExpressionAttributeValues: { ":preview": "preview_complete", ":launched": "launched",
         ":status": outcome.status, ":count": outcome.blockerCount,
         ":sha": outcome.resumeSha256, ":uploaded": outcome.uploaded } }));
+  }
+
+  /** Link a ciphertext object only while this exact run owns a live lease and
+   * no submit intent exists. Candidate deletion purges the entire object prefix. */
+  async markHandoffPointer(candidateId: string, runId: string, leaseToken: string,
+    job: OfficialJobIdentity, artifactId: string, sha256: string, nowEpoch: number): Promise<void> {
+    const id = key(candidateId, runId);
+    const token = uuid.parse(leaseToken);
+    const artifact = uuid.parse(artifactId);
+    if (!/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(nowEpoch) || nowEpoch < 0) {
+      throw new Error("Invalid handoff checkpoint");
+    }
+    await this.db.send(new TransactWriteCommand({ TransactItems: [
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "DELETED" },
+        ConditionExpression: "attribute_not_exists(pk)" } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "LEASE" },
+        ConditionExpression: "ownerToken=:token AND runId=:run AND expiresAt>:now",
+        ExpressionAttributeValues: { ":token": token, ":run": runId, ":now": nowEpoch } } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: officialJobKey(job) },
+        ConditionExpression: "attribute_not_exists(pk)" } },
+      { Update: { TableName: this.table, Key: id,
+        UpdateExpression: "SET handoffArtifactId=:artifact, handoffSha256=:sha",
+        ConditionExpression: "#state=:launched AND (attribute_not_exists(handoffArtifactId) OR handoffArtifactId=:artifact)",
+        ExpressionAttributeNames: { "#state": "state" },
+        ExpressionAttributeValues: { ":launched": "launched", ":artifact": artifact, ":sha": sha256 } } },
+    ] }));
   }
 
   async markBlocked(candidateId: string, runId: string): Promise<void> {
