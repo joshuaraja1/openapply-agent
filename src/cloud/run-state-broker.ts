@@ -65,6 +65,7 @@ const request = z.discriminatedUnion("operation", [
     job: syntheticJob }),
   z.strictObject({ operation: z.literal("readSyntheticClickAttempts"), job: syntheticJob }),
   z.strictObject({ operation: z.literal("readDispatch") }),
+  z.strictObject({ operation: z.literal("markDispatchNeedsHuman"), leaseToken: uuid, job }),
   z.strictObject({ operation: z.literal("markDispatchCompleted") }),
 ]);
 export type RunStateRequest = z.infer<typeof request>;
@@ -188,6 +189,18 @@ export async function executeRunStateRequest(input: unknown, capability: string,
         throw new Error("Exact dispatch is not ready");
       }
       return { body: row.body, state: row.state };
+    }
+    case "markDispatchNeedsHuman": {
+      if (!await admission.hasHandoffUploadEligibility(scope.candidateId, scope.runId,
+        command.leaseToken, nowEpoch)) throw new Error("Handoff stop unavailable");
+      requireHostedAccess(run.subjectId, await billing.loadEntitlements(run.subjectId));
+      const finalEpoch = Math.floor((previewDependencies.clock?.() ?? Date.now()) / 1000);
+      verifyArtifactRunCapability(capability, secret, finalEpoch);
+      if (!await admission.hasHandoffUploadEligibility(scope.candidateId, scope.runId,
+        command.leaseToken, finalEpoch)) throw new Error("Handoff stop unavailable");
+      await dispatch.markNeedsHuman(scope.candidateId, scope.runId,
+        command.leaseToken, run.job, finalEpoch);
+      return null;
     }
     case "markDispatchCompleted": {
       const submitted = await journal.readSubmission(scope.candidateId, run.job);

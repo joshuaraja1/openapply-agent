@@ -7,7 +7,7 @@ import { officialJobKey, type OfficialJobIdentity } from "./durable-journal.js";
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const rowSchema = z.object({ pk: z.string(), sk: z.string(),
   candidateId: uuid, runId: uuid,
-  state: z.enum(["pending_queue", "queued", "launched", "preview_complete", "completed", "blocked", "needs_reconciliation"]),
+  state: z.enum(["pending_queue", "queued", "launched", "preview_complete", "needs_human", "completed", "blocked", "needs_reconciliation"]),
   body: z.string().max(1024), groupId: uuid,
   deduplicationId: z.string().regex(/^[a-f0-9]{64}$/),
   createdAt: z.string().datetime(),
@@ -155,10 +155,35 @@ export class DynamoApplicationDispatchStore {
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: officialJobKey(job) },
         ConditionExpression: "attribute_not_exists(pk)" } },
       { Update: { TableName: this.table, Key: id,
-        UpdateExpression: "SET handoffArtifactId=:artifact, handoffSha256=:sha",
-        ConditionExpression: "#state=:launched AND (attribute_not_exists(handoffArtifactId) OR handoffArtifactId=:artifact)",
+        UpdateExpression: "SET handoffArtifactId=:artifact, handoffSha256=:sha, handoffLeaseToken=:token",
+        ConditionExpression: "#state=:launched",
         ExpressionAttributeNames: { "#state": "state" },
-        ExpressionAttributeValues: { ":launched": "launched", ":artifact": artifact, ":sha": sha256 } } },
+        ExpressionAttributeValues: { ":launched": "launched", ":artifact": artifact,
+          ":sha": sha256, ":token": token } } },
+    ] }));
+  }
+
+  /** Terminal pre-submit stop. The same transaction checks the exact saved
+   * checkpoint, live owner lease, no submit intent, and no deletion marker. */
+  async markNeedsHuman(candidateId: string, runId: string, leaseToken: string,
+    job: OfficialJobIdentity, nowEpoch: number): Promise<void> {
+    const id = key(candidateId, runId);
+    const token = uuid.parse(leaseToken);
+    if (!Number.isSafeInteger(nowEpoch) || nowEpoch < 0) throw new Error("Invalid handoff stop");
+    await this.db.send(new TransactWriteCommand({ TransactItems: [
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "DELETED" },
+        ConditionExpression: "attribute_not_exists(pk)" } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "LEASE" },
+        ConditionExpression: "ownerToken=:token AND runId=:run AND expiresAt>:now",
+        ExpressionAttributeValues: { ":token": token, ":run": runId, ":now": nowEpoch } } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: officialJobKey(job) },
+        ConditionExpression: "attribute_not_exists(pk)" } },
+      { Update: { TableName: this.table, Key: id,
+        UpdateExpression: "SET #state=:human, handoffStatus=:status REMOVE gsi1pk, gsi1sk",
+        ConditionExpression: "#state=:launched AND handoffLeaseToken=:token AND attribute_exists(handoffArtifactId) AND attribute_exists(handoffSha256)",
+        ExpressionAttributeNames: { "#state": "state" },
+        ExpressionAttributeValues: { ":human": "needs_human", ":status": "needs-human",
+          ":launched": "launched", ":token": token } } },
     ] }));
   }
 

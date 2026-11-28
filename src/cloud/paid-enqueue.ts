@@ -19,7 +19,7 @@ export async function enqueueHostedApplication(
     dispatch?: {
       ensurePending(candidateId: string, runId: string,
         envelope: ReturnType<typeof encodeCloudRunEnvelope>): Promise<{
-        state: "pending_queue" | "queued" | "launched" | "preview_complete" | "completed" | "blocked" | "needs_reconciliation";
+        state: "pending_queue" | "queued" | "launched" | "preview_complete" | "needs_human" | "completed" | "blocked" | "needs_reconciliation";
         body: string; groupId: string; deduplicationId: string;
       }>;
       markQueued(candidateId: string, runId: string): Promise<void>;
@@ -54,6 +54,7 @@ export async function enqueueHostedApplication(
   if (pending.state === "blocked") throw new Error("Application run is not authorized");
   if (pending.state === "needs_reconciliation") throw new Error("Application run needs reconciliation");
   if (pending.state === "launched" || pending.state === "preview_complete"
+    || pending.state === "needs_human"
     || pending.state === "completed") return;
   if (pending.state === "pending_queue") {
     // The durable dispatch row is the hosted queue. A run-scoped task must
