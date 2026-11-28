@@ -104,8 +104,9 @@ function harness(targetJob = job) {
         if (prepareThrows) throw new Error("preflight failed");
         if (revokeDuringPrepare) currentConsent = false;
         if (revokePaymentDuringPrepare) entitlement = [];
-        return { async submitOnce() {
+        return { async submitOnce(beforeClick) {
           if (failsBeforeClick) throw new Error("browser closed before click");
+          if (!await beforeClick()) return null;
           events.push("click");
           if (clickThrows) throw new Error("browser lost after click");
           return clickResult;
@@ -149,6 +150,153 @@ function harness(targetJob = job) {
 }
 
 describe("cloud queued application bridge", () => {
+  it("renews the lease while a slow employer form is prepared", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let entered!: () => void;
+      let finish!: () => void;
+      const preparing = new Promise<void>(resolve => { entered = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await preparing;
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(h.events.filter(event => event === "renew")).toHaveLength(3);
+      finish();
+      expect(await run).toBe("confirmed");
+      expect(h.events.indexOf("intent")).toBeLessThan(h.events.indexOf("click"));
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not write submit intent when a timed renewal loses the lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let entered!: () => void;
+      let finish!: () => void;
+      const preparing = new Promise<void>(resolve => { entered = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        entered();
+        await gate;
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await preparing;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("retry");
+      expect(h.events).not.toContain("intent");
+      expect(h.events).not.toContain("click");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not confirm or acknowledge when the lease is lost during a final click", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let clicked!: () => void;
+      let finish!: () => void;
+      const clicking = new Promise<void>(resolve => { clicked = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.application.prepare;
+      h.ports.application.prepare = async (...args) => {
+        const prepared = await original(...args);
+        return { ...prepared, async submitOnce(beforeClick) {
+          clicked();
+          await gate;
+          return prepared.submitOnce(beforeClick);
+        } };
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await clicking;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("needs_reconciliation");
+      expect(h.events).toContain("uncertain");
+      expect(h.events).not.toContain("confirmed");
+      expect(h.events).not.toContain("ack");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not click when ownership expires during the final access check", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let checking!: () => void;
+      let finish!: () => void;
+      const accessCheck = new Promise<void>(resolve => { checking = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.billing.loadEntitlements;
+      let reads = 0;
+      h.ports.billing.loadEntitlements = async (...args) => {
+        if (++reads === 3) {
+          checking();
+          await gate;
+        }
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await accessCheck;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("needs_reconciliation");
+      expect(h.events).toContain("intent");
+      expect(h.events).toContain("uncertain");
+      expect(h.events).not.toContain("click");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("rechecks paid access after adapter-side work and before its final click", async () => {
+    const h = harness();
+    let entered!: () => void;
+    let finish!: () => void;
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const original = h.ports.application.prepare;
+    h.ports.application.prepare = async (...args) => {
+      const prepared = await original(...args);
+      return { ...prepared, async submitOnce(beforeClick) {
+        entered();
+        await gate;
+        return prepared.submitOnce(beforeClick);
+      } };
+    };
+    const run = handleQueuedApplication(message(), h.ports);
+    await waiting;
+    h.setEntitlement([]);
+    finish();
+    expect(await run).toBe("needs_reconciliation");
+    expect(h.events).toContain("intent");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("confirmed");
+  });
+
+  it("rejects an adapter receipt that bypasses the final-click guard", async () => {
+    const h = harness();
+    h.ports.application.prepare = async () => ({ async submitOnce() {
+      return { evidence, job };
+    } });
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("confirmed");
+  });
+
   it("requires current paid or granted access before restoring a profile", async () => {
     const h = harness();
     h.setEntitlement([]);

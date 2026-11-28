@@ -18,8 +18,9 @@ export interface VerifiedReceipt {
 }
 
 export interface PreparedApplication {
-  /** The only final Submit action; the handler calls this only after durable intent. */
-  submitOnce(): Promise<VerifiedReceipt | null>;
+  /** The only final Submit action. Call beforeClick as the last awaited step
+   * before the irreversible click, after any adapter-side preparation. */
+  submitOnce(beforeClick: () => Promise<boolean>): Promise<VerifiedReceipt | null>;
   /** Release the private browser profile on every terminal or retry path. */
   close?(): Promise<void>;
 }
@@ -110,6 +111,21 @@ export async function handleQueuedApplication(
   const token = await ports.journal.acquireLease(run.candidateId, run.runId);
   if (!token) return "lease_busy";
 
+  // Employer forms can take longer than the journal's 120-second lease. Keep
+  // ownership alive while preparing and waiting for an exact-job receipt.
+  // A lost lease before intent permits a retry; after intent it must remain
+  // uncertain so a restarted task cannot click Submit a second time.
+  let leaseLost = false;
+  let renewal = Promise.resolve();
+  const renewLease = () => {
+    renewal = renewal.then(async () => {
+      if (!leaseLost && !await ports.journal.renewLease(run.candidateId, token)) leaseLost = true;
+    }).catch(() => { leaseLost = true; });
+    return renewal;
+  };
+  const timer = setInterval(() => { void renewLease(); }, 30_000);
+  timer.unref();
+
   let shouldAck = false;
   let cleanupComplete = true;
 
@@ -138,7 +154,8 @@ export async function handleQueuedApplication(
       const prepared = await ports.application.prepare(profile.path, record.job, run.candidateId,
         { runId: run.runId, leaseToken: token });
       try {
-        if (!await ports.journal.renewLease(run.candidateId, token)) return "retry";
+        await renewLease();
+        if (leaseLost) return "retry";
         if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) return "unauthorized";
         try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "payment_required"; }
         catch { return "retry"; }
@@ -154,6 +171,12 @@ export async function handleQueuedApplication(
           return "needs_reconciliation";
         }
         ports.syntheticProbe?.checkpoint("after_intent", record.job);
+
+        await renewal;
+        if (leaseLost) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
 
         // One final read after the durable intent narrows the window in which a
         // payment or consent revocation could race with the external Submit.
@@ -171,17 +194,44 @@ export async function handleQueuedApplication(
           return "needs_reconciliation";
         }
 
+        // The final authorization lookup can itself outlast a renewal. Do not
+        // enter the irreversible browser action after ownership was lost.
+        await renewal;
+        if (leaseLost) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
+
         let receipt: VerifiedReceipt | null;
+        let finalGuardPassed = false;
+        const beforeClick = async (): Promise<boolean> => {
+          finalGuardPassed = false;
+          await renewLease();
+          if (leaseLost) return false;
+          try {
+            if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)
+              || !await hasHostedAccess(record.subjectId, ports.billing)) return false;
+            const current = await ports.journal.readSubmission(run.candidateId, record.job);
+            finalGuardPassed = current.status === "needs_reconciliation";
+            return finalGuardPassed;
+          } catch { return false; }
+        };
         try {
-          receipt = await prepared.submitOnce();
+          receipt = await prepared.submitOnce(beforeClick);
         } catch {
           await ports.journal.markUncertain(run.candidateId, token, record.job);
           return "needs_reconciliation";
         }
-        if (!receipt || receipt.evidence.byteLength === 0
+        if (!finalGuardPassed || !receipt || receipt.evidence.byteLength === 0
           || receipt.evidence.byteLength > MAX_RECEIPT_BYTES
           || officialJobKey(receipt.job) !== officialJobKey(record.job)
           || !await ports.receiptVerifier.verify(receipt, record.job)) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
+
+        await renewal;
+        if (leaseLost) {
           await ports.journal.markUncertain(run.candidateId, token, record.job);
           return "needs_reconciliation";
         }
@@ -202,6 +252,8 @@ export async function handleQueuedApplication(
       cleanupComplete = browserCleanupComplete;
     }
   } finally {
+    clearInterval(timer);
+    await renewal;
     await ports.journal.releaseLease(run.candidateId, token);
     if (shouldAck && cleanupComplete) await ports.queue.acknowledge(message.receiptHandle);
   }

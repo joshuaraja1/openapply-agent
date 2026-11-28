@@ -17,7 +17,7 @@ export async function runSyntheticBrowserFixture(): Promise<void> {
       workAuthorization: "Fixture authorized", sponsorshipRequiredNowOrFuture: false,
       consent: { storage: true, automation: true, reviewed: true } }), { mode: 0o600 });
     prepared = await new SyntheticBrowserApplication().prepare(profilePath, job, candidateId);
-    const receipt = await prepared.submitOnce();
+    const receipt = await prepared.submitOnce(async () => true);
     if (!receipt || !await new SyntheticReceiptVerifier().verify(receipt, job)) {
       throw new Error("Synthetic image receipt was not verified");
     }
