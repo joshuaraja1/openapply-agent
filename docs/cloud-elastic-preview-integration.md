@@ -56,8 +56,10 @@ Staging evidence on November 27:
   `pending`, and ECS then reached `STOPPED`. After the 240-second safety hold,
   the one-minute retry marked storage cleanup `complete`, removed the task row,
   and freed the capacity slot. The authenticated UI reported completion.
-- No launcher Lambda is deployed. There is no running browser task or live
-  queue-to-Fargate dispatch. The test did not submit an application.
+- The staging launcher is deployed with a capacity ceiling of **one**. A live
+  empty-queue sweep returned `dispatch: ["empty"]` and started no ECS task.
+  Two-job-seeker queue dispatch and scale-out have not been tested. The test
+  did not submit an application.
 
 Deployment order:
 
@@ -65,8 +67,8 @@ Deployment order:
 2. Deploy the exact-run broker and verify cross-tenant denial with two test
    identities. Confirm the hosted deletion stop gate waits for ECS `STOPPED`.
 3. Deploy the preview task definition with that image and broker ARN.
-4. Deploy the launcher with a ceiling of one. Run a consented, synthetic
-   two-job-seeker backlog and crash drill. Then raise the ceiling gradually.
+4. Run a consented, synthetic two-job-seeker backlog and crash drill through
+   the deployed one-slot launcher. Then raise the ceiling gradually.
 
 See [preview task](cloud-preview-task.md) and
 [launcher](aws-fargate-launcher-staging.md) for the detailed contracts.

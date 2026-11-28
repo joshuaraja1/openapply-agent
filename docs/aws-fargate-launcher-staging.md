@@ -1,6 +1,6 @@
 # Staging Fargate launcher
 
-`deploy/aws/fargate-launcher-staging.yaml` is disabled by default. It defines a bounded browser pool and a one-minute sweep. `MaxConcurrentBrowserTasks` defaults to 1 and is capped at 32. This is a capacity ceiling, not a standing number of tasks: idle slots consume no Fargate task capacity. The preview task definition and private broker are registered in staging, but no browser task or launcher is running. The deployed two-identity broker drill, active-task deletion stop test, and private outbound network remain gates before launcher enablement.
+`deploy/aws/fargate-launcher-staging.yaml` is disabled by default in source. It defines a bounded browser pool and a one-minute sweep. `MaxConcurrentBrowserTasks` defaults to 1 and is capped at 32. This is a capacity ceiling, not a standing number of tasks: idle slots consume no Fargate task capacity. In the staging AWS account the launcher is now deployed at **one slot** after the live two-identity broker drill, authenticated active-task deletion test, and private network probe passed. Its empty-queue sweep returned `empty` and started zero tasks. A two-job-seeker backlog and crash drill still gate an increase above one slot.
 
 ## Exact dispatch and retries
 
