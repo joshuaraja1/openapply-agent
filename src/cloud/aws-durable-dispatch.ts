@@ -154,7 +154,7 @@ export class DynamoApplicationDispatchStore {
   }
 
   async listPending(limit = 25): Promise<DurableDispatchRecord[]> {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new Error("Invalid dispatch limit");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid dispatch limit");
     const rows: DurableDispatchRecord[] = [];
     let cursor: QueryCommandInput["ExclusiveStartKey"];
     let invalid = 0;
@@ -189,7 +189,9 @@ export async function dispatchOnePendingApplication(ports: {
   hasAnotherActiveTask(candidateId: string, runId: string): Promise<boolean>;
   launch(candidateId: string, runId: string): Promise<"started" | "capacity_busy" | "already_stopped">;
 }): Promise<"empty" | "started" | "capacity_busy" | "blocked" | "needs_reconciliation"> {
-  const pending = await ports.store.listPending(25);
+  // Four bounded index pages let an active seeker's backlog of more than one
+  // page yield to another seeker without an unbounded scheduled sweep.
+  const pending = await ports.store.listPending(100);
   let candidateBusy = false;
   for (const row of pending) {
     // The GSI is eventually consistent; a stale row is harmless to skip.

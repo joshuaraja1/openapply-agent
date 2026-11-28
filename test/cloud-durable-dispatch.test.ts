@@ -179,6 +179,40 @@ describe("durable application outbox dispatch", () => {
     expect(h.store.markLaunched).not.toHaveBeenCalledWith(candidateId, runId);
   });
 
+  it("pages past more than 25 queued runs for one busy seeker", async () => {
+    const h = harness();
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const rowFor = (seekId: string, id: string, minute: number): DurableDispatchRecord => {
+      const createdAt = `2026-11-26T20:${String(minute).padStart(2, "0")}:00.000Z`;
+      const envelope = encodeCloudRunEnvelope({ version: 1, candidateId: seekId,
+        runId: id, kind: "apply", scheduledAt: createdAt });
+      return { pk: `CANDIDATE#${seekId}`, sk: `DISPATCH#${id}`,
+        candidateId: seekId, runId: id, state: "queued", body: envelope.body,
+        groupId: envelope.groupId, deduplicationId: envelope.deduplicationId, createdAt };
+    };
+    const rows = Array.from({ length: 27 }, (_, index) => rowFor(candidateId,
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, index));
+    rows.push(rowFor(secondCandidate, secondRun, 27));
+    const send = vi.fn(async (command: QueryCommand) => {
+      expect(command).toBeInstanceOf(QueryCommand);
+      const offset = command.input.ExclusiveStartKey ? 25 : 0;
+      return { Items: rows.slice(offset, offset + 25),
+        ...(offset === 0 ? { LastEvaluatedKey: { pk: "cursor", sk: "page-1" } } : {}) };
+    });
+    const realStore = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    h.store.listPending = vi.fn(limit => realStore.listPending(limit));
+    h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
+    h.launch.mockResolvedValue("started");
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+    expect(h.store.listPending).toHaveBeenCalledWith(100);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(h.launch).toHaveBeenCalledOnce();
+    expect(h.launch).toHaveBeenCalledWith(secondCandidate, secondRun);
+  });
+
   it("keeps scanning after a concurrent active-task reservation", async () => {
     const h = harness();
     const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
