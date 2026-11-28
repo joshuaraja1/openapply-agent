@@ -32,7 +32,8 @@ const previewBinding = z.strictObject({
 export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, functionArn: string,
   capability: string, scope: { candidateId: string; runId: string }):
   Pick<CloudRunPorts, "billing" | "authorization" | "runRecords" | "journal"> & {
-    dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void> };
+    dispatch: { read(): Promise<z.infer<typeof dispatch>>; markCompleted(): Promise<void>;
+      markNeedsHuman(leaseToken: string, target: z.infer<typeof job>): Promise<void> };
     preview: { loadBinding(leaseToken: string): Promise<z.infer<typeof previewBinding>>;
       recordOutcome(leaseToken: string, target: z.infer<typeof job>, outcome: {
         status: "ready-for-review" | "needs-human"; blockerCount: number;
@@ -101,6 +102,10 @@ export function createBrokeredRunState(lambda: Pick<LambdaClient, "send">, funct
     dispatch: {
       async read() { return dispatch.parse(await call({ operation: "readDispatch" })); },
       async markCompleted() { await call({ operation: "markDispatchCompleted" }); },
+      async markNeedsHuman(leaseToken, target) {
+        await call({ operation: "markDispatchNeedsHuman", leaseToken: uuid.parse(leaseToken),
+          job: job.parse(target) });
+      },
     },
     preview: { async loadBinding(leaseToken) {
       return previewBinding.parse(await call({ operation: "loadPreviewBinding",

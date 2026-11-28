@@ -86,6 +86,28 @@ describe("durable application outbox dispatch", () => {
       { provider: "greenhouse", employerId: "example", requisitionId: "123" },
       runId, "a".repeat(64), 1795838400);
   });
+  it("stops a blocked run only when this lease wrote the checkpoint before submit", async () => {
+    const send = vi.fn(async (command: TransactWriteCommand) => {
+      expect(command).toBeInstanceOf(TransactWriteCommand);
+      const tx = command.input.TransactItems!;
+      expect(tx).toHaveLength(4);
+      expect(tx[0]?.ConditionCheck?.Key?.sk).toBe("DELETED");
+      expect(tx[1]?.ConditionCheck?.Key?.sk).toBe("LEASE");
+      expect(tx[2]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
+      expect(tx[2]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
+      expect(tx[3]?.Update?.ConditionExpression).toContain("handoffLeaseToken=:token");
+      expect(tx[3]?.Update?.ConditionExpression).toContain("attribute_exists(handoffArtifactId)");
+      expect(tx[3]?.Update?.UpdateExpression).toContain("#state=:human");
+      return {};
+    });
+    const store = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markNeedsHuman(candidateId, runId, runId,
+      { provider: "greenhouse", employerId: "example", requisitionId: "123" },
+      1795838400);
+  });
+
   it("retries entitlement read failures without blocking a queued run", async () => {
     const h = harness();
     h.authorize.mockImplementationOnce(() => confirmedHostedAccess("sub-a", async () => {
