@@ -154,9 +154,41 @@ export class DynamoApplicationDispatchStore {
   }
 
   async listPending(limit = 25): Promise<DurableDispatchRecord[]> {
+    return (await this.queryPending(limit)).rows;
+  }
+
+  /** Rotate a bounded index window between sweeps. A single seeker's large
+   * backlog cannot permanently hide another seeker's later queued run. */
+  async listPendingWindow(limit = 100): Promise<DurableDispatchRecord[]> {
+    const cursorKey = { pk: "APPLICATION_DISPATCH", sk: "SCAN_CURSOR" };
+    const current = (await this.db.send(new GetCommand({ TableName: this.table,
+      Key: cursorKey, ConsistentRead: true }))).Item;
+    const version = current ? z.number().int().nonnegative().parse(current.version) : 0;
+    const start = current?.cursor === null || current?.cursor === undefined ? undefined
+      : z.record(z.string(), z.string()).parse(current.cursor);
+    const result = await this.queryPending(limit, start);
+    try {
+      await this.db.send(new UpdateCommand({ TableName: this.table, Key: cursorKey,
+        UpdateExpression: "SET #version=:next, #cursor=:cursor",
+        ConditionExpression: current ? "#version=:previous" : "attribute_not_exists(pk)",
+        ExpressionAttributeNames: { "#version": "version", "#cursor": "cursor" },
+        ExpressionAttributeValues: { ":next": version + 1, ":cursor": result.cursor ?? null,
+          ...(current ? { ":previous": version } : {}) } }));
+    } catch (error) {
+      // Another scheduler tick advanced the window first. Its cursor wins;
+      // slot reservations still fence duplicate launches.
+      if ((error as { name?: string }).name !== "ConditionalCheckFailedException") throw error;
+    }
+    return result.rows;
+  }
+
+  private async queryPending(limit: number,
+    start?: QueryCommandInput["ExclusiveStartKey"]): Promise<{
+      rows: DurableDispatchRecord[]; cursor?: QueryCommandInput["ExclusiveStartKey"];
+    }> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid dispatch limit");
     const rows: DurableDispatchRecord[] = [];
-    let cursor: QueryCommandInput["ExclusiveStartKey"];
+    let cursor: QueryCommandInput["ExclusiveStartKey"] = start;
     let invalid = 0;
     // Bounded pagination skips malformed/stale index rows without allowing
     // one damaged record to abort every scheduled dispatch tick.
@@ -176,14 +208,14 @@ export class DynamoApplicationDispatchStore {
       if (!cursor) break;
     }
     if (invalid) console.warn(`OpenApply dispatch skipped ${invalid} malformed index row(s)`);
-    return rows;
+    return { rows, cursor };
   }
 }
 
 /** One scheduler tick advances at most one browser launch. Querying Dynamo's
  * outbox never increments SQS receive counts. */
 export async function dispatchOnePendingApplication(ports: {
-  store: Pick<DynamoApplicationDispatchStore, "listPending" | "markQueued"
+  store: Pick<DynamoApplicationDispatchStore, "listPendingWindow" | "markQueued"
     | "markLaunched" | "markBlocked" | "markNeedsReconciliation">;
   authorize(candidateId: string, runId: string): Promise<boolean>;
   hasAnotherActiveTask(candidateId: string, runId: string): Promise<boolean>;
@@ -191,7 +223,7 @@ export async function dispatchOnePendingApplication(ports: {
 }): Promise<"empty" | "started" | "capacity_busy" | "blocked" | "needs_reconciliation"> {
   // Four bounded index pages let an active seeker's backlog of more than one
   // page yield to another seeker without an unbounded scheduled sweep.
-  const pending = await ports.store.listPending(100);
+  const pending = await ports.store.listPendingWindow(100);
   let candidateBusy = false;
   for (const row of pending) {
     // The GSI is eventually consistent; a stale row is harmless to skip.
