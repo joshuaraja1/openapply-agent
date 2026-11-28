@@ -17,6 +17,13 @@ not promise that AWS can launch 32 tasks under the account's current quotas.
 The queue age, task start failures, and stopped-task reconciliation outcomes
 must be monitored before increasing it.
 
+One deployed synthetic fixture on November 27 took about 105 seconds from ECS
+task creation to container start, including about 91 seconds of image pull;
+the container then ran for about 25 seconds and exited zero. This is one
+staging observation, not a production latency estimate. Reuse a browser
+container for a bounded job-seeker batch rather than paying this startup cost
+for each application.
+
 The preview image includes Chromium and a pinned offline PDF renderer. Its
 task definition forces preview mode and disables final submission. It fills
 supported fields and records a bounded preview result, then closes the
