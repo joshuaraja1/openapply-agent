@@ -121,6 +121,7 @@ async function sweepHandler(config: FargateLaunchConfig) {
       const outcome = await dispatchOnePendingApplication({
         store: new DynamoApplicationDispatchStore(db, config.ledgerTable),
         authorize: eligible,
+        hasAnotherActiveTask: (candidateId, runId) => store.hasAnotherActiveTask(candidateId, runId),
         launch: (candidateId, runId) => launchQueuedFargateRun(candidateId, runId,
           config, { store, ecs, signingKey: secret, authorize: authorizeLaunch }),
       });

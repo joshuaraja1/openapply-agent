@@ -91,6 +91,18 @@ export class DynamoFargateLaunchStore {
     return row;
   }
 
+  /** A candidate can have many queued runs but only one active browser task.
+   * The scheduler skips their later runs so another candidate can use a free slot. */
+  async hasAnotherActiveTask(candidateId: string, runId: string): Promise<boolean> {
+    const item = (await this.db.send(new GetCommand({ TableName: this.table,
+      Key: candidateActiveKey(candidateId), ConsistentRead: true }))).Item;
+    if (!item) return false;
+    const active = z.object({ pk: z.string(), sk: z.literal("ACTIVE_TASK"),
+      runId: uuid, clientToken: z.string().length(64) }).parse(item);
+    if (active.pk !== `CANDIDATE#${candidateId}`) throw new Error("Active task key mismatch");
+    return active.runId !== uuid.parse(runId);
+  }
+
   async readActiveSlot(index = 0): Promise<{ candidateId: string; runId: string;
     clientToken: string; reservedAt: number } | undefined> {
     const item = (await this.db.send(new GetCommand({ TableName: this.table,
