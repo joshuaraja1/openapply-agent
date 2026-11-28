@@ -55,8 +55,10 @@ function receiptLine(text: string, requisitionId: string): string | undefined {
 }
 
 function oneSubmit(snapshot: BrowserSnapshot): string | undefined {
-  const controls = snapshot.controls.filter(control => control.type === "submit"
-    || (control.tag === "button" && /^(submit|submit application|send application)$/i.test(control.name)));
+  // Only native submit controls can be tied to the checked HTML form action.
+  // A named custom button may run arbitrary script while an unrelated hidden
+  // submit input satisfies the later form locator.
+  const controls = snapshot.controls.filter(control => control.type === "submit");
   return controls.length === 1 ? controls[0]!.ref : undefined;
 }
 
@@ -240,9 +242,17 @@ export async function prepareHostedGreenhouseApplication(input: GreenhouseApplic
           }, input.runJob.requisitionId, { timeout: 10_000 });
         } catch { throw new Error("Employer receipt did not identify the requisition"); }
         const text = await finalClick.page.locator("body").innerText();
+        const visibleValidationErrors = await finalClick.page.locator(
+          '[role="alert"], [aria-invalid="true"], .field-error, .error-message',
+        ).filter({ visible: true }).count();
+        const formStillOpen = await finalClick.page.locator(
+          'form button[type="submit"], form input[type="submit"]',
+        ).filter({ visible: true }).count();
         if (text.length > MAX_RECEIPT_TEXT || !sameJobUrl(finalClick.page.url(), job)
           || finalPostCount !== 1 || finalPostStatus === undefined
           || finalPostStatus < 200 || finalPostStatus >= 300
+          || visibleValidationErrors || formStillOpen
+          || /\b(?:validation errors?|please (?:correct|fix)|invalid (?:email|phone|field)|error submitting)\b/i.test(text)
           || blockedWrites || blockedHosts || blockedSockets || blockedLateGets) {
           throw new Error("Employer receipt is unavailable or unbound");
         }
