@@ -62,7 +62,8 @@ ${extra}<button type="submit">Submit Application</button></form></body></html>`;
 
 async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean; errorReceipt?: boolean;
   xhr?: boolean; crossHost?: boolean; duplicatePost?: boolean; redirect?: boolean;
-  preexistingReceipt?: boolean; delayedButton?: boolean; mismatchedControl?: boolean } = {}) {
+  preexistingReceipt?: boolean; delayedButton?: boolean; mismatchedControl?: boolean;
+  validationError?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "openapply-greenhouse-fixture-"));
   const work = join(root, "work");
   await mkdir(work, { mode: 0o700 });
@@ -90,7 +91,10 @@ async function fixture(options: { unknown?: boolean; wrongReceipt?: boolean; err
         posts++;
         const success = options.wrongReceipt ? "Application received for requisition 999999"
           : "Application received for requisition 123456";
-        const body = options.duplicatePost
+        const body = options.validationError
+          ? `<p role="alert">Please correct the required field</p><p>${success}</p>
+            <form method="post" action="${url}"><button type="submit">Submit Application</button></form>`
+          : options.duplicatePost
           ? `<script>fetch('${url}',{method:'POST'}).catch(()=>{}).finally(()=>{document.body.innerText='${success}'})</script>`
           : `<p>${success}</p>`;
         return { status: options.errorReceipt ? 500 : 200,
@@ -175,6 +179,17 @@ describe.runIf(process.env.OPENAPPLY_RUN_BROWSER_E2E === "1")("hosted Greenhouse
 
   it("rejects an HTTP error even when its body claims success", async () => {
     const f = await fixture({ errorReceipt: true });
+    try {
+      const prepared = await f.prepare();
+      try {
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("receipt");
+        expect(f.getPosts()).toBe(1);
+      } finally { await prepared.close?.(); }
+    } finally { await f.cleanup(); }
+  });
+
+  it("rejects a 200 response with both a success sentence and visible validation errors", async () => {
+    const f = await fixture({ validationError: true });
     try {
       const prepared = await f.prepare();
       try {
