@@ -193,6 +193,14 @@ export async function handleQueuedApplication(
           return "needs_reconciliation";
         }
 
+        // The final authorization lookup can itself outlast a renewal. Do not
+        // enter the irreversible browser action after ownership was lost.
+        await renewal;
+        if (leaseLost) {
+          await ports.journal.markUncertain(run.candidateId, token, record.job);
+          return "needs_reconciliation";
+        }
+
         let receipt: VerifiedReceipt | null;
         try {
           receipt = await prepared.submitOnce();

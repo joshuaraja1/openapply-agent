@@ -230,6 +230,36 @@ describe("cloud queued application bridge", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("does not click when ownership expires during the final access check", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      let checking!: () => void;
+      let finish!: () => void;
+      const accessCheck = new Promise<void>(resolve => { checking = resolve; });
+      const gate = new Promise<void>(resolve => { finish = resolve; });
+      const original = h.ports.billing.loadEntitlements;
+      let reads = 0;
+      h.ports.billing.loadEntitlements = async (...args) => {
+        if (++reads === 3) {
+          checking();
+          await gate;
+        }
+        return original(...args);
+      };
+      const run = handleQueuedApplication(message(), h.ports);
+      await accessCheck;
+      h.setLeaseRenewalSucceeds(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      finish();
+      expect(await run).toBe("needs_reconciliation");
+      expect(h.events).toContain("intent");
+      expect(h.events).toContain("uncertain");
+      expect(h.events).not.toContain("click");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("requires current paid or granted access before restoring a profile", async () => {
     const h = harness();
     h.setEntitlement([]);
