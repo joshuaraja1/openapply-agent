@@ -101,7 +101,7 @@ export class SyntheticBrowserApplication implements ApplicationPort {
         finally { await rm(root, { recursive: true, force: true }); }
       };
       return {
-        async submitOnce(): Promise<VerifiedReceipt> {
+        async submitOnce(beforeClick: () => Promise<boolean>): Promise<VerifiedReceipt | null> {
           if (used || closed) throw new Error("Synthetic final click is no longer available");
           used = true;
           if (await finalClick.page.locator("#confirmation").innerText()) {
@@ -116,6 +116,7 @@ export class SyntheticBrowserApplication implements ApplicationPort {
               throw new Error("Synthetic final click audit denied");
             }
           }
+          if (!await beforeClick()) return null;
           await finalClick.click();
           thisAudit?.afterFinalClick?.(job);
           const confirmation = finalClick.page.locator("#confirmation");

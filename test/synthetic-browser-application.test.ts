@@ -79,8 +79,8 @@ describe("synthetic-only cloud browser adapter", () => {
       const prepared = await application.prepare(profilePath, job, candidateId,
         { runId, leaseToken: artifactId });
       try {
-        await expect(prepared.submitOnce()).rejects.toThrow("task exit 86");
-        await expect(prepared.submitOnce()).rejects.toThrow("no longer available");
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("task exit 86");
+        await expect(prepared.submitOnce(async () => true)).rejects.toThrow("no longer available");
         expect(events).toEqual(["audit", "after-click"]);
       } finally { await prepared.close?.(); }
     }), 45_000,
@@ -115,7 +115,9 @@ describe("synthetic-only cloud browser adapter", () => {
           async cleanup() {} }; }, async put(_candidateId, _runId, _leaseToken, _artifactId, bytes) { savedReceipt = bytes; } },
         application: { async prepare(path, identity, candidate) {
           const prepared = await application.prepare(path, identity, candidate);
-          return { ...prepared, async submitOnce() { clicks++; return prepared.submitOnce(); } };
+          return { ...prepared, async submitOnce(beforeClick) {
+            clicks++; return prepared.submitOnce(beforeClick);
+          } };
         } },
         receiptVerifier: verifier,
         queue: { async acknowledge() { acknowledgements++; } },
@@ -164,7 +166,9 @@ describe("synthetic-only cloud browser adapter", () => {
         } },
         application: { async prepare(path, identity, candidate) {
           const prepared = await application.prepare(path, identity, candidate);
-          return { ...prepared, async submitOnce() { clicks++; return prepared.submitOnce(); } };
+          return { ...prepared, async submitOnce(beforeClick) {
+            clicks++; return prepared.submitOnce(beforeClick);
+          } };
         } },
         receiptVerifier: verifier,
         queue: { async acknowledge() { throw new Error("must not acknowledge uncertain run"); } },
