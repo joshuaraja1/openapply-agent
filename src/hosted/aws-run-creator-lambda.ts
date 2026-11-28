@@ -1,10 +1,17 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client } from "@aws-sdk/client-s3";
 import { DynamoTrustedRunCreator } from "../cloud/aws-run-creator-ports.js";
 import { DynamoBillingStore } from "./stripe-billing-store.js";
 import { createOidcSubjectVerifier } from "./checkout-http.js";
 import { handleApplicationRunHttp } from "./application-run-http.js";
+import { handleReviewedRetryHttp } from "./reviewed-retry-http.js";
+import { DynamoHostedRunAdmission } from "../cloud/aws-enqueue-ports.js";
+import { DynamoApplicationDispatchStore } from "../cloud/aws-durable-dispatch.js";
+import { DynamoFargateLaunchStore } from "../cloud/fargate-launcher.js";
+import { DurableApplicationJournal } from "../cloud/durable-journal.js";
+import { verifyTaskTimeOfficialLead } from "../cloud/task-time-official-lead.js";
+import type { OfficialLeadRow } from "../cloud/official-lead-sync.js";
 import { handleHttpApiEvent, type HttpApiEvent } from "./aws-lambda-adapter.js";
 
 function required(name: string): string {
@@ -30,7 +37,12 @@ function runtime() {
     required("ENTITLEMENT_TABLE_NAME"));
   const runCreator = new DynamoTrustedRunCreator(db, s3,
     required("RUN_LEDGER_TABLE_NAME"), required("PRIVATE_ARTIFACT_BUCKET"));
-  return { handleRequest: (request: Request) => handleApplicationRunHttp(request, {
+  const ledgerTable = required("RUN_LEDGER_TABLE_NAME");
+  const admission = new DynamoHostedRunAdmission(db, ledgerTable);
+  const dispatch = new DynamoApplicationDispatchStore(db, ledgerTable);
+  const launcher = new DynamoFargateLaunchStore(db, ledgerTable);
+  const journal = new DurableApplicationJournal(db, ledgerTable);
+  const createRun = (request: Request) => handleApplicationRunHttp(request, {
     appOrigin, issuer, verifySubject, ports: { billing,
       loadLead: (id: string) => runCreator.loadLead(id),
       loadProfile: (candidate: string, artifact: string) => runCreator.loadProfile(candidate, artifact),
@@ -38,7 +50,29 @@ function runtime() {
       createOrGet: (record: Parameters<typeof runCreator.createOrGet>[0],
         lead: Parameters<typeof runCreator.createOrGet>[1], now: number) => runCreator.createOrGet(record, lead, now),
     },
-  }), processReady: async () => ({ processed: 0, deferred: 0 }) };
+  });
+  const retry = (request: Request) => handleReviewedRetryHttp(request, {
+    appOrigin, issuer, verifySubject, ports: { billing,
+      loadBlockedRun: (candidateId, runId) => admission.loadPreviewRun(candidateId, runId),
+      readNeedsHumanPointer: (candidateId, runId) => dispatch.readNeedsHumanPointer(candidateId, runId),
+      readSubmission: (candidateId, job) => journal.readSubmission(candidateId, job),
+      hasCurrentConsent: (candidateId, runId) => admission.hasCurrentConsent(candidateId, runId),
+      hasActiveTask: async candidateId => (await launcher.listCandidateTasks(candidateId))
+        .some(row => row.state !== "stopped"),
+      verifyLiveLead: async (leadId, job, now) => {
+        const row = (await db.send(new GetCommand({ TableName: ledgerTable,
+          Key: { pk: `LEAD#${leadId}`, sk: "VERIFIED" }, ConsistentRead: true }))).Item;
+        if (!row) throw new Error("Official job changed");
+        return verifyTaskTimeOfficialLead(row as OfficialLeadRow, job, now);
+      },
+      loadProfile: (candidateId, artifactId) => runCreator.loadProfile(candidateId, artifactId),
+      profileObjectExists: (candidateId, artifactId) => runCreator.profileObjectExists(candidateId, artifactId),
+      createOrGet: (record, lead, now) => runCreator.createOrGet(record, lead, now),
+    },
+  });
+  return { handleRequest: (request: Request) => new URL(request.url).pathname ===
+    "/api/applications/reviewed-retry" ? retry(request) : createRun(request),
+    processReady: async () => ({ processed: 0, deferred: 0 }) };
 }
 
 let cached: ReturnType<typeof runtime> | undefined;

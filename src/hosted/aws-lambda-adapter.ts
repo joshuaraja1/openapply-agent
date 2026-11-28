@@ -42,6 +42,7 @@ export async function handleHttpApiEvent(event: HttpApiEvent, runtime: Runtime,
   const browserRoute = event.rawPath === "/api/billing/checkout"
     || event.rawPath === "/api/applications/enqueue"
     || event.rawPath === "/api/applications/runs"
+    || event.rawPath === "/api/applications/reviewed-retry"
     || event.rawPath === "/api/candidates/onboarding"
     || event.rawPath === "/api/candidates/plan"
     || event.rawPath === "/api/candidates/delete"

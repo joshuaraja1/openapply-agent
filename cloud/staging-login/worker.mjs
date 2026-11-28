@@ -14,6 +14,7 @@ export default {
       const deletion = url.pathname === '/api/candidates/delete'
         || url.pathname === '/api/candidates/deletion-status';
       const runCreation = url.pathname === '/api/applications/runs';
+      const reviewedRetry = url.pathname === '/api/applications/reviewed-retry';
       const enqueue = url.pathname === '/api/applications/enqueue';
       const jobs = url.pathname === '/api/jobs/matches';
       if (jobs && env.JOB_DISCOVERY_ENABLED !== 'true') {
@@ -23,10 +24,11 @@ export default {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
       if ((runCreation && env.APPLICATION_RUN_CREATION_ENABLED !== 'true')
+        || (reviewedRetry && env.APPLICATION_REVIEWED_RETRY_ENABLED !== 'true')
         || (enqueue && env.APPLICATION_ENQUEUE_ENABLED !== 'true')) {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }
-      if ((!onboarding && !plan && !deletion && !runCreation && !enqueue && !jobs
+      if ((!onboarding && !plan && !deletion && !runCreation && !reviewedRetry && !enqueue && !jobs
         && url.pathname !== '/api/billing/checkout') || request.method !== (jobs ? 'GET' : 'POST')) {
         return new Response('Not found', { status: 404, headers: securityHeaders });
       }

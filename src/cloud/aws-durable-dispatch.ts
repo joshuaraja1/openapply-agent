@@ -52,6 +52,23 @@ export class DynamoApplicationDispatchStore {
     return row;
   }
 
+  /** Opaque checkpoint metadata for an authenticated review flow. Never
+   * return browser state or form answers through the control plane. */
+  async readNeedsHumanPointer(candidateId: string, runId: string): Promise<{
+    artifactId: string; sha256: string;
+  } | undefined> {
+    const item = (await this.db.send(new GetCommand({ TableName: this.table,
+      Key: key(candidateId, runId), ConsistentRead: true }))).Item;
+    if (!item) return undefined;
+    const row = parseDispatchRow(item);
+    if (row.state !== "needs_human") return undefined;
+    const pointer = z.object({ handoffArtifactId: uuid,
+      handoffSha256: z.string().regex(/^[a-f0-9]{64}$/) }).safeParse(item);
+    if (!pointer.success) throw new Error("Handoff pointer is unavailable");
+    return { artifactId: pointer.data.handoffArtifactId,
+      sha256: pointer.data.handoffSha256 };
+  }
+
   async ensurePending(candidateId: string, runId: string,
     envelope: ReturnType<typeof encodeCloudRunEnvelope>): Promise<DurableDispatchRecord> {
     const id = key(candidateId, runId);
