@@ -146,6 +146,17 @@ export async function handleQueuedApplication(
   let cleanupComplete = true;
 
   try {
+    // The pre-lease read avoids needless work for terminal redelivery. Check
+    // again after acquiring ownership so a racing handoff cannot slip through.
+    const currentDispatch = await ports.dispatch.readStatus();
+    if (currentDispatch === "needs_human") {
+      if (!ports.queue.acknowledgeHandoff) throw new Error("Handoff acknowledgment unavailable");
+      shouldAckHandoff = true;
+      return "needs_human";
+    }
+    if (currentDispatch !== "queued" && currentDispatch !== "launched") {
+      return "needs_reconciliation";
+    }
     const record = await ports.runRecords.loadIdentity(run.candidateId, run.runId);
     const { status } = await ports.journal.readSubmission(run.candidateId, record.job);
     if (status === "confirmed") {

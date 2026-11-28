@@ -61,6 +61,18 @@ describe("cloud pre-submit handoff", () => {
     expect(h.events).toEqual(["ack-handoff"]);
     expect(h.browserState.every(byte => byte !== 0)).toBe(true);
   });
+  it("rechecks a handoff that becomes terminal while this task acquires its lease", async () => {
+    const h = fixture();
+    let reads = 0;
+    h.ports.dispatch = { async readStatus() {
+      reads++;
+      return reads === 1 ? "launched" : "needs_human";
+    } };
+    expect(await handleQueuedApplication({ body, receiptHandle: "sqs-receipt" }, h.ports))
+      .toBe("needs_human");
+    expect(h.events).toEqual(["lease", "release", "ack-handoff"]);
+    expect(reads).toBe(2);
+  });
   it("saves encrypted handoff before terminal queue acknowledgment, with no submit intent", async () => {
     const h = fixture();
     expect(await handleQueuedApplication({ body, receiptHandle: "sqs-receipt" }, h.ports))
