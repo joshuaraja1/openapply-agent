@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { officialJobKey, type OfficialJobIdentity, type SubmissionStatus } from "./durable-journal.js";
 import { HostedAccessDeniedError, requireHostedAccess } from "../hosted/entitlement.js";
+import { HostedSubmissionBlocked } from "./hosted-submission-blocked.js";
+import type { HostedHandoffState } from "./hosted-handoff-state.js";
 
 export interface CloudRunRecord {
   /** Trusted billing subject bound to this candidate when the run was created. */
@@ -71,6 +73,11 @@ export interface CloudRunPorts {
     prepare(profilePath: string, job: OfficialJobIdentity, candidateId: string,
       context?: { runId: string; leaseToken: string }): Promise<PreparedApplication>;
   };
+  /** A blocked pre-submit form is encrypted and made terminal in the durable
+   * dispatch ledger before the queue message can be acknowledged. */
+  handoff?: {
+    save(leaseToken: string, state: HostedHandoffState): Promise<void>;
+  };
   /** Only wired by the .invalid synthetic staging task. */
   syntheticProbe?: { checkpoint(stage: SyntheticCheckpoint, job: OfficialJobIdentity): void };
   receiptVerifier: {
@@ -80,11 +87,12 @@ export interface CloudRunPorts {
   queue: {
     /** Delete the SQS receipt only after the durable confirmed state exists. */
     acknowledge(receiptHandle: string): Promise<void>;
+    acknowledgeHandoff?(receiptHandle: string): Promise<void>;
   };
 }
 
 export type CloudRunOutcome = "confirmed" | "already_confirmed" | "lease_busy" | "unauthorized"
-  | "needs_reconciliation" | "retry" | "payment_required";
+  | "needs_reconciliation" | "retry" | "payment_required" | "needs_human";
 
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 
@@ -127,6 +135,7 @@ export async function handleQueuedApplication(
   timer.unref();
 
   let shouldAck = false;
+  let shouldAckHandoff = false;
   let cleanupComplete = true;
 
   try {
@@ -151,8 +160,35 @@ export async function handleQueuedApplication(
     cleanupComplete = false;
     let browserCleanupComplete = false;
     try {
-      const prepared = await ports.application.prepare(profile.path, record.job, run.candidateId,
-        { runId: run.runId, leaseToken: token });
+      let prepared: PreparedApplication;
+      try {
+        prepared = await ports.application.prepare(profile.path, record.job, run.candidateId,
+          { runId: run.runId, leaseToken: token });
+      } catch (error) {
+        if (!(error instanceof HostedSubmissionBlocked)) throw error;
+        try {
+          if (!ports.handoff || !ports.queue.acknowledgeHandoff
+            || officialJobKey(error.job) !== officialJobKey(record.job)) return "retry";
+          await renewLease();
+          if (leaseLost || !await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)) {
+            return "retry";
+          }
+          try { if (!await hasHostedAccess(record.subjectId, ports.billing)) return "retry"; }
+          catch { return "retry"; }
+          const browserState = JSON.parse(new TextDecoder("utf-8", { fatal: true })
+            .decode(error.browserState)) as HostedHandoffState["browserState"];
+          const state: HostedHandoffState = {
+            version: 1, candidateId: run.candidateId, runId: run.runId, job: record.job,
+            formUrl: error.formUrl, resumeSha256: error.resumeSha256,
+            capturedAt: new Date().toISOString(), blockerCodes: [...error.blockerCodes],
+            browserState,
+          };
+          await ports.handoff.save(token, state);
+          browserCleanupComplete = true;
+          shouldAckHandoff = true;
+          return "needs_human";
+        } finally { error.browserState.fill(0); }
+      }
       try {
         await renewLease();
         if (leaseLost) return "retry";
@@ -255,6 +291,9 @@ export async function handleQueuedApplication(
     clearInterval(timer);
     await renewal;
     await ports.journal.releaseLease(run.candidateId, token);
-    if (shouldAck && cleanupComplete) await ports.queue.acknowledge(message.receiptHandle);
+    if (cleanupComplete) {
+      if (shouldAck) await ports.queue.acknowledge(message.receiptHandle);
+      else if (shouldAckHandoff) await ports.queue.acknowledgeHandoff?.(message.receiptHandle);
+    }
   }
 }

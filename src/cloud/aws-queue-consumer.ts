@@ -30,6 +30,11 @@ export class SqsApplicationQueueReceiver {
     await this.sqs.send(new DeleteMessageCommand({ QueueUrl: this.queueUrl,
       ReceiptHandle: receiptHandle }));
   }
+
+  /** The broker has already made needs-human durable before this delete. */
+  async acknowledgeHandoff(receiptHandle: string): Promise<void> {
+    return this.acknowledge(receiptHandle);
+  }
 }
 
 /** A task exits after one message. Nonterminal outcomes stay visible for safe
