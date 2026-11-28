@@ -7,6 +7,8 @@ row waits for the Fargate launcher. The launcher reserves one DynamoDB slot
 and one active-task lock for that job seeker, then starts a container for the
 run. A one-minute sweep fills free slots from queued runs and reconciles
 stopped tasks. With no queued runs, there are no running browser containers.
+The staging NAT Gateway remains provisioned and billed while idle, so this is
+browser-compute scale-to-zero rather than zero total cloud cost.
 
 The staging ceiling is one task by default and can be raised to 32 after load,
 cost, and failure tests. A lower ceiling blocks new reservations without
