@@ -50,6 +50,11 @@ export function receiptObjectKey(candidateId: string, runId: string, artifactId:
   return `${candidatePrefix(candidateId)}runs/${canonicalId(runId)}/receipts/${canonicalId(artifactId)}`;
 }
 
+/** An encrypted browser checkpoint is scoped to one run, not a reusable profile. */
+export function handoffObjectKey(candidateId: string, runId: string, artifactId: string): string {
+  return `${candidatePrefix(candidateId)}runs/${canonicalId(runId)}/handoffs/${canonicalId(artifactId)}`;
+}
+
 function encryptionContext(candidateId: string, artifactId: string): Record<string, string> {
   return { application: "openapply", version: "1", candidateId, artifactId };
 }
@@ -79,6 +84,12 @@ export class CandidateVault {
     plaintext: Uint8Array): Promise<void> {
     return this.putAtKey(candidateIdInput, artifactIdInput, plaintext,
       (candidateId, artifactId) => receiptObjectKey(candidateId, runId, artifactId));
+  }
+
+  async putHandoff(candidateIdInput: string, runId: string, artifactIdInput: string,
+    plaintext: Uint8Array): Promise<void> {
+    return this.putAtKey(candidateIdInput, artifactIdInput, plaintext,
+      (candidateId, artifactId) => handoffObjectKey(candidateId, runId, artifactId));
   }
 
   private async putAtKey(candidateIdInput: string, artifactIdInput: string, plaintext: Uint8Array,
@@ -126,6 +137,20 @@ export class CandidateVault {
     if (!timingSafeEqual(actual, Buffer.from(confirmedSha256, "hex"))) {
       plaintext.fill(0);
       throw new Error("Confirmed receipt digest mismatch");
+    }
+    return plaintext;
+  }
+
+  /** Callers must zero the returned buffer after restoring the browser state. */
+  async readHandoffVerified(candidateId: string, runId: string, artifactId: string,
+    expectedSha256: string): Promise<Buffer> {
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256)) throw new Error("Handoff digest unavailable");
+    const plaintext = await this.readAtKey(candidateId, artifactId,
+      (id, handoffId) => handoffObjectKey(id, runId, handoffId));
+    const actual = createHash("sha256").update(plaintext).digest();
+    if (!timingSafeEqual(actual, Buffer.from(expectedSha256, "hex"))) {
+      plaintext.fill(0);
+      throw new Error("Handoff digest mismatch");
     }
     return plaintext;
   }

@@ -5,10 +5,11 @@ import { STSClient } from "@aws-sdk/client-sts";
 import { S3Client } from "@aws-sdk/client-s3";
 import { DynamoCandidatePlanStatus } from "../hosted/aws-plan-status.js";
 import { DynamoHostedRunAdmission } from "./aws-enqueue-ports.js";
-import { issueCandidateArtifactCredentials, storeEncryptedReceipt } from "./artifact-credential-broker.js";
+import { issueCandidateArtifactCredentials, storeEncryptedHandoff, storeEncryptedReceipt } from "./artifact-credential-broker.js";
 import { DynamoArtifactGrantFence } from "./aws-artifact-grant-fence.js";
 import { S3ArtifactStore } from "./aws-artifact-store.js";
 import { executeRunStateRequest } from "./run-state-broker.js";
+import { DynamoApplicationDispatchStore } from "./aws-durable-dispatch.js";
 
 const env = process.env;
 const required = ["ARTIFACT_SIGNING_SECRET_ARN", "DATA_ROLE_ARN", "ARTIFACT_BUCKET",
@@ -63,6 +64,25 @@ export async function handler(event: unknown) {
           secret, nowEpoch, config, { admission, grantFence, billing,
             clock: () => Math.floor(Date.now() / 1000),
             receipts: new S3ArtifactStore(new S3Client({}), env.ARTIFACT_BUCKET!) });
+      } finally { body.fill(0); }
+    }
+    if (kind === "handoff-upload") {
+      const artifactId = (event as { artifactId?: unknown }).artifactId;
+      const sha256 = (event as { sha256?: unknown }).sha256;
+      const encoded = (event as { bodyBase64?: unknown }).bodyBase64;
+      if (typeof artifactId !== "string" || typeof sha256 !== "string"
+        || typeof encoded !== "string" || encoded.length > 1_100_000
+        || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+        throw new Error("Handoff envelope unavailable");
+      }
+      const body = Buffer.from(encoded, "base64");
+      if (body.toString("base64") !== encoded) throw new Error("Handoff envelope unavailable");
+      try {
+        return await storeEncryptedHandoff(token, leaseToken as string, artifactId,
+          sha256, body, secret, nowEpoch, config, { admission, grantFence, billing,
+            clock: () => Math.floor(Date.now() / 1000),
+            handoffs: new S3ArtifactStore(new S3Client({}), env.ARTIFACT_BUCKET!),
+            dispatch: new DynamoApplicationDispatchStore(dynamo, env.RUN_LEDGER_TABLE_NAME!) });
       } finally { body.fill(0); }
     }
     if (kind !== "credentials") throw new Error("Unknown artifact broker request");
