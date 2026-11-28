@@ -82,6 +82,7 @@ export function createAwsQueuedRunRuntime(
     billing: state.billing,
     authorization: state.authorization,
     runRecords: state.runRecords,
+    dispatch: { readStatus: () => state.dispatch.readStatus() },
     journal: state.journal,
     vault,
     handoff: { async save(leaseToken, handoff) {

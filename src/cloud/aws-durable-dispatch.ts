@@ -2,7 +2,7 @@ import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand,
   type DynamoDBDocumentClient, type QueryCommandInput } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
 import { decodeCloudRunEnvelope, encodeCloudRunEnvelope } from "./run-envelope.js";
-import { officialJobKey, type OfficialJobIdentity } from "./durable-journal.js";
+import { officialJobKey, runConsentKey, type OfficialJobIdentity } from "./durable-journal.js";
 
 const uuid = z.uuid().refine(value => value === value.toLowerCase());
 const rowSchema = z.object({ pk: z.string(), sk: z.string(),
@@ -50,6 +50,23 @@ export class DynamoApplicationDispatchStore {
     const row = parseDispatchRow(item);
     if (row.pk !== expected.pk || row.sk !== expected.sk) throw new Error("Dispatch key mismatch");
     return row;
+  }
+
+  /** Opaque checkpoint metadata for an authenticated review flow. Never
+   * return browser state or form answers through the control plane. */
+  async readNeedsHumanPointer(candidateId: string, runId: string): Promise<{
+    artifactId: string; sha256: string;
+  } | undefined> {
+    const item = (await this.db.send(new GetCommand({ TableName: this.table,
+      Key: key(candidateId, runId), ConsistentRead: true }))).Item;
+    if (!item) return undefined;
+    const row = parseDispatchRow(item);
+    if (row.state !== "needs_human") return undefined;
+    const pointer = z.object({ handoffArtifactId: uuid,
+      handoffSha256: z.string().regex(/^[a-f0-9]{64}$/) }).safeParse(item);
+    if (!pointer.success) throw new Error("Handoff pointer is unavailable");
+    return { artifactId: pointer.data.handoffArtifactId,
+      sha256: pointer.data.handoffSha256 };
   }
 
   async ensurePending(candidateId: string, runId: string,
@@ -139,11 +156,13 @@ export class DynamoApplicationDispatchStore {
   /** Link a ciphertext object only while this exact run owns a live lease and
    * no submit intent exists. Candidate deletion purges the entire object prefix. */
   async markHandoffPointer(candidateId: string, runId: string, leaseToken: string,
-    job: OfficialJobIdentity, artifactId: string, sha256: string, nowEpoch: number): Promise<void> {
+    job: OfficialJobIdentity, consentVersion: number, artifactId: string,
+    sha256: string, nowEpoch: number): Promise<void> {
     const id = key(candidateId, runId);
     const token = uuid.parse(leaseToken);
     const artifact = uuid.parse(artifactId);
-    if (!/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(nowEpoch) || nowEpoch < 0) {
+    if (!/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(nowEpoch) || nowEpoch < 0
+      || !Number.isSafeInteger(consentVersion) || consentVersion < 1) {
       throw new Error("Invalid handoff checkpoint");
     }
     await this.db.send(new TransactWriteCommand({ TransactItems: [
@@ -152,11 +171,16 @@ export class DynamoApplicationDispatchStore {
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "LEASE" },
         ConditionExpression: "ownerToken=:token AND runId=:run AND expiresAt>:now",
         ExpressionAttributeValues: { ":token": token, ":run": runId, ":now": nowEpoch } } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: runConsentKey(runId) },
+        ConditionExpression: "#state=:granted AND runId=:run AND #version=:version",
+        ExpressionAttributeNames: { "#state": "state", "#version": "version" },
+        ExpressionAttributeValues: { ":granted": "granted", ":run": runId,
+          ":version": consentVersion } } },
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: officialJobKey(job) },
         ConditionExpression: "attribute_not_exists(pk)" } },
       { Update: { TableName: this.table, Key: id,
         UpdateExpression: "SET handoffArtifactId=:artifact, handoffSha256=:sha, handoffLeaseToken=:token",
-        ConditionExpression: "#state=:launched",
+        ConditionExpression: "#state=:launched AND (attribute_not_exists(handoffArtifactId) OR (handoffArtifactId=:artifact AND handoffSha256=:sha AND handoffLeaseToken=:token))",
         ExpressionAttributeNames: { "#state": "state" },
         ExpressionAttributeValues: { ":launched": "launched", ":artifact": artifact,
           ":sha": sha256, ":token": token } } },
@@ -166,16 +190,24 @@ export class DynamoApplicationDispatchStore {
   /** Terminal pre-submit stop. The same transaction checks the exact saved
    * checkpoint, live owner lease, no submit intent, and no deletion marker. */
   async markNeedsHuman(candidateId: string, runId: string, leaseToken: string,
-    job: OfficialJobIdentity, nowEpoch: number): Promise<void> {
+    job: OfficialJobIdentity, consentVersion: number, nowEpoch: number): Promise<void> {
     const id = key(candidateId, runId);
     const token = uuid.parse(leaseToken);
-    if (!Number.isSafeInteger(nowEpoch) || nowEpoch < 0) throw new Error("Invalid handoff stop");
+    if (!Number.isSafeInteger(nowEpoch) || nowEpoch < 0
+      || !Number.isSafeInteger(consentVersion) || consentVersion < 1) {
+      throw new Error("Invalid handoff stop");
+    }
     await this.db.send(new TransactWriteCommand({ TransactItems: [
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "DELETED" },
         ConditionExpression: "attribute_not_exists(pk)" } },
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: "LEASE" },
         ConditionExpression: "ownerToken=:token AND runId=:run AND expiresAt>:now",
         ExpressionAttributeValues: { ":token": token, ":run": runId, ":now": nowEpoch } } },
+      { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: runConsentKey(runId) },
+        ConditionExpression: "#state=:granted AND runId=:run AND #version=:version",
+        ExpressionAttributeNames: { "#state": "state", "#version": "version" },
+        ExpressionAttributeValues: { ":granted": "granted", ":run": runId,
+          ":version": consentVersion } } },
       { ConditionCheck: { TableName: this.table, Key: { pk: id.pk, sk: officialJobKey(job) },
         ConditionExpression: "attribute_not_exists(pk)" } },
       { Update: { TableName: this.table, Key: id,

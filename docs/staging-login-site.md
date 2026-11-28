@@ -56,7 +56,7 @@ controlled HTTPS route is live and tested.
 ## Same-origin API contract
 
 The Worker proxies billing Checkout and the candidate onboarding, plan, and
-deletion routes to their configured AWS origins. It also has two separate,
+deletion routes to their configured AWS origins. It also has three separate,
 **off-by-default** staging switches:
 
 - `APPLICATION_RUN_CREATION_ENABLED=true` allows only
@@ -65,8 +65,14 @@ deletion routes to their configured AWS origins. It also has two separate,
 - `APPLICATION_ENQUEUE_ENABLED=true` allows only
   `POST /api/applications/enqueue` to that origin. The AWS billing stack must
   have `EnableApplicationEnqueue=true` and a deployed exact-run Fargate launcher.
+- `APPLICATION_REVIEWED_RETRY_ENABLED=true` allows only
+  `POST /api/applications/reviewed-retry` to the run-creator origin. The signed-in
+  job seeker must supply a new reviewed profile artifact and explicit consent.
+  It creates one new exact-job run from a durable `needs_human` handoff; it does
+  not restore unsent employer form fields. The normal enqueue route still
+  starts the new run after its own payment and consent checks.
 
-Keep both Worker switches unset until an official-source lead writer has
+Keep the Worker switches unset until an official-source lead writer has
 created a current `LEAD#<id>/VERIFIED` row, onboarding has written a reviewed
 `applicationProfileReady=true` marker, and the hosted browser path is ready for
 the intended provider. The page does not yet present a job list or a Start

@@ -46,6 +46,7 @@ function harness(targetJob = job) {
   let cleanupThrows = false;
   let browserCloseThrows = false;
   const ports: CloudRunPorts = {
+    dispatch: { async readStatus() { return "launched"; } },
     billing: { async loadEntitlements() {
       events.push("billing");
       billingReadCount++;

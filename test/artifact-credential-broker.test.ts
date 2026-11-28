@@ -32,7 +32,7 @@ function fixture() {
       _leaseToken: string, _artifactId: string, _checkedEpoch: number) => true),
     hasHandoffUploadEligibility: vi.fn(async (_candidateId: string, _runId: string,
       _leaseToken: string, _checkedEpoch: number) => true),
-    loadIdentity: vi.fn(async () => ({ subjectId, job })) };
+    loadIdentity: vi.fn(async () => ({ subjectId, job, consentVersion: 1 })) };
   const billing = { loadEntitlements: vi.fn(async () => [{ kind: "free-grant", subjectId,
     grantId: "beta", approvedBy: "admin", startsAt: "2026-11-25T00:00:00.000Z",
     endsAt: "2026-12-01T00:00:00.000Z", revokedAt: null }]) };
@@ -227,7 +227,7 @@ describe("candidate-scoped artifact credentials", () => {
     expect(handoffs.putCreateOnly).toHaveBeenCalledWith(
       handoffObjectKey(candidateId, runId, receiptId), encryptedReceipt);
     expect(dispatch.markHandoffPointer).toHaveBeenCalledWith(candidateId, runId,
-      leaseToken, job, receiptId, digest, nowEpoch);
+      leaseToken, job, 1, receiptId, digest, nowEpoch);
     const blocked = fixture();
     blocked.admission.hasHandoffUploadEligibility.mockResolvedValue(false);
     await expect(storeEncryptedHandoff(token, leaseToken, receiptId, digest,

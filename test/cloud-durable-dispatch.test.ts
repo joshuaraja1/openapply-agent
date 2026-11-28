@@ -69,13 +69,16 @@ describe("durable application outbox dispatch", () => {
     const send = vi.fn(async (command: TransactWriteCommand) => {
       expect(command).toBeInstanceOf(TransactWriteCommand);
       const tx = command.input.TransactItems!;
-      expect(tx).toHaveLength(4);
+      expect(tx).toHaveLength(5);
       expect(tx[0]?.ConditionCheck?.Key?.sk).toBe("DELETED");
       expect(tx[1]?.ConditionCheck?.Key?.sk).toBe("LEASE");
       expect(tx[1]?.ConditionCheck?.ConditionExpression).toContain("ownerToken=:token");
-      expect(tx[2]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
-      expect(tx[2]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
-      expect(tx[3]?.Update?.ConditionExpression).toContain("#state=:launched");
+      expect(tx[2]?.ConditionCheck?.Key?.sk).toBe(`CONSENT#${runId}`);
+      expect(tx[2]?.ConditionCheck?.ConditionExpression).toContain("#state=:granted");
+      expect(tx[3]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
+      expect(tx[3]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
+      expect(tx[4]?.Update?.ConditionExpression).toContain("#state=:launched");
+      expect(tx[4]?.Update?.ConditionExpression).toContain("attribute_not_exists(handoffArtifactId)");
       expect(JSON.stringify(tx)).not.toContain("private browser state");
       return {};
     });
@@ -83,21 +86,22 @@ describe("durable application outbox dispatch", () => {
       { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
       "openapply-staging-run-ledger");
     await store.markHandoffPointer(candidateId, runId, runId,
-      { provider: "greenhouse", employerId: "example", requisitionId: "123" },
+      { provider: "greenhouse", employerId: "example", requisitionId: "123" }, 1,
       runId, "a".repeat(64), 1795838400);
   });
   it("stops a blocked run only when this lease wrote the checkpoint before submit", async () => {
     const send = vi.fn(async (command: TransactWriteCommand) => {
       expect(command).toBeInstanceOf(TransactWriteCommand);
       const tx = command.input.TransactItems!;
-      expect(tx).toHaveLength(4);
+      expect(tx).toHaveLength(5);
       expect(tx[0]?.ConditionCheck?.Key?.sk).toBe("DELETED");
       expect(tx[1]?.ConditionCheck?.Key?.sk).toBe("LEASE");
-      expect(tx[2]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
-      expect(tx[2]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
-      expect(tx[3]?.Update?.ConditionExpression).toContain("handoffLeaseToken=:token");
-      expect(tx[3]?.Update?.ConditionExpression).toContain("attribute_exists(handoffArtifactId)");
-      expect(tx[3]?.Update?.UpdateExpression).toContain("#state=:human");
+      expect(tx[2]?.ConditionCheck?.Key?.sk).toBe(`CONSENT#${runId}`);
+      expect(tx[3]?.ConditionCheck?.Key?.sk).toMatch(/^JOB#/);
+      expect(tx[3]?.ConditionCheck?.ConditionExpression).toBe("attribute_not_exists(pk)");
+      expect(tx[4]?.Update?.ConditionExpression).toContain("handoffLeaseToken=:token");
+      expect(tx[4]?.Update?.ConditionExpression).toContain("attribute_exists(handoffArtifactId)");
+      expect(tx[4]?.Update?.UpdateExpression).toContain("#state=:human");
       return {};
     });
     const store = new DynamoApplicationDispatchStore(
@@ -105,7 +109,7 @@ describe("durable application outbox dispatch", () => {
       "openapply-staging-run-ledger");
     await store.markNeedsHuman(candidateId, runId, runId,
       { provider: "greenhouse", employerId: "example", requisitionId: "123" },
-      1795838400);
+      1, 1795838400);
   });
 
   it("retries entitlement read failures without blocking a queued run", async () => {

@@ -79,7 +79,8 @@ export class DynamoTrustedRunCreator {
   }
 
   async createOrGet(record: TrustedRunRecord, lead: VerifiedOfficialLead,
-    nowEpoch: number): Promise<"created" | "existing"> {
+    nowEpoch: number, reviewedFrom?: { blockedRunId: string;
+      oldProfileArtifactId: string }): Promise<"created" | "existing"> {
     const pk = `CANDIDATE#${uuid.parse(record.candidateId).toLowerCase()}`;
     const runKey = { pk, sk: `RUN#${record.runId}` };
     const consentKey = { pk, sk: runConsentKey(record.runId) };
@@ -100,6 +101,31 @@ export class DynamoTrustedRunCreator {
           ExpressionAttributeValues: { ":verified": "verified", ":subject": record.subjectId,
             ":candidate": record.candidateId, ":artifact": record.profileArtifactId,
             ":ready": true } } },
+        ...(reviewedFrom ? [
+          { Update: { TableName: this.table,
+            Key: { pk, sk: `DISPATCH#${uuid.parse(reviewedFrom.blockedRunId)}` },
+            UpdateExpression: "SET reviewedRetryRunId=:newRun",
+            ConditionExpression: "#state=:human AND attribute_exists(handoffArtifactId) AND attribute_exists(handoffSha256) AND (attribute_not_exists(reviewedRetryRunId) OR reviewedRetryRunId=:newRun)",
+            ExpressionAttributeNames: { "#state": "state" },
+            ExpressionAttributeValues: { ":human": "needs_human", ":newRun": record.runId } } },
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk, sk: `RUN#${uuid.parse(reviewedFrom.blockedRunId)}` },
+            ConditionExpression: "subjectId=:subject AND leadId=:lead AND profileArtifactId=:old AND jobKey=:jobKey",
+            ExpressionAttributeValues: { ":subject": record.subjectId, ":lead": record.leadId,
+              ":old": uuid.parse(reviewedFrom.oldProfileArtifactId), ":jobKey": record.jobKey } } },
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk, sk: runConsentKey(reviewedFrom.blockedRunId) },
+            ConditionExpression: "#state=:granted AND #version=:version AND runId=:oldRun",
+            ExpressionAttributeNames: { "#state": "state", "#version": "version" },
+            ExpressionAttributeValues: { ":granted": "granted", ":version": 1,
+              ":oldRun": reviewedFrom.blockedRunId } } },
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk, sk: officialJobKey(record.job) },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+          { ConditionCheck: { TableName: this.table,
+            Key: { pk, sk: "ACTIVE_TASK" },
+            ConditionExpression: "attribute_not_exists(pk)" } },
+        ] : []),
         { Put: { TableName: this.table, Item: { ...runKey, ...record },
           ConditionExpression: "attribute_not_exists(pk)" } },
         { Put: { TableName: this.table,
@@ -114,16 +140,20 @@ export class DynamoTrustedRunCreator {
       if (!conditional(error)) throw error;
       // A concurrent request may have committed. Confirm both immutable rows
       // before treating this as a safe idempotent retry.
-      const [run, consent, deleted] = await Promise.all([
+      const [run, consent, deleted, priorReview] = await Promise.all([
         this.db.send(new GetCommand({ TableName: this.table, Key: runKey, ConsistentRead: true })),
         this.db.send(new GetCommand({ TableName: this.table, Key: consentKey, ConsistentRead: true })),
         this.db.send(new GetCommand({ TableName: this.table,
           Key: { pk, sk: "DELETED" }, ConsistentRead: true })),
+        reviewedFrom ? this.db.send(new GetCommand({ TableName: this.table,
+          Key: { pk, sk: `DISPATCH#${uuid.parse(reviewedFrom.blockedRunId)}` },
+          ConsistentRead: true })) : Promise.resolve(undefined),
       ]);
       if (deleted.Item) throw new RunInputsUnavailableError("Candidate deleted");
       const existing = runSchema.safeParse(run.Item);
       const grant = consentSchema.safeParse(consent.Item);
       const same = existing.success && grant.success
+        && (!reviewedFrom || priorReview?.Item?.reviewedRetryRunId === record.runId)
         && existing.data.pk === runKey.pk && existing.data.sk === runKey.sk
         && grant.data.pk === consentKey.pk && grant.data.sk === consentKey.sk
         && grant.data.runId === record.runId
