@@ -27,8 +27,9 @@ This code is **not yet a deployable real-application service**. The browser
 image now pins a static Linux Tectonic binary by SHA-256, warms the Jake cache
 at build time, and runs the real offline renderer test. A separate disabled
 preview task definition is in `deploy/aws/preview-task-staging.yaml`. The
-image must pass its GitHub build, be published to ECR by immutable digest, and
-complete a deployed staging run. The current preview closes the
+image passed its GitHub build and an AWS CodeBuild run, and was published to
+staging ECR by immutable digest. The preview task definition is registered,
+but it has not completed a deployed staging run. The current preview closes the
 browser and does not persist its page state or exact unknown question; a
 resumeable encrypted handoff is required before final submission can be
 enabled. Provider-specific confirmation checks and consented real-site tests

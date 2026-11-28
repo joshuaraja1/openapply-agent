@@ -1,6 +1,6 @@
 # Staging Fargate launcher
 
-`deploy/aws/fargate-launcher-staging.yaml` is disabled by default. It defines a bounded browser pool and a one-minute sweep. `MaxConcurrentBrowserTasks` defaults to 1 and is capped at 32. This is a capacity ceiling, not a standing number of tasks: idle slots consume no Fargate task capacity. No candidate browser task is deployed or enabled yet. The browser image, tested task definition, deletion stop gate, and trusted run-state boundary are required before enablement.
+`deploy/aws/fargate-launcher-staging.yaml` is disabled by default. It defines a bounded browser pool and a one-minute sweep. `MaxConcurrentBrowserTasks` defaults to 1 and is capped at 32. This is a capacity ceiling, not a standing number of tasks: idle slots consume no Fargate task capacity. The preview task definition and private broker are registered in staging, but no browser task or launcher is running. The deployed two-identity broker drill, active-task deletion stop test, and private outbound network remain gates before launcher enablement.
 
 ## Exact dispatch and retries
 
