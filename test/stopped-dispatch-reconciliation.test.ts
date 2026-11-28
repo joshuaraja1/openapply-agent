@@ -31,6 +31,14 @@ describe("stopped exact dispatch reconciliation", () => {
     expect(h.admission.loadIdentity).not.toHaveBeenCalled();
     expect(h.dispatch.markNeedsReconciliation).not.toHaveBeenCalled();
   });
+  it("does not relaunch a saved job seeker handoff after the task stops", async () => {
+    const h = harness("not_started");
+    h.dispatch.read.mockResolvedValueOnce({ state: "needs_human" } as never);
+    expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports))
+      .toBe("needs_human");
+    expect(h.admission.loadIdentity).not.toHaveBeenCalled();
+    expect(h.dispatch.markNeedsReconciliation).not.toHaveBeenCalled();
+  });
   it("repairs a confirmed journal without requeueing or a second submit", async () => {
     const h = harness("confirmed");
     expect(await reconcileStoppedDispatch(candidateId, runId, h.generation, h.ports)).toBe("completed");
