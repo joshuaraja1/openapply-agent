@@ -104,8 +104,9 @@ function harness(targetJob = job) {
         if (prepareThrows) throw new Error("preflight failed");
         if (revokeDuringPrepare) currentConsent = false;
         if (revokePaymentDuringPrepare) entitlement = [];
-        return { async submitOnce() {
+        return { async submitOnce(beforeClick) {
           if (failsBeforeClick) throw new Error("browser closed before click");
+          if (!await beforeClick()) return null;
           events.push("click");
           if (clickThrows) throw new Error("browser lost after click");
           return clickResult;
@@ -211,10 +212,10 @@ describe("cloud queued application bridge", () => {
       const original = h.ports.application.prepare;
       h.ports.application.prepare = async (...args) => {
         const prepared = await original(...args);
-        return { ...prepared, async submitOnce() {
+        return { ...prepared, async submitOnce(beforeClick) {
           clicked();
           await gate;
-          return prepared.submitOnce();
+          return prepared.submitOnce(beforeClick);
         } };
       };
       const run = handleQueuedApplication(message(), h.ports);
@@ -258,6 +259,42 @@ describe("cloud queued application bridge", () => {
       expect(h.events).not.toContain("click");
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
+  });
+
+  it("rechecks paid access after adapter-side work and before its final click", async () => {
+    const h = harness();
+    let entered!: () => void;
+    let finish!: () => void;
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const original = h.ports.application.prepare;
+    h.ports.application.prepare = async (...args) => {
+      const prepared = await original(...args);
+      return { ...prepared, async submitOnce(beforeClick) {
+        entered();
+        await gate;
+        return prepared.submitOnce(beforeClick);
+      } };
+    };
+    const run = handleQueuedApplication(message(), h.ports);
+    await waiting;
+    h.setEntitlement([]);
+    finish();
+    expect(await run).toBe("needs_reconciliation");
+    expect(h.events).toContain("intent");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("click");
+    expect(h.events).not.toContain("confirmed");
+  });
+
+  it("rejects an adapter receipt that bypasses the final-click guard", async () => {
+    const h = harness();
+    h.ports.application.prepare = async () => ({ async submitOnce() {
+      return { evidence, job };
+    } });
+    expect(await handleQueuedApplication(message(), h.ports)).toBe("needs_reconciliation");
+    expect(h.events).toContain("uncertain");
+    expect(h.events).not.toContain("confirmed");
   });
 
   it("requires current paid or granted access before restoring a profile", async () => {

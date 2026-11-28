@@ -18,8 +18,9 @@ export interface VerifiedReceipt {
 }
 
 export interface PreparedApplication {
-  /** The only final Submit action; the handler calls this only after durable intent. */
-  submitOnce(): Promise<VerifiedReceipt | null>;
+  /** The only final Submit action. Call beforeClick as the last awaited step
+   * before the irreversible click, after any adapter-side preparation. */
+  submitOnce(beforeClick: () => Promise<boolean>): Promise<VerifiedReceipt | null>;
   /** Release the private browser profile on every terminal or retry path. */
   close?(): Promise<void>;
 }
@@ -202,13 +203,26 @@ export async function handleQueuedApplication(
         }
 
         let receipt: VerifiedReceipt | null;
+        let finalGuardPassed = false;
+        const beforeClick = async (): Promise<boolean> => {
+          finalGuardPassed = false;
+          await renewLease();
+          if (leaseLost) return false;
+          try {
+            if (!await ports.authorization.hasCurrentConsent(run.candidateId, run.runId)
+              || !await hasHostedAccess(record.subjectId, ports.billing)) return false;
+            const current = await ports.journal.readSubmission(run.candidateId, record.job);
+            finalGuardPassed = current.status === "needs_reconciliation";
+            return finalGuardPassed;
+          } catch { return false; }
+        };
         try {
-          receipt = await prepared.submitOnce();
+          receipt = await prepared.submitOnce(beforeClick);
         } catch {
           await ports.journal.markUncertain(run.candidateId, token, record.job);
           return "needs_reconciliation";
         }
-        if (!receipt || receipt.evidence.byteLength === 0
+        if (!finalGuardPassed || !receipt || receipt.evidence.byteLength === 0
           || receipt.evidence.byteLength > MAX_RECEIPT_BYTES
           || officialJobKey(receipt.job) !== officialJobKey(record.job)
           || !await ports.receiptVerifier.verify(receipt, record.job)) {

@@ -55,7 +55,9 @@ function ports() {
     vault: { async restoreToPrivateTemp() { profileRestores++;
       return { path: "/private/synthetic-profile", async cleanup() {} }; },
     async put() {} },
-    application: { async prepare() { return { async submitOnce() { clickCount++;
+    application: { async prepare() { return { async submitOnce(beforeClick) {
+      if (!await beforeClick()) return null;
+      clickCount++;
       return { evidence: submitted, job }; } }; } },
     receiptVerifier: { async verify(receipt, expected) {
       return receipt.job.requisitionId === expected.requisitionId;
