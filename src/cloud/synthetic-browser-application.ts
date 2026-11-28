@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { AgentBrowser, type BrowserSnapshot } from "../browser/actions.js";
 import { launchBrowser } from "../browser/runtime.js";
@@ -93,6 +94,13 @@ export class SyntheticBrowserApplication implements ApplicationPort {
       snapshot = await browser.act(only(snapshot, "Work authorization"), "fill", profile.workAuthorization);
       snapshot = await browser.act(only(snapshot, "Sponsorship required"), "select",
         profile.sponsorshipRequiredNowOrFuture ? "Yes" : "No");
+      if (process.env.OPENAPPLY_CLOUD_TASK_MODE === "synthetic") {
+        const seconds = Number(process.env.OPENAPPLY_SYNTHETIC_HOLD_BEFORE_INTENT_SECONDS ?? "0");
+        if (!Number.isInteger(seconds) || seconds < 0 || seconds > 180) {
+          throw new Error("Synthetic hold is outside the bounded drill window");
+        }
+        if (seconds) await delay(seconds * 1000);
+      }
       const finalClick = await browser.prepareFinalClick(only(snapshot, "Submit application"));
       const thisAudit = this.audit;
       let used = false;

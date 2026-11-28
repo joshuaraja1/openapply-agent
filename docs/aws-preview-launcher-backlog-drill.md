@@ -7,8 +7,8 @@ official provider URLs and performs real GET requests, so a `.invalid`
 synthetic posting cannot pass `boundJob`. Use the existing isolated
 `SyntheticBrowserApplication` and `deploy/aws/synthetic-queue-task.yaml` for
 this drill. It intercepts the exact `.invalid` fixture URL in Chromium, closes
-WebSockets, and aborts every other request, while
-uses the same exact-run broker, lease, dispatch, and launcher paths. The old
+WebSockets, and aborts every other request, while exercising the same exact-run
+broker, lease, dispatch, and launcher paths. The old
 synthetic stack is absent today and must be redeployed from the reviewed image;
 its prior evidence is not evidence of the current launcher.
 
@@ -33,8 +33,10 @@ the ECS cluster has no running disposable tasks and both `SLOT#0` and
    private bucket, and KMS key. Verify its task role can invoke only the named
    broker and has no direct DynamoDB, SQS, S3, or KMS grants. Verify the task
    has `OPENAPPLY_CLOUD_TASK_MODE=synthetic`, the two synthetic-only flags,
-   `OPENAPPLY_SUBMISSION_MODE=disabled`, and no crash stage for the backlog
-   baseline. Point the launcher at this exact task revision only for the drill.
+   `OPENAPPLY_SUBMISSION_MODE=disabled`, a 90-second bounded hold before intent,
+   and no crash stage for the backlog baseline. The hold keeps two tasks visible
+   long enough to inspect slots and safely stop one before intent. Point the
+   launcher at this exact task revision only for the drill.
    Keep the ceiling at one through a disposable one-seeker fixture run.
 3. Confirm the launcher is on the reviewed code SHA. Run the existing
    `aws-synthetic-drill-preflight.mjs` against the newly deployed synthetic
@@ -43,10 +45,18 @@ the ECS cluster has no running disposable tasks and both `SLOT#0` and
    restoring the normal task revision.
    Raise `MaxConcurrentBrowserTasks` from **1 to 2** in the launcher stack.
    No standing ECS task is created by this parameter change.
-4. Create two short-lived, distinct staging Cognito identities and reviewed
-   synthetic profiles, with exact `.invalid` fixture postings, explicit consent,
-   and approved short-lived free grants. Do not use real résumés, payment cards,
-   or employer URLs. Enqueue A1, A2, and B1 in that order. Require A1 and B1
+4. Run `npx tsx src/cloud/aws-synthetic-drill-fixture-cli.ts seed
+   /absolute/private/fixture-manifest.json 205064803661` from the repository
+   root. The tool requires the synthetic preflight and exact staging issuer,
+   writes an opaque manifest before AWS mutations, and creates two fake job seeker
+   subjects with 90-minute free grants and encrypted synthetic profiles. On a
+   partial seed failure, it fences and attempts cleanup from the saved manifest.
+   Then run `npx tsx src/cloud/aws-synthetic-drill-fixture-cli.ts enqueue
+   /absolute/private/fixture-manifest.json 205064803661` to enqueue A1, A2,
+   and B1. An enqueue failure fences both seekers and keeps the manifest for
+   stopped-task cleanup. It does not create Cognito user accounts or test
+   signed-in UI. Do not use real résumés, payment cards, or employer URLs.
+   Require A1 and B1
    to occupy the two slots while A2 remains indexed behind A's active-task
    lock. Each task may click only the intercepted `.invalid` synthetic form;
    synthetic confirmations must never be presented as employer receipts.
@@ -61,11 +71,19 @@ the ECS cluster has no running disposable tasks and both `SLOT#0` and
    each disposable run. Require `syntheticClickAttempts <= 1` and
    `needs_reconciliation` after either uncertain crash. Restore the no-crash
    task revision before cleanup.
-6. Withdraw consent and request deletion for both disposable identities.
-   Wait for ECS stop acknowledgement and scheduled storage cleanup. Remove
-   fixture lead and entitlement rows. Restore the normal preview task revision
-   and ceiling one, then require the preview preflight to pass. Stop the drill
-   early and restore both settings if any invariant fails.
+6. Run `node scripts/aws-synthetic-drill-rollback.mjs --account-id
+   205064803661` in a `finally` step whether the drill passes or fails. It
+   reduces the ceiling to one, stops only tasks on the synthetic task revision,
+   waits for ECS `STOPPED` and both slot rows to clear, restores the normal
+   preview task and roles, then requires the preview preflight to pass. If AWS
+   itself prevents rollback, stop the drill and retain the manifest for the
+   next operator retry; do not report the environment restored.
+7. With the preview launcher restored, run
+   `npx tsx src/cloud/aws-synthetic-drill-fixture-cli.ts cleanup
+   /absolute/private/fixture-manifest.json 205064803661`. It writes deletion
+   fences, refuses active tasks, purges all encrypted object versions, and
+   removes fixture lead, grant, and run rows. Stop the drill early and run
+   rollback if any invariant fails.
 
 At every step, stop on a cross-tenant read, an unexpected HTTP write, a task
 outside the two slots, or a deletion that proceeds before ECS `STOPPED`.

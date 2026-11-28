@@ -24,6 +24,12 @@ Parameters:
     Default: ''
     AllowedValues: ['', after_intent, after_click, after_confirmation]
     Description: One-off disposable .invalid fixture crash drill checkpoint; empty for normal staging.
+  SyntheticHoldBeforeIntentSeconds:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 180
+    Description: Bounded pause before durable submit intent for disposable backlog and pre-intent stop drills.
 
 Conditions:
   TaskEnabled: !Equals [!Ref EnableSyntheticQueueTask, 'true']
@@ -132,6 +138,7 @@ Resources:
             - { Name: OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK, Value: '1' }
             - { Name: OPENAPPLY_SUBMISSION_MODE, Value: disabled }
             - { Name: OPENAPPLY_SYNTHETIC_CRASH_AT, Value: !Ref SyntheticCrashAt }
+            - { Name: OPENAPPLY_SYNTHETIC_HOLD_BEFORE_INTENT_SECONDS, Value: !Ref SyntheticHoldBeforeIntentSeconds }
             - Name: OPENAPPLY_ARTIFACT_BUCKET
               Value: !Ref ArtifactBucketName
             - Name: OPENAPPLY_ARTIFACT_KMS_KEY_ARN

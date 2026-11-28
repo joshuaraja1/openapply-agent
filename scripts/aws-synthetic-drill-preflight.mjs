@@ -82,6 +82,9 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       item.OutputKey === 'TaskRoleArn')?.OutputValue;
     const executionRole = stacks.syntheticTask?.Outputs?.find((item) =>
       item.OutputKey === 'ExecutionRoleArn')?.OutputValue;
+    const hold = Number(env.get('OPENAPPLY_SYNTHETIC_HOLD_BEFORE_INTENT_SECONDS'));
+    const holdParameter = stacks.syntheticTask?.Parameters?.find((item) =>
+      item.ParameterKey === 'SyntheticHoldBeforeIntentSeconds')?.ParameterValue;
     const safe = taskRole && taskDefinition?.taskRoleArn === taskRole
       && executionRole && taskDefinition?.executionRoleArn === executionRole
       && immutableImage
@@ -89,6 +92,8 @@ export function assessInventory(accountId, expectedAccountId, stacks, taskDefini
       && env.get('OPENAPPLY_CLOUD_SYNTHETIC_ONLY') === '1'
       && env.get('OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK') === '1'
       && env.get('OPENAPPLY_SUBMISSION_MODE') === 'disabled'
+      && Number.isInteger(hold) && hold >= 0 && hold <= 180
+      && String(hold) === holdParameter
       && ['', 'after_intent', 'after_click', 'after_confirmation']
         .includes(env.get('OPENAPPLY_SYNTHETIC_CRASH_AT') ?? '');
     checks.push({ gate: 'synthetic-task-mode', ok: Boolean(safe),
