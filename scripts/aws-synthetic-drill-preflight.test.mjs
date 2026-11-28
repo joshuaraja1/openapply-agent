@@ -66,6 +66,7 @@ function readyFixture() {
     setParameter(key, 'ArtifactBucketName', 'fixture-bucket');
   }
   setParameter('syntheticTask', 'ArtifactBrokerArn', stacks.broker.Outputs[0].OutputValue);
+  setParameter('syntheticTask', 'SyntheticHoldBeforeIntentSeconds', '0');
   const task = { taskRoleArn: 'arn:aws:iam::123456789012:role/synthetic',
     executionRoleArn: 'arn:aws:iam::123456789012:role/execution',
     containerDefinitions: [{ name: 'browser-worker', environment: [
@@ -73,6 +74,7 @@ function readyFixture() {
       { name: 'OPENAPPLY_CLOUD_SYNTHETIC_ONLY', value: '1' },
       { name: 'OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK', value: '1' },
       { name: 'OPENAPPLY_SUBMISSION_MODE', value: 'disabled' },
+      { name: 'OPENAPPLY_SYNTHETIC_HOLD_BEFORE_INTENT_SECONDS', value: '0' },
     ], image: `example.dkr.ecr.us-east-1.amazonaws.com/openapply@sha256:${'a'.repeat(64)}` }] };
   return { stacks, task };
 }
