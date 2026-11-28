@@ -80,6 +80,9 @@ export class SyntheticBrowserApplication implements ApplicationPort {
       runtime = await launchBrowser({ profileDirectory: join(root, "profile"),
         headless: true, serviceWorkers: "block" });
       const expectedUrl = fixtureUrl(job);
+      await runtime.context.routeWebSocket("**/*", socket => {
+        socket.close({ code: 1008, reason: "Synthetic fixture sockets are disabled" });
+      });
       await runtime.context.route("**/*", async route => {
         if (route.request().url() !== expectedUrl) { await route.abort(); return; }
         await route.fulfill({ status: 200, contentType: "text/html; charset=utf-8",
