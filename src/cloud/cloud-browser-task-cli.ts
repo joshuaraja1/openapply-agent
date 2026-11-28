@@ -10,6 +10,7 @@ import { runSyntheticBrowserFixture } from "./synthetic-browser-fixture.js";
 import { createBrokeredRunState } from "./aws-run-state-broker-client.js";
 import { syntheticCheckpoint, syntheticCrashStage } from "./synthetic-fault-probe.js";
 import { runAwsCloudPreSubmitPreview } from "./aws-cloud-preview-runtime.js";
+import { runAwsHostedGreenhouseApplication } from "./aws-hosted-greenhouse-runtime.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -25,8 +26,8 @@ function configuration(): AwsQueuedRunConfiguration {
   };
 }
 
-/** Docker defaults to the safe image smoke. An explicitly enabled task accepts
- * only the intercepted synthetic fixture; there is no real-site mode here. */
+/** Docker defaults to the safe image smoke. Real-site mode additionally needs
+ * an exact run permit and is never selected by the deployed staging launcher. */
 export async function runCloudBrowserTask(): Promise<"smoke" | string> {
   const mode = process.env.OPENAPPLY_CLOUD_TASK_MODE ?? "smoke";
   if (mode === "smoke") { await runBrowserSmoke(); return "smoke"; }
@@ -46,6 +47,21 @@ export async function runCloudBrowserTask(): Promise<"smoke" | string> {
       privateRoot: required("OPENAPPLY_PRIVATE_WORK_ROOT"),
     }, { candidateId: required("OPENAPPLY_CANDIDATE_ID"),
       runId: required("OPENAPPLY_RUN_ID"), capability: required("OPENAPPLY_RUN_CAPABILITY") });
+  }
+  if (mode === "greenhouse") {
+    const runId = required("OPENAPPLY_RUN_ID");
+    if (process.env.OPENAPPLY_CLOUD_GREENHOUSE_ENABLED !== "1"
+      || process.env.OPENAPPLY_SUBMISSION_MODE !== "enabled"
+      || process.env.OPENAPPLY_CLOUD_SUBMISSION_RUN_ID !== runId) {
+      throw new Error("Real-site Greenhouse browser mode is disabled for this run");
+    }
+    return runAwsHostedGreenhouseApplication({
+      ...configuration(), region: required("AWS_REGION"),
+      tectonicBinary: required("OPENAPPLY_TECTONIC_BIN"),
+      tectonicCache: required("OPENAPPLY_TECTONIC_CACHE"),
+      privateRoot: required("OPENAPPLY_PRIVATE_WORK_ROOT"),
+    }, { candidateId: required("OPENAPPLY_CANDIDATE_ID"), runId,
+      capability: required("OPENAPPLY_RUN_CAPABILITY") });
   }
   if (mode !== "synthetic" || process.env.OPENAPPLY_CLOUD_SYNTHETIC_ONLY !== "1"
     || process.env.OPENAPPLY_ENABLE_CLOUD_QUEUE_TASK !== "1"

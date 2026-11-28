@@ -266,7 +266,7 @@ export class AgentBrowser {
   }
 
   /** Owner-only final-click preparation. The caller must persist its intent first. */
-  async prepareFinalClick(ref: string): Promise<{ page: Page; click: () => Promise<void> }> {
+  async prepareFinalClick(ref: string): Promise<{ page: Page; click: (timeoutMs?: number) => Promise<void> }> {
     const page = this.requirePage();
     const handle = this.controls.get(ref);
     if (!handle || !ref.startsWith(`${this.generation}:`)) throw new Error("Stale browser control reference");
@@ -276,10 +276,10 @@ export class AgentBrowser {
     if (type !== "submit" && !/\b(submit|apply now|send application)\b/i.test(label)) {
       throw new Error("Selected control is not a submit action");
     }
-    return { page, click: async () => {
+    return { page, click: async (timeoutMs?: number) => {
       this.controls.clear();
       this.generation += 1;
-      await handle.click();
+      await handle.click(timeoutMs === undefined ? {} : { timeout: timeoutMs });
     } };
   }
 

@@ -57,7 +57,7 @@ async function fetchWithoutRedirect(route: Route): Promise<PreviewFetchedRespons
   return { status: response.status(), headers: response.headers(), body: await response.body() };
 }
 
-function boundJob(lead: OfficialLeadRow, expected: OfficialJobIdentity, now: Date): DiscoveredJob {
+export function boundJob(lead: OfficialLeadRow, expected: OfficialJobIdentity, now: Date): DiscoveredJob {
   if (lead.sk !== "VERIFIED" || lead.status !== "open" || lead.pk !== `LEAD#${lead.leadId}`
     || lead.jobKey !== officialJobKey(expected) || officialJobKey(lead.job) !== lead.jobKey
     || !Number.isSafeInteger(lead.expiresAt) || lead.expiresAt <= Math.floor(now.getTime() / 1000)) {
