@@ -1,0 +1,37 @@
+# Elastic cloud browser preview integration
+
+OpenApply uses Cloudflare for signed-in web requests and AWS for each private
+Chromium task. The browser is not a long-running Cloudflare Worker. An
+authenticated job seeker creates an exact-job run, and the durable dispatch
+row waits for the Fargate launcher. The launcher reserves one DynamoDB slot
+and one active-task lock for that job seeker, then starts a container for the
+run. A one-minute sweep fills free slots from queued runs and reconciles
+stopped tasks. With no queued runs, there are no running browser containers.
+
+The staging ceiling is one task by default and can be raised to 32 after load,
+cost, and failure tests. A lower ceiling blocks new reservations without
+abandoning tasks already running above it. The ceiling limits spend; it does
+not promise that AWS can launch 32 tasks under the account's current quotas.
+The queue age, task start failures, and stopped-task reconciliation outcomes
+must be monitored before increasing it.
+
+The preview image includes Chromium and a pinned offline PDF renderer. Its
+task definition forces preview mode and disables final submission. It fills
+supported fields and records a bounded preview result, then closes the
+browser. User-visible pause and resume needs encrypted browser state outside
+the container. Real submission also needs an exact employer confirmation
+receipt and a crash test that proves a restarted task never clicks Submit
+twice. These are gates before autonomous public use, not settings to enable
+for a staging capacity test.
+
+Deployment order:
+
+1. Build the combined browser image and publish it to ECR by immutable digest.
+2. Deploy the exact-run broker and verify cross-tenant denial with two test
+   identities. Confirm the hosted deletion stop gate waits for ECS `STOPPED`.
+3. Deploy the preview task definition with that image and broker ARN.
+4. Deploy the launcher with a ceiling of one. Run a consented, synthetic
+   two-job-seeker backlog and crash drill. Then raise the ceiling gradually.
+
+See [preview task](cloud-preview-task.md) and
+[launcher](aws-fargate-launcher-staging.md) for the detailed contracts.
