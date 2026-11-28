@@ -23,7 +23,7 @@ function harness() {
   let launchResult: "started" | "capacity_busy" = "capacity_busy";
   const queue = { send: vi.fn(async () => {}) };
   const store = {
-    listPending: vi.fn(async () => row.state === "pending_queue" || row.state === "queued"
+    listPendingWindow: vi.fn(async () => row.state === "pending_queue" || row.state === "queued"
       ? [row] : []),
     markQueued: vi.fn(async () => {
       if (failMarkQueued) throw new Error("crash after SQS send");
@@ -32,7 +32,7 @@ function harness() {
     markLaunched: vi.fn(async () => { row = { ...row, state: "launched" }; }),
     markBlocked: vi.fn(async () => { row = { ...row, state: "blocked" }; }),
     markNeedsReconciliation: vi.fn(async () => { row = { ...row, state: "needs_reconciliation" }; }),
-  } as unknown as Pick<DynamoApplicationDispatchStore, "listPending" | "markQueued"
+  } as unknown as Pick<DynamoApplicationDispatchStore, "listPendingWindow" | "markQueued"
     | "markLaunched" | "markBlocked" | "markNeedsReconciliation">;
   const launch = vi.fn(async (_candidateId: string, _runId: string) => launchResult);
   return { store, queue, launch, authorize: vi.fn(async () => true),
@@ -169,7 +169,7 @@ describe("durable application outbox dispatch", () => {
         groupId: secondEnvelope.groupId, deduplicationId: secondEnvelope.deduplicationId,
         createdAt: "2026-11-26T20:01:00.000Z", state: "queued" },
     ];
-    h.store.listPending = vi.fn(async () => rows);
+    h.store.listPendingWindow = vi.fn(async () => rows);
     h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
     h.launch.mockResolvedValue("started");
     expect(await dispatchOnePendingApplication(h)).toBe("started");
@@ -203,14 +203,62 @@ describe("durable application outbox dispatch", () => {
     const realStore = new DynamoApplicationDispatchStore(
       { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
       "openapply-staging-run-ledger");
-    h.store.listPending = vi.fn(limit => realStore.listPending(limit));
+    h.store.listPendingWindow = vi.fn(limit => realStore.listPending(limit));
     h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
     h.launch.mockResolvedValue("started");
     expect(await dispatchOnePendingApplication(h)).toBe("started");
-    expect(h.store.listPending).toHaveBeenCalledWith(100);
+    expect(h.store.listPendingWindow).toHaveBeenCalledWith(100);
     expect(send).toHaveBeenCalledTimes(2);
     expect(h.launch).toHaveBeenCalledOnce();
     expect(h.launch).toHaveBeenCalledWith(secondCandidate, secondRun);
+  });
+
+  it("advances a durable cursor so a seeker beyond 100 busy rows runs next tick", async () => {
+    const h = harness();
+    const secondCandidate = "aa77d7c8-a697-4f49-932b-aa6ca45a4054";
+    const secondRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    const rowFor = (seekId: string, id: string, minute: number): DurableDispatchRecord => {
+      const createdAt = new Date(Date.UTC(2026, 10, 26, 20, minute)).toISOString();
+      const envelope = encodeCloudRunEnvelope({ version: 1, candidateId: seekId,
+        runId: id, kind: "apply", scheduledAt: createdAt });
+      return { pk: `CANDIDATE#${seekId}`, sk: `DISPATCH#${id}`,
+        candidateId: seekId, runId: id, state: "queued", body: envelope.body,
+        groupId: envelope.groupId, deduplicationId: envelope.deduplicationId, createdAt };
+    };
+    const rows = Array.from({ length: 101 }, (_, index) => rowFor(candidateId,
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, index));
+    rows.push(rowFor(secondCandidate, secondRun, 101));
+    let cursorRow: { version: number; cursor: Record<string, string> | null } | undefined;
+    const send = vi.fn(async (command: GetCommand | QueryCommand | UpdateCommand) => {
+      if (command instanceof GetCommand) return { Item: cursorRow };
+      if (command instanceof QueryCommand) {
+        const offset = Number(command.input.ExclusiveStartKey?.sk ?? 0);
+        const end = Math.min(offset + 25, rows.length);
+        return { Items: rows.slice(offset, end),
+          ...(end < rows.length ? { LastEvaluatedKey: { pk: "cursor", sk: String(end) } } : {}) };
+      }
+      if (command instanceof UpdateCommand) {
+        const values = command.input.ExpressionAttributeValues ?? {};
+        expect(cursorRow?.version ?? 0).toBe(values[":previous"] ?? 0);
+        cursorRow = { version: values[":next"] as number,
+          cursor: values[":cursor"] as Record<string, string> | null };
+        return {};
+      }
+      throw new Error("Unexpected Dynamo command");
+    });
+    const realStore = new DynamoApplicationDispatchStore(
+      { send } as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    h.store.listPendingWindow = vi.fn(limit => realStore.listPendingWindow(limit));
+    h.hasAnotherActiveTask.mockImplementation(async candidate => candidate === candidateId);
+    h.launch.mockResolvedValue("started");
+    expect(await dispatchOnePendingApplication(h)).toBe("capacity_busy");
+    expect(h.launch).not.toHaveBeenCalled();
+    expect(cursorRow?.cursor).toEqual({ pk: "cursor", sk: "100" });
+    expect(await dispatchOnePendingApplication(h)).toBe("started");
+    expect(h.launch).toHaveBeenCalledOnce();
+    expect(h.launch).toHaveBeenCalledWith(secondCandidate, secondRun);
+    expect(cursorRow?.cursor).toBeNull();
   });
 
   it("keeps scanning after a concurrent active-task reservation", async () => {
@@ -220,7 +268,7 @@ describe("durable application outbox dispatch", () => {
     const secondEnvelope = encodeCloudRunEnvelope({ version: 1,
       candidateId: secondCandidate, runId: secondRun,
       kind: "apply", scheduledAt: "2026-11-26T20:01:00.000Z" });
-    h.store.listPending = vi.fn(async () => [h.row, {
+    h.store.listPendingWindow = vi.fn(async () => [h.row, {
       ...h.row, pk: `CANDIDATE#${secondCandidate}`, sk: `DISPATCH#${secondRun}`,
       candidateId: secondCandidate, runId: secondRun, body: secondEnvelope.body,
       groupId: secondEnvelope.groupId, deduplicationId: secondEnvelope.deduplicationId,

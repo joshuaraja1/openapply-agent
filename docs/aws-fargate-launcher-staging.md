@@ -12,7 +12,7 @@ Each sweep launches pending runs only up to the configured ceiling. The authenti
 
 Before raising a deployment from the legacy one-slot launcher, wait for all old tasks to reach `STOPPED` and for `SLOT#0` to clear. Legacy reservations did not create `ACTIVE_TASK` locks. New reservations create that lock in the same transaction as the slot and run row.
 
-The index scan is bounded to four pages per tick and skips malformed rows while logging only their count. The broker capability is never put in the dispatch row's body, a URL, or a log.
+The index scan is bounded to four pages (100 index rows) per tick and skips malformed rows while logging only their count. A conditional DynamoDB cursor advances the next sweep to the following window, then wraps to the start at the end of the index. This prevents one job seeker's backlog of more than 100 queued runs from permanently hiding another seeker's run. Concurrent sweeps may inspect the same window, while task-slot transactions fence duplicate launches. Monitor queue age and verify two-job-seeker fairness in staging before raising the one-task ceiling. The broker capability is never put in the dispatch row's body, a URL, or a log.
 
 ## Consent withdrawal and deletion
 
