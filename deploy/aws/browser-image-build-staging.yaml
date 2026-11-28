@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private staging CodeBuild project for an immutable OpenApply browser image.
+
+Parameters:
+  SourceBucket:
+    Type: String
+  SourceKey:
+    Type: String
+  RepositoryName:
+    Type: String
+    Default: openapply-staging-browser
+  SourceRevision:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{7,40}$'
+
+Resources:
+  BuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /openapply/staging/browser-image-build
+      RetentionInDays: 14
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BuildOnlyStagingBrowserImage
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SourceBucket}/${SourceKey}'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt BuildLogGroup.Arn
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:CompleteLayerUpload,
+                  ecr:DescribeImages, ecr:InitiateLayerUpload, ecr:PutImage, ecr:UploadLayerPart]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${RepositoryName}'
+
+  BrowserImageBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: openapply-staging-browser-image
+      Description: Builds a reviewed staging image from a pinned source archive.
+      ServiceRole: !GetAtt BuildRole.Arn
+      Source:
+        Type: S3
+        Location: !Sub '${SourceBucket}/${SourceKey}'
+        BuildSpec: deploy/aws/browser-image-buildspec.yml
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - { Name: REPOSITORY_URI, Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepositoryName}' }
+          - { Name: SOURCE_REV, Value: !Ref SourceRevision }
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref BuildLogGroup
+      TimeoutInMinutes: 60
+
+Outputs:
+  ProjectName:
+    Value: !Ref BrowserImageBuild

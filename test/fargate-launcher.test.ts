@@ -28,6 +28,9 @@ function harness() {
     readActiveSlot: vi.fn(async () => slot && row ? {
       candidateId, runId, clientToken: row.clientToken, reservedAt: row.reservedAt,
     } : undefined),
+    readActiveSlots: vi.fn(async () => slot && row ? [{
+      index: 0, candidateId, runId, clientToken: row.clientToken, reservedAt: row.reservedAt,
+    }] : []),
     listCandidateTasks: vi.fn(async () => row ? [row] : []),
     reserve: vi.fn(async (fresh: Record<string, unknown>) => {
       if (row?.state === "stopped") {
@@ -83,6 +86,74 @@ function harness() {
 }
 
 describe("bounded Fargate run launch", () => {
+  it("releases only the matching nonzero slot and job-seeker lock after STOPPED", async () => {
+    const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
+      candidateId, runId, state: "started" as const, generation: 0,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000, taskArn, slotIndex: 1 };
+    const db = { send: vi.fn(async (command: TransactWriteCommand) => {
+      expect(command).toBeInstanceOf(TransactWriteCommand);
+      const entries = command.input.TransactItems ?? [];
+      expect(entries[1]?.Delete?.Key).toEqual({ pk: "LAUNCHER#staging", sk: "SLOT#1" });
+      expect(entries[2]?.Delete?.Key).toEqual({
+        pk: `CANDIDATE#${candidateId}`, sk: "ACTIVE_TASK" });
+      expect(entries[1]?.Delete?.ConditionExpression).toContain("clientToken=:token");
+      expect(entries[2]?.Delete?.ConditionExpression).toContain("clientToken=:token");
+      return {};
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    await store.markStopped(row);
+  });
+
+  it("reserves separate durable slots for concurrent seekers and stops at the configured ceiling", async () => {
+    const occupied = new Set<number>();
+    const activeCandidates = new Set<string>();
+    const rows = new Map<string, Record<string, unknown>>();
+    const db = { send: vi.fn(async (command: GetCommand | TransactWriteCommand) => {
+      if (command instanceof GetCommand) {
+        const key = command.input.Key as { pk: string; sk: string };
+        return { Item: rows.get(`${key.pk}:${key.sk}`) };
+      }
+      const items = command.input.TransactItems ?? [];
+      const slot = items[2]?.Put?.Item as { pk: string; sk: string } | undefined;
+      if (!slot) throw new Error("Missing slot reservation");
+      const index = Number(slot.sk.slice("SLOT#".length));
+      const row = items[1]?.Put?.Item as Record<string, unknown>;
+      if (occupied.has(index) || activeCandidates.has(String(row.candidateId))) {
+        const error = new Error("slot occupied");
+        error.name = "TransactionCanceledException";
+        throw error;
+      }
+      occupied.add(index);
+      expect(items[3]?.Put?.Item).toMatchObject({
+        pk: row.pk, sk: "ACTIVE_TASK", runId: row.runId });
+      activeCandidates.add(String(row.candidateId));
+      rows.set(`${row.pk}:${row.sk}`, row);
+      return {};
+    }) };
+    const store = new DynamoFargateLaunchStore(
+      db as unknown as Pick<DynamoDBDocumentClient, "send">,
+      "openapply-staging-run-ledger");
+    const ids = [candidateId, "aa77d7c8-a697-4f49-932b-aa6ca45a4054",
+      "8f7c65a6-cb5c-4eeb-8f8e-879f83204462"];
+    const makeRow = (id: string) => ({
+      pk: `CANDIDATE#${id}`, sk: `TASK#${runId}`, candidateId: id, runId,
+      clientToken: "a".repeat(64), configHash: "b".repeat(64),
+      reservedAt: 1_800_000_000, state: "reserved" as const, generation: 0,
+      slotIndex: 0,
+    });
+    expect(await Promise.all(ids.map(id => store.reserve(makeRow(id), 2))))
+      .toEqual(["created", "created", "busy"]);
+    expect(occupied).toEqual(new Set([0, 1]));
+    expect((await store.read(ids[1]!, runId))?.slotIndex).toBe(1);
+    expect(await store.reserve(makeRow(ids[0]!), 2)).toBe("existing");
+    const anotherRun = "cbc6b581-287c-42f5-b56c-a4ee75eb4196";
+    expect(await store.reserve({ ...makeRow(ids[0]!), runId: anotherRun,
+      sk: `TASK#${anotherRun}` }, 2)).toBe("busy");
+  });
+
   it("publishes a retryable row only in the same transaction that frees its old slot", async () => {
     let slotHeld = true;
     let taskState = "started";
@@ -91,7 +162,7 @@ describe("bounded Fargate run launch", () => {
     const row = { pk: `CANDIDATE#${candidateId}`, sk: `TASK#${runId}`,
       candidateId, runId, state: "started" as const, generation: 0,
       clientToken: "a".repeat(64), configHash: "b".repeat(64),
-      reservedAt: 1_800_000_000, taskArn };
+      reservedAt: 1_800_000_000, taskArn, slotIndex: 0 };
     const envelope = { version: 1 as const, candidateId, runId, kind: "apply" as const,
       scheduledAt: "2026-11-26T20:00:00.000Z" };
     const { encodeCloudRunEnvelope } = await import("../src/cloud/run-envelope.js");
@@ -102,8 +173,11 @@ describe("bounded Fargate run launch", () => {
         candidateId, runId, state: dispatchState, ...encoded,
         createdAt: envelope.scheduledAt } };
       const items = command.input.TransactItems ?? [];
-      expect(items).toHaveLength(3);
-      expect(items[2]?.Update?.Key).toEqual({
+      expect(items).toHaveLength(4);
+      expect(items[1]?.Delete?.Key).toEqual({ pk: "LAUNCHER#staging", sk: "SLOT#0" });
+      expect(items[2]?.Delete?.Key).toEqual({
+        pk: `CANDIDATE#${candidateId}`, sk: "ACTIVE_TASK" });
+      expect(items[3]?.Update?.Key).toEqual({
         pk: `CANDIDATE#${candidateId}`, sk: `DISPATCH#${runId}` });
       // A concurrent controller can observe only the pre-commit state here.
       sawRace = dispatchState === "queued" && taskState === "started";

@@ -1,0 +1,12 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password | docker login --username AWS --password-stdin "${REPOSITORY_URI%%/*}"
+  build:
+    commands:
+      - docker build -f cloud/browser/Dockerfile -t "$REPOSITORY_URI:$SOURCE_REV" .
+  post_build:
+    commands:
+      - docker push "$REPOSITORY_URI:$SOURCE_REV"
+      - aws ecr describe-images --repository-name openapply-staging-browser --image-ids imageTag="$SOURCE_REV" --query 'imageDetails[0].imageDigest' --output text

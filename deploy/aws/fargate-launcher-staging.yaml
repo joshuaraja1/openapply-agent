@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Disabled-by-default single-slot staging launcher; task definition must be supplied separately after its browser worker is tested.
+Description: Disabled-by-default bounded staging browser launcher; task definition must be supplied separately after its browser worker is tested.
 
 Parameters:
   EnableFargateLauncher:
@@ -56,7 +56,13 @@ Parameters:
     Type: Number
     Default: 0
     MinValue: 0
-    Description: 0 omits a reservation for accounts with the minimum Lambda concurrency quota; the durable slot still limits browser tasks to one.
+    Description: 0 omits a reservation for accounts with the minimum Lambda concurrency quota; durable slots still limit browser tasks.
+  MaxConcurrentBrowserTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 32
+    Description: Maximum concurrently reserved browser tasks. Raise only after staging load and cost validation.
 
 Conditions:
   LauncherEnabled: !Equals [!Ref EnableFargateLauncher, 'true']
@@ -99,7 +105,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: OpenApplyLaunchOneBrowser
+        - PolicyName: OpenApplyLaunchBoundedBrowsers
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -162,10 +168,11 @@ Resources:
       Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
       ReservedConcurrentExecutions: !If [LauncherReservationEnabled, !Ref LauncherReservedConcurrentExecutions, !Ref 'AWS::NoValue']
       MemorySize: 256
-      Timeout: 30
+      Timeout: 120
       Environment:
         Variables:
           FARGATE_LAUNCH_ENABLED: 'true'
+          FARGATE_MAX_CONCURRENT_TASKS: !Ref MaxConcurrentBrowserTasks
           RUN_LEDGER_TABLE_NAME: !Ref RunLedgerTableName
           ENTITLEMENT_TABLE_NAME: !Ref EntitlementTableName
           ARTIFACT_SIGNING_SECRET_ARN: !Ref ArtifactSigningSecretArn
@@ -181,7 +188,7 @@ Resources:
     Type: AWS::Events::Rule
     Condition: LauncherEnabled
     Properties:
-      ScheduleExpression: rate(5 minutes)
+      ScheduleExpression: rate(1 minute)
       State: ENABLED
       Targets:
         - Id: launcher-sweep

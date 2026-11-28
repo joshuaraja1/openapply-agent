@@ -4,6 +4,10 @@
   "main": "./worker.mjs",
   "compatibility_date": "2026-11-26",
   "workers_dev": true,
+  "vars": {
+    "ONBOARDING_API_ORIGIN": "https://ee8wbs0ww3.execute-api.us-east-1.amazonaws.com",
+    "CANDIDATE_DELETION_ENABLED": "true"
+  },
   "observability": { "enabled": false, "traces": { "enabled": false } },
   "assets": {
     "directory": "../staging-login-dist",

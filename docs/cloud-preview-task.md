@@ -23,9 +23,13 @@ facts, credentials, and page content are not stored in that row or task logs.
 The stopped-task reconciler treats `preview_complete` as terminal for that
 task generation, so it cannot silently relaunch a completed preview.
 
-This code is **not yet a deployable real-application service**. The image still
-needs a pinned Linux Tectonic binary and offline cache, a separate preview
-task definition, and a deployed staging run. The current preview closes the
+This code is **not yet a deployable real-application service**. The browser
+image now pins a static Linux Tectonic binary by SHA-256, warms the Jake cache
+at build time, and runs the real offline renderer test. A separate disabled
+preview task definition is in `deploy/aws/preview-task-staging.yaml`. The
+image passed its GitHub build and an AWS CodeBuild run, and was published to
+staging ECR by immutable digest. The preview task definition is registered,
+but it has not completed a deployed staging run. The current preview closes the
 browser and does not persist its page state or exact unknown question; a
 resumeable encrypted handoff is required before final submission can be
 enabled. Provider-specific confirmation checks and consented real-site tests
