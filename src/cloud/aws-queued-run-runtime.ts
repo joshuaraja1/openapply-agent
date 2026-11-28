@@ -7,6 +7,7 @@ import { decodeCloudRunEnvelope } from "./run-envelope.js";
 import { handleQueuedApplication, type CloudRunPorts, type CloudRunOutcome } from "./queued-run.js";
 import { requestScopedArtifactCredentials, uploadEncryptedReceipt } from "./aws-artifact-broker-client.js";
 import { createBrokeredRunState } from "./aws-run-state-broker-client.js";
+import { createAwsHostedHandoffStore } from "./aws-hosted-handoff.js";
 
 export interface AwsQueuedRunConfiguration {
   artifactBucket: string;
@@ -35,6 +36,10 @@ export function createAwsQueuedRunRuntime(
   const awsRegion = region;
   const state = createBrokeredRunState(clients.lambda, config.artifactBrokerArn,
     scope.capability, { candidateId: scope.candidateId, runId: scope.runId });
+  const handoffStore = createAwsHostedHandoffStore(clients.lambda, {
+    region: awsRegion, bucket: config.artifactBucket,
+    kmsKeyArn: config.artifactKmsKeyArn, brokerArn: config.artifactBrokerArn,
+  }, scope);
   async function scopedGrant(candidateId: string, runId: string, leaseToken: string) {
     if (candidateId !== scope.candidateId || runId !== scope.runId) {
       throw new Error("Artifact run scope mismatch");
@@ -79,12 +84,22 @@ export function createAwsQueuedRunRuntime(
     runRecords: state.runRecords,
     journal: state.journal,
     vault,
+    handoff: { async save(leaseToken, handoff) {
+      await handoffStore.save(leaseToken, handoff);
+      // The checkpoint pointer exists before the broker makes this task
+      // terminal; its transition checks the same lease and no submit intent.
+      await state.dispatch.markNeedsHuman(leaseToken, handoff.job);
+    } },
     application,
     receiptVerifier,
     ...(syntheticProbe ? { syntheticProbe } : {}),
     queue: { async acknowledge(receiptHandle) {
       if (receiptHandle !== scope.runId) throw new Error("Dispatch run scope mismatch");
       await state.dispatch.markCompleted();
+    }, async acknowledgeHandoff(receiptHandle) {
+      if (receiptHandle !== scope.runId) throw new Error("Dispatch run scope mismatch");
+      // No SQS message is polled by this exact-run runtime. The broker already
+      // committed needs_human and removed the dispatch row from the pending GSI.
     } },
   };
   return { async runExact() {
